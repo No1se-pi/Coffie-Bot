@@ -1,0 +1,178 @@
+"""Telegram identity, staff access, invitations, and opaque sessions."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.types import enum_type
+from app.models.enums import PermissionCode, Role, UserStatus
+
+if TYPE_CHECKING:
+    from app.models.cards import UserCard
+    from app.models.loyalty import UserLoyaltyState
+
+
+class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_username", "username"),
+        Index("ix_users_status", "status"),
+    )
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    username: Mapped[str | None] = mapped_column(String(64))
+    first_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_name: Mapped[str | None] = mapped_column(String(128))
+    language_code: Mapped[str | None] = mapped_column(String(16))
+    photo_url: Mapped[str | None] = mapped_column(String(2048))
+    status: Mapped[UserStatus] = mapped_column(
+        enum_type(UserStatus, name="user_status", length=16),
+        nullable=False,
+        default=UserStatus.ACTIVE,
+        server_default=UserStatus.ACTIVE.value,
+    )
+    internal_note: Mapped[str | None] = mapped_column(Text)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    staff_member: Mapped[StaffMember | None] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
+    sessions: Mapped[list[Session]] = relationship(back_populates="user")
+    cards: Mapped[list[UserCard]] = relationship(back_populates="user")
+    loyalty_state: Mapped[UserLoyaltyState | None] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
+
+
+class StaffMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "staff_members"
+    __table_args__ = (
+        CheckConstraint("role <> 'customer'", name="role_not_customer"),
+        Index("ix_staff_members_role_active", "role", "is_active"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    role: Mapped[Role] = mapped_column(
+        enum_type(Role, name="role", length=16),
+        nullable=False,
+        default=Role.STAFF,
+        server_default=Role.STAFF.value,
+    )
+    display_name: Mapped[str | None] = mapped_column(String(128))
+    position: Mapped[str | None] = mapped_column(String(128))
+    bio: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    can_edit_tip_profile: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="staff_member")
+    permissions: Mapped[list[StaffPermission]] = relationship(
+        back_populates="staff_member",
+        cascade="all, delete-orphan",
+    )
+
+
+class StaffPermission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "staff_permissions"
+    __table_args__ = (
+        Index(
+            "uq_staff_permissions_staff_permission",
+            "staff_member_id",
+            "permission",
+            unique=True,
+        ),
+    )
+
+    staff_member_id: Mapped[UUID] = mapped_column(
+        ForeignKey("staff_members.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    permission: Mapped[PermissionCode] = mapped_column(
+        enum_type(PermissionCode, name="permission_code", length=40),
+        nullable=False,
+    )
+    allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    staff_member: Mapped[StaffMember] = relationship(back_populates="permissions")
+
+
+class Session(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "sessions"
+    __table_args__ = (
+        Index("ix_sessions_user_active", "user_id", "expires_at", "revoked_at"),
+        Index("ix_sessions_expires_at", "expires_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoke_reason: Mapped[str | None] = mapped_column(String(256))
+    created_ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(512))
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class StaffInvite(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "staff_invites"
+    __table_args__ = (
+        CheckConstraint("role <> 'customer'", name="role_not_customer"),
+        Index("ix_staff_invites_target_telegram_id", "target_telegram_id"),
+        Index("ix_staff_invites_expires_at", "expires_at"),
+    )
+
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    target_telegram_id: Mapped[int | None] = mapped_column(BigInteger)
+    role: Mapped[Role] = mapped_column(
+        enum_type(Role, name="invite_role", length=16),
+        nullable=False,
+        default=Role.STAFF,
+        server_default=Role.STAFF.value,
+    )
+    invited_by_staff_id: Mapped[UUID] = mapped_column(
+        ForeignKey("staff_members.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    used_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    invited_by: Mapped[StaffMember] = relationship(foreign_keys=[invited_by_staff_id])
+    used_by: Mapped[User | None] = relationship(foreign_keys=[used_by_user_id])

@@ -1,0 +1,152 @@
+name: ${COMPOSE_PROJECT_NAME:-coffie-bot}
+
+x-backend-common: &backend-common
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+    target: runtime
+  image: ${BACKEND_IMAGE:-coffie-bot-backend:local}
+  working_dir: /app
+  init: true
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  environment: &backend-environment
+    APP_ENV: production
+    APP_DEBUG: "false"
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    LOG_JSON: "true"
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-coffie}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-coffie}
+    BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
+    TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?Set TELEGRAM_BOT_USERNAME in .env}
+    TELEGRAM_WEBAPP_URL: ${TELEGRAM_WEBAPP_URL:?Set TELEGRAM_WEBAPP_URL in .env}
+    TELEGRAM_INIT_DATA_TTL_SECONDS: ${TELEGRAM_INIT_DATA_TTL_SECONDS:-600}
+    SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-900}
+    SESSION_TOKEN_PEPPER: ${SESSION_TOKEN_PEPPER:?Set SESSION_TOKEN_PEPPER in .env}
+    CORS_ORIGINS: '${CORS_ORIGINS:?Set CORS_ORIGINS in .env}'
+    DEV_AUTH_ENABLED: "false"
+    MEDIA_ROOT: /app/media
+    SEED_FILE: /app/configs/demo-seed.json
+    PYTHONUNBUFFERED: "1"
+    PYTHONDONTWRITEBYTECODE: "1"
+  volumes: &backend-volumes
+    - ./configs:/app/configs:ro
+    - media_data:/app/media
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-coffie}
+      POSTGRES_USER: ${POSTGRES_USER:-coffie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  migrate:
+    <<: *backend-common
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    <<: *backend-common
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - ${UVICORN_WORKERS:-2}
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - ${FORWARDED_ALLOW_IPS:-172.16.0.0/12}
+    expose:
+      - "8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+  bot:
+    <<: *backend-common
+    command: ["python", "-m", "app.bot.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+  worker:
+    <<: *backend-common
+    command: ["python", "-m", "app.worker.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 90s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: production
+      args:
+        VITE_API_BASE_URL: /api/v1
+    image: ${FRONTEND_IMAGE:-coffie-bot-frontend:local}
+    ports:
+      - ${PROD_FRONTEND_BIND_ADDRESS:-127.0.0.1}:${PROD_FRONTEND_PORT:-8080}:80
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:-coffie-bot-postgres}
+  media_data:
+    name: ${MEDIA_VOLUME_NAME:-coffie-bot-media}

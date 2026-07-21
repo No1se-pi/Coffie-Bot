@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "installation": {
+    "mode": "single_organization",
+    "timezone": "Europe/Moscow",
+    "currency_code": "RUB",
+    "currency_minor_unit": 2
+  },
+  "brand": {
+    "name": "Демо Кофе",
+    "short_name": "Демо",
+    "welcome_text": "Добро пожаловать в демонстрационную программу лояльности!",
+    "loyalty_currency_name": "баллы",
+    "primary_color": "#6F4E37",
+    "secondary_color": "#D9B382",
+    "background_color": "#FFF9F2",
+    "logo_media_key": null,
+    "hero_media_key": null
+  },
+  "contacts": {
+    "phone": "+7 900 000-00-00",
+    "email": "hello@example.com",
+    "website": "https://example.com",
+    "telegram": "https://t.me/example",
+    "privacy_policy_url": "https://example.com/privacy"
+  },
+  "locations": [
+    {
+      "slug": "main",
+      "name": "Основная кофейня",
+      "address": "Демо-адрес, 1",
+      "timezone": "Europe/Moscow",
+      "phone": "+7 900 000-00-00",
+      "opening_hours": {
+        "monday": "08:00-21:00",
+        "tuesday": "08:00-21:00",
+        "wednesday": "08:00-21:00",
+        "thursday": "08:00-21:00",
+        "friday": "08:00-22:00",
+        "saturday": "09:00-22:00",
+        "sunday": "09:00-21:00"
+      },
+      "is_default": true,
+      "is_active": true
+    }
+  ],
+  "loyalty": {
+    "points": {
+      "enabled": true,
+      "minor_units_per_point": 1000,
+      "minimum_purchase_minor": 10000,
+      "rounding": "floor",
+      "maximum_redemption_percent": 30,
+      "minimum_redemption_points": 50,
+      "welcome_bonus_points": 10,
+      "expiry_days": null,
+      "daily_accrual_limit_points": 500,
+      "per_operation_limit_points": 200,
+      "approval_threshold_minor": null
+    },
+    "visits": {
+      "enabled": true,
+      "required_visits": 5,
+      "consecutive_days": true,
+      "visits_per_business_day": 1,
+      "business_day_boundary": "04:00",
+      "allowed_missed_days": 0,
+      "reset_after_miss": true,
+      "reward_template_slug": "visit-streak-drink",
+      "reward_validity_days": 7,
+      "restart_cycle_after_reward": true
+    },
+    "stamps": {
+      "enabled": true,
+      "required_paid_items": 9,
+      "stamps_per_purchase": 1,
+      "per_operation_limit": 1,
+      "reward_template_slug": "tenth-drink-free",
+      "reward_validity_days": 30,
+      "reset_after_reward": true
+    }
+  },
+  "reward_templates": [
+    {
+      "slug": "visit-streak-drink",
+      "name": "Напиток за серию посещений",
+      "description": "Демонстрационная награда за пять последовательных посещений.",
+      "type": "free_product",
+      "validity_days": 7,
+      "is_active": true
+    },
+    {
+      "slug": "tenth-drink-free",
+      "name": "Десятый напиток бесплатно",
+      "description": "Выдаётся после девяти оплаченных напитков.",
+      "type": "free_product",
+      "validity_days": 30,
+      "is_active": true
+    },
+    {
+      "slug": "demo-ten-percent",
+      "name": "Скидка 10%",
+      "description": "Нейтральный демонстрационный шаблон процентной скидки.",
+      "type": "percent_discount",
+      "discount_percent": 10,
+      "validity_days": 14,
+      "is_active": true
+    }
+  ],
+  "menu": {
+    "categories": [
+      {
+        "slug": "coffee",
+        "name": "Кофе",
+        "sort_order": 10,
+        "is_active": true
+      },
+      {
+        "slug": "desserts",
+        "name": "Десерты",
+        "sort_order": 20,
+        "is_active": true
+      }
+    ],
+    "items": [
+      {
+        "slug": "filter-coffee",
+        "category_slug": "coffee",
+        "name": "Фильтр-кофе",
+        "description": "Свежесваренный демонстрационный напиток.",
+        "price_minor": 22000,
+        "image_media_key": null,
+        "sort_order": 10,
+        "is_active": true
+      },
+      {
+        "slug": "cappuccino",
+        "category_slug": "coffee",
+        "name": "Капучино",
+        "description": "Эспрессо и молоко.",
+        "price_minor": 29000,
+        "image_media_key": null,
+        "sort_order": 20,
+        "is_active": true
+      },
+      {
+        "slug": "croissant",
+        "category_slug": "desserts",
+        "name": "Круассан",
+        "description": "Нейтральная демонстрационная позиция меню.",
+        "price_minor": 21000,
+        "image_media_key": null,
+        "sort_order": 10,
+        "is_active": true
+      }
+    ]
+  },
+  "promotions": [
+    {
+      "slug": "demo-welcome",
+      "title": "Добро пожаловать",
+      "summary": "Покажите эту демонстрационную акцию сотруднику.",
+      "body": "Условия и сроки акции задаются владельцем кофейни перед публикацией.",
+      "image_media_key": null,
+      "starts_at": null,
+      "ends_at": null,
+      "status": "published"
+    }
+  ],
+  "development_only": {
+    "staff_members": [
+      {
+        "telegram_id": 1000000000001,
+        "display_name": "Демо-бариста",
+        "role": "staff",
+        "permissions": [
+          "card.lookup",
+          "points.accrue",
+          "points.redeem",
+          "visits.mark",
+          "stamps.add",
+          "rewards.redeem",
+          "operations.reverse_own",
+          "tip_profile.manage_own"
+        ],
+        "is_active": true,
+        "synthetic": true
+      }
+    ]
+  }
+}

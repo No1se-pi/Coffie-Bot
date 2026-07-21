@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    name: Compose and production images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate development Compose
+        run: docker compose --env-file .env.example -f compose.yaml config --quiet
+      - name: Validate production Compose
+        run: docker compose --env-file .env.example -f compose.prod.yaml config --quiet
+      - name: Validate demo seed and POSIX scripts
+        run: |
+          python -m json.tool configs/demo-seed.json >/dev/null
+          sh -n scripts/backup.sh scripts/restore.sh
+      - name: Validate PowerShell scripts
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/backup.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          $restoreTokens = $null
+          $restoreErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/restore.ps1),
+            [ref]$restoreTokens,
+            [ref]$restoreErrors
+          ) | Out-Null
+          $allErrors = @($errors) + @($restoreErrors)
+          if ($allErrors.Count -gt 0) {
+            $allErrors | Format-List
+            exit 1
+          }
+      - name: Build production images
+        run: docker compose --env-file .env.example -f compose.prod.yaml build backend frontend
+
+  backend:
+    name: Backend quality and tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: coffie_test
+          POSTGRES_USER: coffie
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U coffie -d coffie_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://coffie:ci-only-password@127.0.0.1:5432/coffie_test
+      DEV_AUTH_ENABLED: "false"
+      SESSION_TOKEN_PEPPER: ci-only-session-pepper-not-a-production-secret-0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install backend
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Mypy
+        run: mypy app
+      - name: Apply migrations to clean PostgreSQL
+        run: alembic upgrade head
+      - name: Pytest
+        run: pytest
+
+  frontend:
+    name: Frontend quality and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: Prettier check
+        run: npm run format:check
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Vitest
+        run: npm run test
+      - name: Production build
+        env:
+          VITE_API_BASE_URL: /api/v1
+        run: npm run build

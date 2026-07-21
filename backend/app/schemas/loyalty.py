@@ -42,6 +42,16 @@ class CardLookupRequest(ApiSchema):
     qr_token: str | None = Field(default=None, min_length=16, max_length=128)
     short_code: str | None = Field(default=None, min_length=4, max_length=16)
 
+    @field_validator("short_code")
+    @classmethod
+    def normalize_short_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("short_code must contain visible characters")
+        return normalized
+
     @model_validator(mode="after")
     def exactly_one_identifier(self) -> CardLookupRequest:
         if (self.qr_token is None) == (self.short_code is None):
@@ -286,13 +296,31 @@ def card_lookup_response(value: CardLookupView) -> CardLookupResponse:
 
 
 def accrual_preview_response(value: AccrualPreviewView) -> AccrualPreviewResponse:
-    return AccrualPreviewResponse(**_public_fields(value))
+    return AccrualPreviewResponse(
+        user_id=value.user_id,
+        purchase_amount_minor=value.purchase_amount_minor,
+        raw_points=value.raw_points,
+        awarded_points=value.awarded_points,
+        balance_before=value.balance_before,
+        projected_balance_after=value.projected_balance_after,
+        limited_by_operation=value.limited_by_operation,
+        limited_by_daily_total=value.limited_by_daily_total,
+        requires_approval=value.requires_approval,
+    )
 
 
 def redemption_preview_response(
     value: RedemptionPreviewView,
 ) -> RedemptionPreviewResponse:
-    return RedemptionPreviewResponse(**_public_fields(value))
+    return RedemptionPreviewResponse(
+        user_id=value.user_id,
+        purchase_amount_minor=value.purchase_amount_minor,
+        requested_points=value.requested_points,
+        discount_minor=value.discount_minor,
+        maximum_points_for_purchase=value.maximum_points_for_purchase,
+        balance_before=value.balance_before,
+        projected_balance_after=value.projected_balance_after,
+    )
 
 
 def operation_response(value: OperationOutcome) -> OperationResponse:
@@ -327,7 +355,14 @@ def user_status_response(value: UserStatusOutcome) -> UserStatusResponse:
 
 
 def card_reissue_response(value: CardReissueOutcome) -> CardReissueResponse:
-    return CardReissueResponse(**_public_fields(value))
+    return CardReissueResponse(
+        user_id=value.user_id,
+        card_id=value.card_id,
+        qr_payload=value.qr_payload,
+        short_code=value.short_code,
+        idempotent_replay=value.idempotent_replay,
+        audit_message=value.audit_message,
+    )
 
 
 def operation_page_response(
@@ -461,13 +496,6 @@ def audit_event_page_response(
         page_size=page_size,
         total=value.total,
     )
-
-
-def _public_fields(value: object) -> dict[str, Any]:
-    return {
-        field: getattr(value, field)
-        for field in value.__dataclass_fields__  # type: ignore[attr-defined]
-    }
 
 
 def _display_name(first_name: str, last_name: str | None) -> str:

@@ -133,6 +133,7 @@ def test_demo_seed_file_is_valid_and_neutral() -> None:
     assert document.development_only.staff_members[0].synthetic is True
 
 
+@pytest.mark.asyncio
 async def test_development_seed_is_repeatable_with_stable_entity_ids() -> None:
     document = SeedDocument.from_file(SEED_PATH)
     repository = FakeSeedRepository()
@@ -151,6 +152,7 @@ async def test_development_seed_is_repeatable_with_stable_entity_ids() -> None:
     assert len(repository.entity_ids) == len(first_call_ids)
 
 
+@pytest.mark.asyncio
 async def test_production_seed_never_imports_development_staff() -> None:
     document = SeedDocument.from_file(SEED_PATH)
     repository = FakeSeedRepository(active_staff_id=uuid4())
@@ -165,6 +167,7 @@ async def test_production_seed_never_imports_development_staff() -> None:
     assert repository.development_staff_calls == []
 
 
+@pytest.mark.asyncio
 async def test_seed_requires_real_staff_author_for_promotions_outside_development() -> None:
     document = SeedDocument.from_file(SEED_PATH)
     repository = FakeSeedRepository()

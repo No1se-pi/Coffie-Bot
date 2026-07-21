@@ -53,12 +53,8 @@ class WorkerOptions:
                 minimum=0.1,
                 maximum=300.0,
             ),
-            lease_seconds=_environment_int(
-                "WORKER_LEASE_SECONDS", 60, minimum=5, maximum=3600
-            ),
-            max_attempts=_environment_int(
-                "WORKER_MAX_ATTEMPTS", 7, minimum=1, maximum=100
-            ),
+            lease_seconds=_environment_int("WORKER_LEASE_SECONDS", 60, minimum=5, maximum=3600),
+            max_attempts=_environment_int("WORKER_MAX_ATTEMPTS", 7, minimum=1, maximum=100),
             base_backoff_seconds=_environment_int(
                 "WORKER_BASE_BACKOFF_SECONDS", 10, minimum=1, maximum=3600
             ),
@@ -204,9 +200,7 @@ def _keyboard(message: OutboundMessage) -> InlineKeyboardMarkup | None:
     if not message.button_label or not message.button_url:
         return None
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=message.button_label, url=message.button_url)]
-        ]
+        inline_keyboard=[[InlineKeyboardButton(text=message.button_label, url=message.button_url)]]
     )
 
 

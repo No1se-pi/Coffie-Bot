@@ -233,6 +233,26 @@ async def test_registration_is_repeat_safe_and_initializes_welcome_state_once() 
 
 
 @pytest.mark.asyncio
+async def test_registration_completes_customer_state_for_cli_created_owner() -> None:
+    repository = FakeIdentityRepository(welcome_bonus=10)
+    repository.user = User(
+        id=uuid4(),
+        telegram_id=42,
+        first_name="Local owner",
+        status=UserStatus.ACTIVE,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    service = IdentityService(settings=_settings(), repository=repository)
+
+    result = await service.register_telegram_user(_telegram_user(), now=NOW)
+
+    assert result.created is False
+    assert result.card.loyalty_state.points_balance == 10
+    assert len(repository.initialize_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_authentication_uses_verifier_and_stores_only_issued_hash() -> None:
     repository = FakeIdentityRepository()
     verifier = FakeVerifier(_telegram_user())

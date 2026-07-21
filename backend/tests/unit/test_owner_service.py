@@ -8,6 +8,8 @@ import pytest
 
 from app.services.owner import OwnerService
 
+pytestmark = pytest.mark.asyncio
+
 
 class FakeOwnerRepository:
     def __init__(self) -> None:

@@ -173,9 +173,7 @@ class DeliveryRepository:
                     .outerjoin(MediaFile, MediaFile.id == Broadcast.image_media_id)
                     .where(
                         eligible_delivery,
-                        Broadcast.status.in_(
-                            (BroadcastStatus.CONFIRMED, BroadcastStatus.RUNNING)
-                        ),
+                        Broadcast.status.in_((BroadcastStatus.CONFIRMED, BroadcastStatus.RUNNING)),
                     )
                     .order_by(BroadcastDelivery.created_at, BroadcastDelivery.id)
                     .limit(limit)
@@ -277,9 +275,7 @@ class DeliveryRepository:
         for broadcast_id in broadcast_ids:
             async with self._session.begin():
                 broadcast = await self._session.scalar(
-                    select(Broadcast)
-                    .where(Broadcast.id == broadcast_id)
-                    .with_for_update()
+                    select(Broadcast).where(Broadcast.id == broadcast_id).with_for_update()
                 )
                 if broadcast is None or broadcast.status != BroadcastStatus.RUNNING:
                     continue
@@ -305,9 +301,7 @@ class DeliveryRepository:
         return cast(
             NotificationOutbox | None,
             await self._session.scalar(
-                select(NotificationOutbox)
-                .where(NotificationOutbox.id == job_id)
-                .with_for_update()
+                select(NotificationOutbox).where(NotificationOutbox.id == job_id).with_for_update()
             ),
         )
 
@@ -318,18 +312,14 @@ class DeliveryRepository:
         return cast(
             BroadcastDelivery | None,
             await self._session.scalar(
-                select(BroadcastDelivery)
-                .where(BroadcastDelivery.id == job_id)
-                .with_for_update()
+                select(BroadcastDelivery).where(BroadcastDelivery.id == job_id).with_for_update()
             ),
         )
 
     async def _increment_broadcast(self, broadcast_id: UUID, field: str) -> None:
         column = getattr(Broadcast, field)
         await self._session.execute(
-            update(Broadcast)
-            .where(Broadcast.id == broadcast_id)
-            .values({field: column + 1})
+            update(Broadcast).where(Broadcast.id == broadcast_id).values({field: column + 1})
         )
 
 
@@ -338,9 +328,7 @@ def _owns_notification(
     lease_until: datetime,
 ) -> TypeGuard[NotificationOutbox]:
     return bool(
-        job is not None
-        and job.status == OutboxStatus.PROCESSING
-        and job.lease_until == lease_until
+        job is not None and job.status == OutboxStatus.PROCESSING and job.lease_until == lease_until
     )
 
 

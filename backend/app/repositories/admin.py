@@ -11,11 +11,18 @@ from uuid import UUID
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.access import Session, StaffInvite, StaffMember, StaffPermission, User
-from app.models.audit import AuditEvent
 from app.models.content import MenuCategory, MenuItem, Promotion
-from app.models.enums import FeedbackStatus, MediaStatus, PermissionCode, PromotionStatus, Role
+from app.models.enums import (
+    FeedbackStatus,
+    MediaStatus,
+    PermissionCode,
+    PromotionStatus,
+    Role,
+    TipProfileStatus,
+)
 from app.models.loyalty import LoyaltySettings
 from app.models.media import MediaFile
 from app.models.staff import FeedbackItem, StaffTipProfile
@@ -112,7 +119,8 @@ class AdminRepository:
         statement = select(LoyaltySettings).where(LoyaltySettings.singleton_key == "default")
         if for_update:
             statement = statement.with_for_update()
-        return await self._session.scalar(statement)
+        value: LoyaltySettings | None = await self._session.scalar(statement)
+        return value
 
     async def list_menu_categories(
         self,
@@ -150,7 +158,8 @@ class AdminRepository:
         statement = select(MenuCategory).where(MenuCategory.id == category_id)
         if for_update:
             statement = statement.with_for_update()
-        return await self._session.scalar(statement)
+        value: MenuCategory | None = await self._session.scalar(statement)
+        return value
 
     async def list_menu_items(
         self,
@@ -160,7 +169,9 @@ class AdminRepository:
         page_size: int,
         include_archived: bool,
     ) -> MenuItemPage:
-        filters = [] if include_archived else [MenuItem.archived_at.is_(None)]
+        filters: list[ColumnElement[bool]] = (
+            [] if include_archived else [MenuItem.archived_at.is_(None)]
+        )
         if category_id is not None:
             filters.append(MenuItem.category_id == category_id)
         total = int(
@@ -184,7 +195,8 @@ class AdminRepository:
         statement = select(MenuItem).where(MenuItem.id == item_id)
         if for_update:
             statement = statement.with_for_update()
-        return await self._session.scalar(statement)
+        value: MenuItem | None = await self._session.scalar(statement)
+        return value
 
     async def list_promotions(
         self,
@@ -220,7 +232,8 @@ class AdminRepository:
         statement = select(Promotion).where(Promotion.id == promotion_id)
         if for_update:
             statement = statement.with_for_update()
-        return await self._session.scalar(statement)
+        value: Promotion | None = await self._session.scalar(statement)
+        return value
 
     async def list_feedback(
         self,
@@ -327,7 +340,8 @@ class AdminRepository:
         )
         if for_update:
             statement = statement.with_for_update(of=StaffMember)
-        return await self._session.scalar(statement)
+        value: StaffMember | None = await self._session.scalar(statement)
+        return value
 
     async def get_staff_by_user(
         self,
@@ -342,12 +356,14 @@ class AdminRepository:
         )
         if for_update:
             statement = statement.with_for_update(of=StaffMember)
-        return await self._session.scalar(statement)
+        value: StaffMember | None = await self._session.scalar(statement)
+        return value
 
     async def get_user_for_staff_creation(self, user_id: UUID) -> User | None:
-        return await self._session.scalar(
+        value: User | None = await self._session.scalar(
             select(User).where(User.id == user_id).with_for_update()
         )
+        return value
 
     async def lock_staff_management(self, staff_id: UUID) -> LockedStaffManagement | None:
         owners = list(
@@ -394,7 +410,7 @@ class AdminRepository:
             .where(Session.user_id == user_id, Session.revoked_at.is_(None))
             .values(revoked_at=now, revoke_reason=reason)
         )
-        return int(result.rowcount or 0)
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def revoke_open_invites_for_target(
         self,
@@ -428,11 +444,7 @@ class AdminRepository:
         if for_update:
             statement = statement.with_for_update(of=StaffTipProfile)
         row = (await self._session.execute(statement)).one_or_none()
-        return (
-            None
-            if row is None
-            else TipProfileRecord(profile=row[0], staff=row[1], user=row[2])
-        )
+        return None if row is None else TipProfileRecord(profile=row[0], staff=row[1], user=row[2])
 
     async def get_staff_for_tip_profile(
         self,
@@ -447,10 +459,11 @@ class AdminRepository:
         )
         if for_update:
             statement = statement.with_for_update(of=StaffMember)
-        return await self._session.scalar(statement)
+        value: StaffMember | None = await self._session.scalar(statement)
+        return value
 
     async def list_pending_tip_profiles(self, *, page: int, page_size: int) -> TipProfilePage:
-        filters = [StaffTipProfile.status == "pending_review"]
+        filters = [StaffTipProfile.status == TipProfileStatus.PENDING_REVIEW]
         total = int(
             await self._session.scalar(
                 select(func.count()).select_from(StaffTipProfile).where(*filters)
@@ -488,14 +501,11 @@ class AdminRepository:
         if for_update:
             statement = statement.with_for_update(of=StaffTipProfile)
         row = (await self._session.execute(statement)).one_or_none()
-        return (
-            None
-            if row is None
-            else TipProfileRecord(profile=row[0], staff=row[1], user=row[2])
-        )
+        return None if row is None else TipProfileRecord(profile=row[0], staff=row[1], user=row[2])
 
     async def get_media(self, media_id: UUID, *, active_only: bool) -> MediaFile | None:
         filters = [MediaFile.id == media_id]
         if active_only:
             filters.append(MediaFile.status == MediaStatus.ACTIVE)
-        return await self._session.scalar(select(MediaFile).where(*filters))
+        value: MediaFile | None = await self._session.scalar(select(MediaFile).where(*filters))
+        return value

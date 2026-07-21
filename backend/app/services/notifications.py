@@ -224,7 +224,7 @@ def _safe_error_code(value: str) -> str:
         character if character.isalnum() or character in {"_", "-", "."} else "_"
         for character in value.casefold()
     )
-    return (normalized[:128] or "delivery_error")
+    return normalized[:128] or "delivery_error"
 
 
 def _aware_now(value: datetime | None) -> datetime:

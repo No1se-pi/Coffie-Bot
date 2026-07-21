@@ -262,15 +262,11 @@ class SeedRepositoryPort(Protocol):
 
     async def find_media_id(self, storage_key: str | None) -> UUID | None: ...
 
-    async def upsert_reward_template(
-        self, entity_id: UUID, values: dict[str, Any]
-    ) -> UUID: ...
+    async def upsert_reward_template(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
 
     async def upsert_loyalty_settings(self, values: dict[str, Any]) -> UUID: ...
 
-    async def upsert_menu_category(
-        self, entity_id: UUID, values: dict[str, Any]
-    ) -> UUID: ...
+    async def upsert_menu_category(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
 
     async def upsert_menu_item(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
 
@@ -400,9 +396,7 @@ class SeedService:
                     "currency_code": document.installation.currency_code,
                     "points_enabled": points.enabled,
                     "minor_units_per_point": points.minor_units_per_point,
-                    "redemption_minor_units_per_point": (
-                        points.redemption_minor_units_per_point
-                    ),
+                    "redemption_minor_units_per_point": (points.redemption_minor_units_per_point),
                     "minimum_purchase_minor": points.minimum_purchase_minor,
                     "maximum_purchase_minor": points.maximum_purchase_minor,
                     "rounding_mode": points.rounding,

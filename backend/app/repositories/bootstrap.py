@@ -319,9 +319,7 @@ class BootstrapRepository:
         for key, value in setting_rows:
             app_settings[str(key)] = value
         locations = list(
-            (
-                await self._session.scalars(select(Location).order_by(Location.sort_order))
-            ).all()
+            (await self._session.scalars(select(Location).order_by(Location.sort_order))).all()
         )
         loyalty = await self._session.scalar(
             select(LoyaltySettings).where(LoyaltySettings.singleton_key == "default")

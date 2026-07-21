@@ -1,6 +1,6 @@
 # План реализации
 
-Статус: активная разработка MVP. Дата исходного анализа: 2026-07-21.
+Статус: MVP реализован и прошёл основной набор автоматических и Docker-проверок. Дата проверки: 2026-07-21.
 
 ## Зафиксированные решения
 
@@ -24,85 +24,85 @@
 - [x] Прочитать и декомпозировать исходное ТЗ.
 - [x] Зафиксировать правила разработки в `AGENTS.md`.
 - [x] Зафиксировать архитектурные решения, модель данных и ключевые потоки в `ARCHITECTURE.md`.
-- [ ] Создать структуру backend/frontend/config/docs/scripts.
-- [ ] Закрепить совместимые версии зависимостей и добавить lock-файлы.
-- [ ] Добавить единые команды, `.env.example`, ignore/editor settings и CI.
+- [x] Создать структуру backend/frontend/config/docs/scripts.
+- [x] Закрепить совместимые версии зависимостей и добавить lock-файлы.
+- [x] Добавить единые команды, `.env.example`, ignore/editor settings и CI.
 
 ## Этап 2 — основа backend
 
-- [ ] Конфигурация Pydantic Settings, structured logging, единый формат ошибок.
-- [ ] Async SQLAlchemy, PostgreSQL, session/transaction boundaries.
-- [ ] Модели и первоначальная Alembic migration с индексами/constraints.
-- [ ] `/api/v1/health/live` и `/api/v1/health/ready`.
-- [ ] Проверка Telegram Mini App init data и допустимого возраста.
-- [ ] Короткоживущие opaque sessions с хешем токена, logout/revoke.
-- [ ] Регистрация клиента, карта, короткий код, стартовый бонус.
-- [ ] Backend RBAC и staff permissions.
+- [x] Конфигурация Pydantic Settings, structured logging, единый формат ошибок.
+- [x] Async SQLAlchemy, PostgreSQL, session/transaction boundaries.
+- [x] Модели и первоначальная Alembic migration с индексами/constraints.
+- [x] `/api/v1/health/live` и `/api/v1/health/ready`.
+- [x] Проверка Telegram Mini App init data и допустимого возраста.
+- [x] Короткоживущие opaque sessions с хешем токена, logout/revoke.
+- [x] Регистрация клиента, карта, короткий код, стартовый бонус.
+- [x] Backend RBAC и staff permissions.
 
 ## Этап 3 — критический контур лояльности
 
-- [ ] Поиск клиента по активному QR/короткому коду без побочных эффектов.
-- [ ] Preview и атомарное начисление по сумме покупки.
-- [ ] Уникальная идемпотентность и защита от concurrent double spend.
-- [ ] Списание, ручная корректировка с причиной, блокировка и QR reissue.
-- [ ] Отмена собственной недавней операции compensating entry.
-- [ ] Посещения и уникальность business day.
-- [ ] Стрики, штампы, создание/погашение/отмена/истечение наград.
-- [ ] Структурированные audit events и человеческий formatter.
-- [ ] Базовые suspicious flags и лимиты.
-- [ ] Unit и integration tests критических инвариантов.
+- [x] Поиск клиента по активному QR/короткому коду без побочных эффектов.
+- [x] Preview и атомарное начисление по сумме покупки.
+- [x] Уникальная идемпотентность и защита от concurrent double spend.
+- [x] Списание, ручная корректировка с причиной, блокировка и QR reissue.
+- [x] Отмена собственной недавней операции compensating entry.
+- [x] Посещения и уникальность business day.
+- [x] Стрики, штампы, создание/погашение/отмена/истечение наград.
+- [x] Структурированные audit events и человеческий formatter.
+- [x] Базовые suspicious flags и лимиты.
+- [x] Unit и integration tests критических инвариантов.
 
 ## Этап 4 — Telegram-бот и фоновые задачи
 
-- [ ] aiogram `/start`, регистрация, role-aware Mini App button, help/contact.
-- [ ] Шаблоны уведомлений и безопасная отправка после commit.
-- [ ] CLI `create-owner`, `seed`, export settings.
-- [ ] Worker для broadcasts, scheduled content и expiry.
-- [ ] Preview/test audience/confirm рассылки, delivery results и защита повторного запуска.
+- [x] aiogram `/start`, регистрация, role-aware Mini App button, help/contact.
+- [x] Шаблоны уведомлений и безопасная отправка после commit.
+- [x] CLI `create-owner`, `seed`, export settings.
+- [ ] Worker для broadcasts, scheduled content и expiry. Broadcast/outbox delivery готов; автоматический expiry баллов оставлен отключённым после MVP.
+- [ ] Preview/test audience/confirm рассылки, delivery results и защита повторного запуска. Preview/create/confirm/cancel и безопасная доставка готовы; отдельной test-send операции нет.
 
 ## Этап 5 — клиентский Mini App
 
-- [ ] Telegram auth/bootstrap и browser-only development mode.
-- [ ] Главная, карта/QR/короткий код, баланс и прогресс.
-- [ ] История, награды, акции, меню.
-- [ ] Контакты, одобренные сотрудники/чаевые, feedback и privacy.
-- [ ] Светлая/тёмная тема, safe area, loading/empty/error states, accessibility.
+- [x] Telegram auth/bootstrap и browser-only development mode.
+- [x] Главная, карта/QR/короткий код, баланс и прогресс.
+- [x] История, награды, акции, меню.
+- [x] Контакты, одобренные сотрудники/чаевые, feedback и privacy.
+- [x] Светлая/тёмная тема, safe area, loading/empty/error states, accessibility.
 
 ## Этап 6 — интерфейс сотрудника
 
-- [ ] Scanner через Telegram API с camera fallback и ручным кодом.
-- [ ] Ограниченная карточка клиента и последние операции.
-- [ ] Preview/confirm начисления, посещения, штампа, списания и reward redemption.
-- [ ] Результат, ссылка на операцию и доступная отмена.
-- [ ] Собственный tip profile и статус модерации.
+- [ ] Scanner через Telegram API с camera fallback и ручным кодом. Telegram scanner и ручной код готовы; отдельный browser-camera fallback не добавлен.
+- [x] Ограниченная карточка клиента и последние операции.
+- [x] Preview/confirm начисления, посещения, штампа, списания и reward redemption.
+- [x] Результат, ссылка на операцию и доступная отмена.
+- [x] Собственный tip profile и статус модерации.
 
 ## Этап 7 — административный интерфейс/API
 
-- [ ] Пользователи, история, корректировки, блокировка, QR, заметки.
-- [ ] Сотрудники, роли, granular permissions, sessions, invites.
-- [ ] Events с фильтрами и human-readable presentation.
-- [ ] Loyalty settings и reward templates.
-- [ ] Promotions, menu/categories, contacts/locations/settings.
-- [ ] Feedback workflow, broadcasts и media uploads.
-- [ ] Подтверждение опасных действий с обязательной причиной.
+- [x] Пользователи, история, корректировки, блокировка, QR, заметки.
+- [x] Сотрудники, роли, granular permissions, sessions, invites.
+- [x] Events с фильтрами и human-readable presentation.
+- [ ] Loyalty settings и reward templates. Настройки лояльности готовы; отдельный CRUD шаблонов наград не включён в MVP.
+- [ ] Promotions, menu/categories, contacts/locations/settings. Promotions и menu готовы; contacts/locations/settings пока управляются seed/config.
+- [x] Feedback workflow, broadcasts и media uploads.
+- [x] Подтверждение опасных действий с обязательной причиной.
 
 ## Этап 8 — инфраструктура и документация
 
-- [ ] Development Compose, health checks, volumes и migration job.
-- [ ] Production Compose example с reverse proxy/restart policy.
-- [ ] Локальное media storage и placeholder assets.
-- [ ] Backup/restore БД и media.
-- [ ] `README.md`, `CUSTOMIZATION.md`, `DEPLOYMENT.md`, `SECURITY.md`.
-- [ ] Нейтральные demo seed-данные; demo staff только в development.
+- [x] Development Compose, health checks, volumes и migration job.
+- [x] Production Compose example с reverse proxy/restart policy.
+- [x] Локальное media storage и placeholder assets.
+- [x] Backup/restore БД и media.
+- [x] `README.md`, `CUSTOMIZATION.md`, `DEPLOYMENT.md`, `SECURITY.md`.
+- [x] Нейтральные demo seed-данные; demo staff только в development.
 
 ## Этап 9 — итоговая проверка
 
-- [ ] Backend unit/integration tests на отдельной БД.
-- [ ] Backend lint, format check и typecheck.
-- [ ] Frontend component tests, lint, typecheck и production build.
-- [ ] Alembic upgrade с чистой PostgreSQL и seed.
-- [ ] Compose startup/health smoke test.
-- [ ] Проверка ролей, IDOR, uploads, secrets и dependency audit.
+- [x] Backend unit/integration tests на отдельной БД.
+- [x] Backend lint, format check и typecheck.
+- [x] Frontend component tests, lint, typecheck и production build.
+- [x] Alembic upgrade с чистой PostgreSQL и seed.
+- [x] Compose startup/health smoke test.
+- [x] Проверка ролей, IDOR, uploads, secrets и dependency audit.
 - [ ] Backup/restore rehearsal.
 - [ ] Сверка всех 30 критериев готовности и финальный отчёт без неподтверждённых утверждений.
 
@@ -116,4 +116,3 @@
 6. Различия scanner/camera API на Telegram iOS, Android, Desktop и в браузере.
 7. Эволюция копируемого шаблона без нарушения миграций клиентских установок.
 8. Безопасность media и резервных копий с персональными данными.
-

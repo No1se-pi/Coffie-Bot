@@ -295,7 +295,10 @@ class IdentityService:
                 status_code=status.HTTP_403_FORBIDDEN,
             )
 
-        if created:
+        customer_aggregate_missing = (
+            created or await self._repository.get_card_view(user.id) is None
+        )
+        if customer_aggregate_missing:
             loyalty_settings = await self._repository.get_loyalty_settings()
             welcome_bonus = (
                 loyalty_settings.welcome_bonus_points

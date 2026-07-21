@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
+
 from app.models.enums import UserStatus
 from app.repositories.delivery import BroadcastJob, NotificationJob
 from app.services.broadcasts import BroadcastService
@@ -16,6 +18,7 @@ from app.services.notifications import (
 
 NOW = datetime(2026, 7, 21, 12, tzinfo=UTC)
 LEASE = NOW + timedelta(minutes=1)
+pytestmark = pytest.mark.asyncio
 
 
 class FakeSender:
@@ -185,9 +188,7 @@ async def test_notification_retry_uses_exponential_backoff() -> None:
     )
 
     assert result.retried == 1
-    assert repository.failed == [
-        (job.id, "telegram_network_error", NOW + timedelta(seconds=40))
-    ]
+    assert repository.failed == [(job.id, "telegram_network_error", NOW + timedelta(seconds=40))]
 
 
 async def test_broadcast_isolates_failures_and_skips_inactive_users(tmp_path: Path) -> None:

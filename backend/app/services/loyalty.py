@@ -1166,7 +1166,7 @@ class LoyaltyService:
                     user_id=UUID(str(replay.payload["user_id"])),
                     user_status=UserStatus(str(replay.payload["user_status"])),
                     idempotent_replay=True,
-                    audit_message="",
+                    audit_message=str(replay.payload.get("audit_message", "")),
                 )
             context = await self._require_context(
                 user_id,
@@ -1200,7 +1200,11 @@ class LoyaltyService:
                 event_type="card.blocked",
                 idempotency_key=action_key,
                 request_hash=request_hash,
-                payload={"user_id": str(user_id), "user_status": UserStatus.BLOCKED.value},
+                payload={
+                    "user_id": str(user_id),
+                    "user_status": UserStatus.BLOCKED.value,
+                    "audit_message": format_audit_event("card.blocked", event_metadata),
+                },
             )
             self._repository.add_all([audit, outbox])
             await self._repository.flush()
@@ -1230,7 +1234,7 @@ class LoyaltyService:
                     user_id=UUID(str(replay.payload["user_id"])),
                     user_status=UserStatus(str(replay.payload["user_status"])),
                     idempotent_replay=True,
-                    audit_message="",
+                    audit_message=str(replay.payload.get("audit_message", "")),
                 )
             context = await self._require_context(
                 user_id,
@@ -1255,7 +1259,11 @@ class LoyaltyService:
                 event_type="card.unblocked",
                 idempotency_key=action_key,
                 request_hash=request_hash,
-                payload={"user_id": str(user_id), "user_status": UserStatus.ACTIVE.value},
+                payload={
+                    "user_id": str(user_id),
+                    "user_status": UserStatus.ACTIVE.value,
+                    "audit_message": format_audit_event("card.unblocked", event_metadata),
+                },
             )
             self._repository.add_all([audit, outbox])
             await self._repository.flush()
@@ -1292,7 +1300,7 @@ class LoyaltyService:
                     qr_payload=card.qr_token,
                     short_code=card.short_code,
                     idempotent_replay=True,
-                    audit_message="",
+                    audit_message=str(replay.payload.get("audit_message", "")),
                 )
             context = await self._require_context(user_id, for_update=True)
             old_card = context.card
@@ -1330,7 +1338,11 @@ class LoyaltyService:
                 event_type="card.reissued",
                 idempotency_key=action_key,
                 request_hash=request_hash,
-                payload={"user_id": str(user_id), "card_id": str(new_card.id)},
+                payload={
+                    "user_id": str(user_id),
+                    "card_id": str(new_card.id),
+                    "audit_message": format_audit_event("card.reissued", event_metadata),
+                },
             )
             self._repository.add_all([new_card, audit, outbox])
             await self._repository.flush()
@@ -1768,7 +1780,12 @@ def _new_reward(
     validity_days: int | None,
     now: datetime,
 ) -> Reward:
-    effective_validity = validity_days or template.validity_days
+    effective_validity = validity_days if validity_days is not None else template.validity_days
+    if effective_validity is not None and effective_validity <= 0:
+        _raise_conflict(
+            "invalid_reward_validity",
+            "Срок действия награды настроен некорректно",
+        )
     return Reward(
         id=uuid4(),
         user_id=user_id,

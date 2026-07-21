@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from app.bot.main import BotCommandService
 from app.security.telegram import TelegramUserData
+
+pytestmark = pytest.mark.asyncio
 
 
 async def test_start_registers_through_injected_shared_use_case() -> None:

@@ -11,6 +11,7 @@ from app.core.errors import AppError
 from app.models.access import User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.delivery import NotificationOutbox
 from app.models.enums import (
     CardStatus,
     LoyaltyOperationType,
@@ -53,8 +54,12 @@ class FakeRepository:
         self.operations: dict[tuple[LoyaltyOperationType, str], LoyaltyOperation] = {}
         self.audits: dict[UUID, AuditEvent] = {}
         self.point_transactions: list[PointTransaction] = []
+        self.outboxes: dict[str, NotificationOutbox] = {}
+        self.cards: dict[UUID, UserCard] = {context.card.id: context.card}
+        self.revoked_session_calls = 0
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._held_locks: dict[asyncio.Task[object], asyncio.Lock] = {}
+        self.for_update_calls: list[bool] = []
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction(self)
@@ -89,7 +94,7 @@ class FakeRepository:
         *,
         for_update: bool,
     ) -> LoyaltyContext | None:
-        assert for_update
+        self.for_update_calls.append(for_update)
         return self.context if self.context.user.id == user_id else None
 
     async def accrued_points_between(
@@ -109,6 +114,10 @@ class FakeRepository:
                 self.operations[(item.operation_type, item.idempotency_key)] = item
             elif isinstance(item, PointTransaction):
                 self.point_transactions.append(item)
+            elif isinstance(item, NotificationOutbox):
+                self.outboxes[item.idempotency_key] = item
+            elif isinstance(item, UserCard):
+                self.cards[item.id] = item
             elif isinstance(item, AuditEvent) and item.object_id is not None:
                 self.audits[item.object_id] = item
 
@@ -123,8 +132,33 @@ class FakeRepository:
             audit_event=self.audits.get(operation_id),
         )
 
+    async def get_outbox_by_key(
+        self,
+        idempotency_key: str,
+    ) -> NotificationOutbox | None:
+        return self.outboxes.get(idempotency_key)
 
-def loyalty_context(*, large_operation_requires_approval: bool = False) -> LoyaltyContext:
+    async def revoke_user_sessions(
+        self,
+        *,
+        user_id: UUID,
+        now: object,
+        reason: str,
+    ) -> None:
+        assert user_id == self.context.user.id
+        assert now is not None
+        assert reason
+        self.revoked_session_calls += 1
+
+    async def get_card(self, card_id: UUID) -> UserCard | None:
+        return self.cards.get(card_id)
+
+
+def loyalty_context(
+    *,
+    large_operation_requires_approval: bool = False,
+    points_balance: int = 10,
+) -> LoyaltyContext:
     user_id = uuid4()
     user = User(
         id=user_id,
@@ -143,7 +177,7 @@ def loyalty_context(*, large_operation_requires_approval: bool = False) -> Loyal
     state = UserLoyaltyState(
         id=uuid4(),
         user_id=user_id,
-        points_balance=10,
+        points_balance=points_balance,
         visit_streak=0,
         allowed_misses_used=0,
         stamp_count=0,
@@ -157,6 +191,9 @@ def loyalty_context(*, large_operation_requires_approval: bool = False) -> Loyal
         minimum_purchase_minor=0,
         maximum_purchase_minor=1_000_000,
         rounding_mode=RoundingMode.FLOOR,
+        redemption_minor_units_per_point=100,
+        minimum_redemption_points=1,
+        maximum_redemption_percent=50,
         daily_accrual_limit_points=None,
         operation_accrual_limit_points=None,
         large_operation_threshold_minor=(20_000 if large_operation_requires_approval else None),
@@ -303,3 +340,119 @@ async def test_idempotency_key_is_scoped_to_actor_and_payload() -> None:
         )
 
     assert error.value.code == "idempotency_conflict"
+
+
+@pytest.mark.asyncio
+async def test_confirm_recalculates_redemption_against_locked_current_balance() -> None:
+    context = loyalty_context(points_balance=100)
+    repository = FakeRepository(context)
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+    actor = staff_actor(PermissionCode.POINTS_REDEEM)
+    preview = await service.preview_redemption(
+        actor,
+        user_id=context.user.id,
+        purchase_amount_minor=20_000,
+        requested_points=50,
+    )
+    assert preview.projected_balance_after == 50
+
+    context.state.points_balance = 40
+    with pytest.raises(AppError) as error:
+        await service.confirm_redemption(
+            actor,
+            user_id=context.user.id,
+            purchase_amount_minor=20_000,
+            requested_points=50,
+            idempotency_key=str(uuid4()),
+        )
+
+    assert error.value.code == "insufficient_points"
+    assert repository.for_update_calls[-1] is True
+    assert context.state.points_balance == 40
+
+
+@pytest.mark.asyncio
+async def test_blocked_and_self_cards_are_rejected_before_mutation() -> None:
+    context = loyalty_context()
+    context.user.status = UserStatus.BLOCKED
+    repository = FakeRepository(context)
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+    actor = staff_actor(PermissionCode.POINTS_ACCRUE)
+
+    with pytest.raises(AppError) as blocked_error:
+        await service.confirm_accrual(
+            actor,
+            user_id=context.user.id,
+            purchase_amount_minor=20_000,
+            idempotency_key=str(uuid4()),
+        )
+    assert blocked_error.value.code == "card_blocked"
+
+    context.user.status = UserStatus.ACTIVE
+    self_actor = Actor(
+        user_id=context.user.id,
+        telegram_id=1001,
+        session_id=uuid4(),
+        role=Role.STAFF,
+        staff_member_id=uuid4(),
+        permissions=frozenset({PermissionCode.POINTS_ACCRUE}),
+    )
+    with pytest.raises(AppError) as self_error:
+        await service.confirm_accrual(
+            self_actor,
+            user_id=context.user.id,
+            purchase_amount_minor=20_000,
+            idempotency_key=str(uuid4()),
+        )
+    assert self_error.value.code == "self_operation_forbidden"
+    assert repository.point_transactions == []
+
+
+@pytest.mark.asyncio
+async def test_block_unblock_and_reissue_are_idempotent_admin_actions() -> None:
+    context = loyalty_context()
+    old_card_id = context.card.id
+    repository = FakeRepository(context)
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+    actor = staff_actor(PermissionCode.ADMIN_USERS_MANAGE)
+
+    block_key = str(uuid4())
+    blocked = await service.block_user(
+        actor,
+        user_id=context.user.id,
+        reason="подозрительная активность",
+        idempotency_key=block_key,
+    )
+    blocked_replay = await service.block_user(
+        actor,
+        user_id=context.user.id,
+        reason="подозрительная активность",
+        idempotency_key=block_key,
+    )
+    assert blocked.user_status is UserStatus.BLOCKED
+    assert blocked_replay.idempotent_replay is True
+    assert blocked_replay.audit_message == blocked.audit_message
+    assert repository.revoked_session_calls == 1
+
+    await service.unblock_user(
+        actor,
+        user_id=context.user.id,
+        idempotency_key=str(uuid4()),
+    )
+    assert context.user.status is UserStatus.ACTIVE
+
+    reissue_key = str(uuid4())
+    reissued = await service.reissue_card(
+        actor,
+        user_id=context.user.id,
+        idempotency_key=reissue_key,
+    )
+    replay = await service.reissue_card(
+        actor,
+        user_id=context.user.id,
+        idempotency_key=reissue_key,
+    )
+    assert repository.cards[old_card_id].status is CardStatus.REVOKED
+    assert reissued.card_id != old_card_id
+    assert replay.card_id == reissued.card_id
+    assert replay.qr_payload == reissued.qr_payload

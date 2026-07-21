@@ -163,6 +163,7 @@ def menu_items_response(items: list[MenuItem]) -> MenuItemListResponse:
             category_id=item.category_id,
             name=item.name,
             description=item.description,
+            image_url=_media_url(item.image_media_id),
             price_minor=item.price_minor,
             old_price_minor=item.old_price_minor,
             composition=item.composition,
@@ -186,6 +187,7 @@ def promotions_response(items: list[Promotion]) -> PromotionListResponse:
             id=item.id,
             title=item.title,
             text=item.body,
+            image_url=_media_url(item.image_media_id),
             button_label=item.button_label,
             button_url=item.button_url,
             starts_at=item.starts_at,
@@ -237,7 +239,9 @@ def staff_profiles_response(
             or record.user.first_name,
             position=record.staff.position or "Сотрудник",
             bio=record.profile.published_bio,
+            photo_url=_media_url(record.profile.published_photo_media_id),
             tip_url=record.profile.published_tip_url,
+            tip_qr_url=_media_url(record.profile.published_tip_qr_media_id),
         )
         for record in records
     ]
@@ -290,3 +294,7 @@ def _text(value: Any) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _media_url(media_id: UUID | None) -> str | None:
+    return f"/api/v1/media/{media_id}" if media_id is not None else None

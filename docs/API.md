@@ -74,17 +74,18 @@ Preview не принимает и не возвращает секреты; con
 - `POST /admin/staff/invites` — TTL-limited one-time token.
 - `POST /admin/staff/{staff_id}/role` — `admin`/`owner` transitions требуют owner.
 
-## Admin audit/settings/content
+## Admin audit/content
 
 - `GET /admin/events` — period/actor/user/type/severity/suspicious/adjustments/reversed filters.
-- `GET|PUT /admin/settings`, `/admin/loyalty-settings`.
-- CRUD `/admin/reward-templates`.
-- CRUD `/admin/promotions`; explicit `/publish` and `/archive` actions.
-- CRUD `/admin/menu/categories`, `/admin/menu/items`; hide вместо destructive delete.
-- `GET|PATCH /admin/feedback/{id}`.
+- `GET|PUT /admin/loyalty-settings`.
+- `GET|POST|PATCH /admin/promotions`; explicit `/publish` and `/archive` actions.
+- `GET|POST|PATCH /admin/menu/categories`, `/admin/menu/items`; hide вместо destructive delete.
+- `GET /admin/feedback`, `PATCH /admin/feedback/{id}`.
 - `POST /admin/media` multipart upload; metadata response, no client-controlled storage path.
-- CRUD `/admin/broadcasts`; `/preview`, `/send-test`, `/confirm`, `/status`.
+- `GET|POST /admin/broadcasts`, `GET /admin/broadcasts/{id}`; `/preview`, `/{id}/confirm`, `/{id}/cancel`.
 - `GET /admin/tip-profiles/pending`; `POST /admin/tip-profiles/{id}/approve|hide`.
+
+Загруженные публичные файлы выдаются через `GET /media/{media_id}`; storage path клиенту не раскрывается.
 
 ## Health
 

@@ -1,0 +1,676 @@
+"""Strict API contracts for admin content, staff, tips, feedback, and media."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Self
+from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.models.access import StaffMember
+from app.models.content import MenuCategory, MenuItem, Promotion
+from app.models.enums import (
+    FeedbackCategory,
+    FeedbackStatus,
+    PermissionCode,
+    PromotionStatus,
+    Role,
+    RoundingMode,
+    TipProfileStatus,
+)
+from app.models.loyalty import LoyaltySettings
+from app.repositories.admin import (
+    FeedbackPage,
+    MenuCategoryPage,
+    MenuItemPage,
+    PromotionPage,
+    StaffPage,
+    TipProfilePage,
+    TipProfileRecord,
+)
+from app.services.admin import MediaUploadResult, StaffInviteResult, TipProfileView
+
+
+class ApiSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class LoyaltySettingsResponse(ApiSchema):
+    points_enabled: bool
+    currency_name: str
+    rubles_per_point: int
+    minimum_purchase_minor: int
+    rounding: RoundingMode
+    max_redemption_percent: int
+    visit_enabled: bool
+    visit_goal: int
+    timezone: str
+    business_day_boundary: str
+    stamps_enabled: bool
+    stamp_goal: int
+
+    @field_validator("business_day_boundary")
+    @classmethod
+    def validate_boundary(cls, value: str) -> str:
+        boundary_minutes(value)
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("unknown timezone") from exc
+        return value
+
+
+class LoyaltySettingsUpdate(LoyaltySettingsResponse):
+    currency_name: str = Field(min_length=1, max_length=64)
+    rubles_per_point: int = Field(ge=1, le=1_000_000)
+    minimum_purchase_minor: int = Field(ge=0, le=1_000_000_000)
+    max_redemption_percent: int = Field(ge=0, le=100)
+    visit_goal: int = Field(ge=1, le=365)
+    timezone: str = Field(min_length=1, max_length=64)
+    stamp_goal: int = Field(ge=1, le=1_000)
+
+
+class MenuCategoryResponse(ApiSchema):
+    id: UUID
+    name: str
+    description: str | None
+    sort_order: int
+    visible: bool
+    archived_at: datetime | None
+
+
+class MenuCategoryListResponse(ApiSchema):
+    items: list[MenuCategoryResponse]
+    page: int
+    page_size: int
+    total: int
+
+
+class MenuCategoryCreate(ApiSchema):
+    name: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4_000)
+    sort_order: int = Field(default=0, ge=-100_000, le=100_000)
+    visible: bool = True
+
+
+class MenuCategoryUpdate(ApiSchema):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4_000)
+    sort_order: int | None = Field(default=None, ge=-100_000, le=100_000)
+    visible: bool | None = None
+
+
+class MenuItemResponse(ApiSchema):
+    id: UUID
+    category_id: UUID
+    name: str
+    description: str | None
+    image_media_id: UUID | None
+    image_url: str | None
+    price_minor: int
+    old_price_minor: int | None
+    composition: str | None
+    volume: str | None
+    labels: list[str]
+    available: bool
+    visible: bool
+    sort_order: int
+    archived_at: datetime | None
+
+
+class MenuItemListResponse(ApiSchema):
+    items: list[MenuItemResponse]
+    page: int
+    page_size: int
+    total: int
+
+
+class MenuItemCreate(ApiSchema):
+    category_id: UUID
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=8_000)
+    image_media_id: UUID | None = None
+    price_minor: int = Field(ge=0, le=1_000_000_000)
+    old_price_minor: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    composition: str | None = Field(default=None, max_length=8_000)
+    volume: str | None = Field(default=None, max_length=80)
+    labels: list[str] = Field(default_factory=list, max_length=20)
+    available: bool = True
+    visible: bool = True
+    sort_order: int = Field(default=0, ge=-100_000, le=100_000)
+
+    @field_validator("labels")
+    @classmethod
+    def normalize_labels(cls, value: list[str]) -> list[str]:
+        normalized = [label.strip() for label in value if label.strip()]
+        if any(len(label) > 64 for label in normalized):
+            raise ValueError("labels must be at most 64 characters")
+        return list(dict.fromkeys(normalized))
+
+    @model_validator(mode="after")
+    def validate_prices(self) -> Self:
+        if self.old_price_minor is not None and self.old_price_minor <= self.price_minor:
+            raise ValueError("old_price_minor must exceed price_minor")
+        return self
+
+
+class MenuItemUpdate(ApiSchema):
+    category_id: UUID | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=8_000)
+    image_media_id: UUID | None = None
+    price_minor: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    old_price_minor: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    composition: str | None = Field(default=None, max_length=8_000)
+    volume: str | None = Field(default=None, max_length=80)
+    labels: list[str] | None = Field(default=None, max_length=20)
+    available: bool | None = None
+    visible: bool | None = None
+    sort_order: int | None = Field(default=None, ge=-100_000, le=100_000)
+
+    @field_validator("labels")
+    @classmethod
+    def normalize_labels(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else MenuItemCreate.normalize_labels(value)
+
+
+class PromotionResponse(ApiSchema):
+    id: UUID
+    title: str
+    text: str
+    image_media_id: UUID | None
+    image_url: str | None
+    button_label: str | None
+    button_url: str | None
+    starts_at: datetime | None
+    ends_at: datetime | None
+    status: PromotionStatus
+    published_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PromotionListResponse(ApiSchema):
+    items: list[PromotionResponse]
+    page: int
+    page_size: int
+    total: int
+
+
+class PromotionCreate(ApiSchema):
+    title: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=20_000)
+    image_media_id: UUID | None = None
+    button_label: str | None = Field(default=None, max_length=80)
+    button_url: str | None = Field(default=None, max_length=2_048)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+    @field_validator("button_url")
+    @classmethod
+    def validate_url(cls, value: str | None) -> str | None:
+        return optional_http_url(value)
+
+    @model_validator(mode="after")
+    def validate_window(self) -> Self:
+        promotion_window(self.starts_at, self.ends_at)
+        return self
+
+
+class PromotionUpdate(ApiSchema):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    text: str | None = Field(default=None, min_length=1, max_length=20_000)
+    image_media_id: UUID | None = None
+    button_label: str | None = Field(default=None, max_length=80)
+    button_url: str | None = Field(default=None, max_length=2_048)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+    @field_validator("button_url")
+    @classmethod
+    def validate_url(cls, value: str | None) -> str | None:
+        return optional_http_url(value)
+
+
+class FeedbackAdminResponse(ApiSchema):
+    id: UUID
+    user_id: UUID
+    user_display_name: str
+    rating: int
+    category: FeedbackCategory
+    message: str
+    may_contact: bool
+    status: FeedbackStatus
+    assigned_to_staff_id: UUID | None
+    internal_note: str | None
+    resolved_at: datetime | None
+    created_at: datetime
+
+
+class FeedbackListResponse(ApiSchema):
+    items: list[FeedbackAdminResponse]
+    page: int
+    page_size: int
+    total: int
+
+
+class FeedbackUpdate(ApiSchema):
+    status: FeedbackStatus
+    internal_note: str | None = Field(default=None, max_length=4_000)
+    assigned_to_staff_id: UUID | None = None
+
+
+class PermissionOverride(ApiSchema):
+    permission: PermissionCode
+    allowed: bool
+
+
+class StaffResponse(ApiSchema):
+    id: UUID
+    user_id: UUID
+    telegram_id: int
+    username: str | None
+    display_name: str
+    position: str | None
+    bio: str | None
+    role: Role
+    is_active: bool
+    can_edit_tip_profile: bool
+    permissions: list[PermissionOverride]
+    created_at: datetime
+    updated_at: datetime
+
+
+class StaffListResponse(ApiSchema):
+    items: list[StaffResponse]
+    page: int
+    page_size: int
+    total: int
+
+
+class StaffCreate(ApiSchema):
+    user_id: UUID
+    role: Role = Role.STAFF
+    display_name: str | None = Field(default=None, max_length=128)
+    position: str | None = Field(default=None, max_length=128)
+    bio: str | None = Field(default=None, max_length=8_000)
+    can_edit_tip_profile: bool = True
+    permissions: dict[PermissionCode, bool] = Field(default_factory=dict)
+
+
+class StaffUpdate(ApiSchema):
+    display_name: str | None = Field(default=None, max_length=128)
+    position: str | None = Field(default=None, max_length=128)
+    bio: str | None = Field(default=None, max_length=8_000)
+    can_edit_tip_profile: bool | None = None
+    is_active: bool | None = None
+    permissions: dict[PermissionCode, bool] | None = None
+
+
+class StaffRoleUpdate(ApiSchema):
+    role: Role
+
+
+class StaffInviteCreate(ApiSchema):
+    role: Role = Role.STAFF
+    target_telegram_id: int | None = Field(default=None, gt=0)
+    expires_in_minutes: int = Field(default=1_440, ge=5, le=10_080)
+
+
+class StaffInviteResponse(ApiSchema):
+    id: UUID
+    token: str
+    role: Role
+    target_telegram_id: int | None
+    expires_at: datetime
+
+
+class SessionsRevokedResponse(ApiSchema):
+    revoked_sessions: int
+
+
+class TipProfileUpdate(ApiSchema):
+    display_name: str = Field(min_length=1, max_length=128)
+    position: str = Field(max_length=128)
+    bio: str = Field(default="", max_length=8_000)
+    tip_url: str = Field(default="", max_length=2_048)
+    tip_qr_url: str | None = None
+    moderation_status: TipProfileStatus | None = None
+    photo_media_id: UUID | None = None
+    tip_qr_media_id: UUID | None = None
+
+    @field_validator("tip_url")
+    @classmethod
+    def validate_tip_url(cls, value: str) -> str:
+        return optional_http_url(value) or ""
+
+
+class TipProfileResponse(ApiSchema):
+    id: UUID | None
+    display_name: str
+    position: str
+    bio: str
+    tip_url: str
+    photo_url: str | None
+    tip_qr_url: str | None
+    photo_media_id: UUID | None
+    tip_qr_media_id: UUID | None
+    moderation_status: TipProfileStatus
+    published_visible: bool
+
+
+class PendingTipProfileResponse(ApiSchema):
+    id: UUID
+    staff_id: UUID
+    user_id: UUID
+    staff_display_name: str
+    position: str | None
+    pending_name: str | None
+    pending_bio: str | None
+    pending_tip_url: str | None
+    pending_photo_media_id: UUID | None
+    pending_tip_qr_media_id: UUID | None
+    published_name: str | None
+    published_bio: str | None
+    published_tip_url: str | None
+    status: TipProfileStatus
+    submitted_at: datetime | None
+
+
+class PendingTipProfileListResponse(ApiSchema):
+    items: list[PendingTipProfileResponse]
+    page: int
+    page_size: int
+    total: int
+
+
+class TipModerationRequest(ApiSchema):
+    moderation_note: str | None = Field(default=None, max_length=2_000)
+
+
+class MediaUploadResponse(ApiSchema):
+    id: UUID
+    url: str
+    original_filename: str | None
+    detected_mime: str
+    byte_size: int
+    sha256: str
+    kind: str
+    created_at: datetime
+
+
+def loyalty_settings_response(settings: LoyaltySettings) -> LoyaltySettingsResponse:
+    return LoyaltySettingsResponse(
+        points_enabled=settings.points_enabled,
+        currency_name=settings.currency_name,
+        rubles_per_point=max(1, settings.minor_units_per_point // 100),
+        minimum_purchase_minor=settings.minimum_purchase_minor,
+        rounding=settings.rounding_mode,
+        max_redemption_percent=settings.maximum_redemption_percent,
+        visit_enabled=settings.visits_enabled,
+        visit_goal=settings.visit_required_count,
+        timezone=settings.timezone,
+        business_day_boundary=boundary_string(settings.business_day_boundary_minutes),
+        stamps_enabled=settings.stamps_enabled,
+        stamp_goal=settings.stamp_required_count,
+    )
+
+
+def menu_category_response(item: MenuCategory) -> MenuCategoryResponse:
+    return MenuCategoryResponse(
+        id=item.id,
+        name=item.name,
+        description=item.description,
+        sort_order=item.sort_order,
+        visible=item.is_visible,
+        archived_at=item.archived_at,
+    )
+
+
+def menu_category_list_response(
+    result: MenuCategoryPage, *, page: int, page_size: int
+) -> MenuCategoryListResponse:
+    return MenuCategoryListResponse(
+        items=[menu_category_response(item) for item in result.items],
+        page=page,
+        page_size=page_size,
+        total=result.total,
+    )
+
+
+def menu_item_response(item: MenuItem) -> MenuItemResponse:
+    return MenuItemResponse(
+        id=item.id,
+        category_id=item.category_id,
+        name=item.name,
+        description=item.description,
+        image_media_id=item.image_media_id,
+        image_url=media_url(item.image_media_id),
+        price_minor=item.price_minor,
+        old_price_minor=item.old_price_minor,
+        composition=item.composition,
+        volume=item.volume,
+        labels=item.labels,
+        available=item.is_available,
+        visible=item.is_visible,
+        sort_order=item.sort_order,
+        archived_at=item.archived_at,
+    )
+
+
+def menu_item_list_response(
+    result: MenuItemPage, *, page: int, page_size: int
+) -> MenuItemListResponse:
+    return MenuItemListResponse(
+        items=[menu_item_response(item) for item in result.items],
+        page=page,
+        page_size=page_size,
+        total=result.total,
+    )
+
+
+def promotion_response(item: Promotion) -> PromotionResponse:
+    return PromotionResponse(
+        id=item.id,
+        title=item.title,
+        text=item.body,
+        image_media_id=item.image_media_id,
+        image_url=media_url(item.image_media_id),
+        button_label=item.button_label,
+        button_url=item.button_url,
+        starts_at=item.starts_at,
+        ends_at=item.ends_at,
+        status=item.status,
+        published_at=item.published_at,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+def promotion_list_response(
+    result: PromotionPage, *, page: int, page_size: int
+) -> PromotionListResponse:
+    return PromotionListResponse(
+        items=[promotion_response(item) for item in result.items],
+        page=page,
+        page_size=page_size,
+        total=result.total,
+    )
+
+
+def feedback_list_response(
+    result: FeedbackPage, *, page: int, page_size: int
+) -> FeedbackListResponse:
+    return FeedbackListResponse(
+        items=[feedback_response(item) for item in result.items],
+        page=page,
+        page_size=page_size,
+        total=result.total,
+    )
+
+
+def feedback_response(record: Any) -> FeedbackAdminResponse:
+    feedback = record.feedback
+    user = record.user
+    return FeedbackAdminResponse(
+        id=feedback.id,
+        user_id=user.id,
+        user_display_name=" ".join(value for value in (user.first_name, user.last_name) if value),
+        rating=feedback.rating,
+        category=feedback.category,
+        message=feedback.message,
+        may_contact=feedback.may_contact,
+        status=feedback.status,
+        assigned_to_staff_id=feedback.assigned_to_staff_id,
+        internal_note=feedback.internal_note,
+        resolved_at=feedback.resolved_at,
+        created_at=feedback.created_at,
+    )
+
+
+def staff_response(item: StaffMember) -> StaffResponse:
+    user = item.user
+    return StaffResponse(
+        id=item.id,
+        user_id=item.user_id,
+        telegram_id=user.telegram_id,
+        username=user.username,
+        display_name=item.display_name or user.first_name,
+        position=item.position,
+        bio=item.bio,
+        role=item.role,
+        is_active=item.is_active,
+        can_edit_tip_profile=item.can_edit_tip_profile,
+        permissions=[
+            PermissionOverride(permission=value.permission, allowed=value.allowed)
+            for value in sorted(item.permissions, key=lambda value: value.permission.value)
+        ],
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+def staff_list_response(result: StaffPage, *, page: int, page_size: int) -> StaffListResponse:
+    return StaffListResponse(
+        items=[staff_response(item) for item in result.items],
+        page=page,
+        page_size=page_size,
+        total=result.total,
+    )
+
+
+def staff_invite_response(result: StaffInviteResult) -> StaffInviteResponse:
+    invite = result.invite
+    return StaffInviteResponse(
+        id=invite.id,
+        token=result.raw_token,
+        role=invite.role,
+        target_telegram_id=invite.target_telegram_id,
+        expires_at=invite.expires_at,
+    )
+
+
+def tip_profile_response(view: TipProfileView) -> TipProfileResponse:
+    return TipProfileResponse(
+        id=view.profile_id,
+        display_name=view.display_name,
+        position=view.position,
+        bio=view.bio,
+        tip_url=view.tip_url,
+        photo_url=media_url(view.photo_media_id),
+        tip_qr_url=media_url(view.tip_qr_media_id),
+        photo_media_id=view.photo_media_id,
+        tip_qr_media_id=view.tip_qr_media_id,
+        moderation_status=view.moderation_status,
+        published_visible=view.published_visible,
+    )
+
+
+def pending_tip_profile_response(record: TipProfileRecord) -> PendingTipProfileResponse:
+    profile = record.profile
+    return PendingTipProfileResponse(
+        id=profile.id,
+        staff_id=record.staff.id,
+        user_id=record.user.id,
+        staff_display_name=record.staff.display_name or record.user.first_name,
+        position=record.staff.position,
+        pending_name=profile.pending_name,
+        pending_bio=profile.pending_bio,
+        pending_tip_url=profile.pending_tip_url,
+        pending_photo_media_id=profile.pending_photo_media_id,
+        pending_tip_qr_media_id=profile.pending_tip_qr_media_id,
+        published_name=profile.published_name,
+        published_bio=profile.published_bio,
+        published_tip_url=profile.published_tip_url,
+        status=profile.status,
+        submitted_at=profile.submitted_at,
+    )
+
+
+def pending_tip_profile_list_response(
+    result: TipProfilePage, *, page: int, page_size: int
+) -> PendingTipProfileListResponse:
+    return PendingTipProfileListResponse(
+        items=[pending_tip_profile_response(item) for item in result.items],
+        page=page,
+        page_size=page_size,
+        total=result.total,
+    )
+
+
+def media_upload_response(result: MediaUploadResult) -> MediaUploadResponse:
+    item = result.media
+    return MediaUploadResponse(
+        id=item.id,
+        url=result.public_url,
+        original_filename=item.original_filename,
+        detected_mime=item.detected_mime,
+        byte_size=item.byte_size,
+        sha256=item.sha256,
+        kind=item.kind,
+        created_at=item.created_at,
+    )
+
+
+def media_url(media_id: UUID | None) -> str | None:
+    return None if media_id is None else f"/api/v1/media/{media_id}"
+
+
+def boundary_minutes(value: str) -> int:
+    parts = value.split(":")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError("business_day_boundary must be HH:MM")
+    hour, minute = (int(part) for part in parts)
+    if hour > 23 or minute > 59:
+        raise ValueError("business_day_boundary must be HH:MM")
+    return hour * 60 + minute
+
+
+def boundary_string(value: int) -> str:
+    return f"{value // 60:02d}:{value % 60:02d}"
+
+
+def promotion_window(starts_at: datetime | None, ends_at: datetime | None) -> None:
+    for value in (starts_at, ends_at):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("promotion timestamps must include timezone")
+    if starts_at is not None and ends_at is not None and ends_at <= starts_at:
+        raise ValueError("ends_at must be after starts_at")
+
+
+def optional_http_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if not normalized.lower().startswith(("https://", "http://")):
+        raise ValueError("URL must use http or https")
+    return normalized

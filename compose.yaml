@@ -1,0 +1,156 @@
+name: ${COMPOSE_PROJECT_NAME:-coffie-bot}
+
+x-backend-common: &backend-common
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+    target: development
+  image: ${BACKEND_IMAGE:-coffie-bot-backend:local}
+  working_dir: /app
+  init: true
+  environment: &backend-environment
+    APP_ENV: ${APP_ENV:-development}
+    APP_DEBUG: ${APP_DEBUG:-true}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    LOG_JSON: ${LOG_JSON:-false}
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-coffie}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-coffie}
+    BOT_TOKEN: ${BOT_TOKEN:-}
+    TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+    TELEGRAM_WEBAPP_URL: ${TELEGRAM_WEBAPP_URL:-http://localhost:5173}
+    TELEGRAM_INIT_DATA_TTL_SECONDS: ${TELEGRAM_INIT_DATA_TTL_SECONDS:-600}
+    SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-900}
+    SESSION_TOKEN_PEPPER: ${SESSION_TOKEN_PEPPER:-}
+    CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:5173"]}'
+    DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-false}
+    DEV_AUTH_TELEGRAM_ID: ${DEV_AUTH_TELEGRAM_ID:-1000000000000}
+    MEDIA_ROOT: /app/media
+    SEED_FILE: /app/configs/demo-seed.json
+    PYTHONUNBUFFERED: "1"
+    PYTHONDONTWRITEBYTECODE: "1"
+  volumes: &backend-volumes
+    - ./backend:/app
+    - ./configs:/app/configs:ro
+    - media_data:/app/media
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-coffie}
+      POSTGRES_USER: ${POSTGRES_USER:-coffie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - ${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 30s
+
+  migrate:
+    <<: *backend-common
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    <<: *backend-common
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    ports:
+      - ${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8000}:8000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    stop_grace_period: 30s
+
+  bot:
+    <<: *backend-common
+    command: ["python", "-m", "app.bot.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 30s
+
+  worker:
+    <<: *backend-common
+    command: ["python", "-m", "app.worker.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 60s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: development
+    image: ${FRONTEND_IMAGE:-coffie-bot-frontend:local}
+    working_dir: /app
+    init: true
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+      VITE_USE_DEMO_DATA: ${VITE_USE_DEMO_DATA:-false}
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    ports:
+      - ${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-5173}:5173
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:5173').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    stop_grace_period: 15s
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:-coffie-bot-postgres}
+  media_data:
+    name: ${MEDIA_VOLUME_NAME:-coffie-bot-media}
+  frontend_node_modules:
+    name: ${FRONTEND_NODE_MODULES_VOLUME_NAME:-coffie-bot-frontend-node-modules}

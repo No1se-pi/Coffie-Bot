@@ -23,6 +23,7 @@ import type {
   Promotion,
   PromotionDraft,
   PublicMoreData,
+  PurchasePreview,
   RedemptionPreview,
   Reward,
   Role,
@@ -302,7 +303,7 @@ interface BackendOperation {
   operation_id?: string;
   type?: HistoryItem["type"];
   operation_type?: HistoryItem["type"];
-  status: OperationResult["status"];
+  status: OperationResult["status"] | "committed" | "rejected";
   points_delta: number;
   balance_after: number | null;
   occurred_at: string;
@@ -336,6 +337,16 @@ interface BackendAccrualPreview {
   requires_approval: boolean;
 }
 
+interface BackendPurchasePreview extends BackendAccrualPreview {
+  stamps_to_add: number;
+  stamps_before: number;
+  projected_stamps_after: number;
+  stamp_rewards_earned: number;
+  visit_will_be_recorded: boolean;
+  visit_already_counted: boolean;
+  projected_visit_streak: number;
+}
+
 interface BackendRedemptionPreview {
   user_id: string;
   purchase_amount_minor: number;
@@ -360,6 +371,14 @@ const operationDescriptions: Record<HistoryItem["type"], string> = {
   operation_reversal: "Отмена операции",
 };
 
+function normalizeOperationStatus(
+  status: BackendOperation["status"],
+): OperationResult["status"] {
+  if (status === "committed") return "completed";
+  if (status === "rejected") return "failed";
+  return status;
+}
+
 function normalizeHistoryOperation(operation: BackendOperation): HistoryItem {
   const type = operation.type ?? operation.operation_type ?? "admin_adjustment";
   return {
@@ -369,7 +388,7 @@ function normalizeHistoryOperation(operation: BackendOperation): HistoryItem {
     delta_points: operation.points_delta,
     balance_after: operation.balance_after,
     created_at: operation.occurred_at,
-    status: operation.status,
+    status: normalizeOperationStatus(operation.status),
   };
 }
 
@@ -379,7 +398,7 @@ function normalizeOperationResult(
   return {
     operation_id: operation.operation_id ?? operation.id ?? "",
     operation_type: operation.operation_type ?? operation.type,
-    status: operation.status,
+    status: normalizeOperationStatus(operation.status),
     delta_points: operation.points_delta,
     balance_after: operation.balance_after,
     created_at: operation.occurred_at,
@@ -505,6 +524,44 @@ export const coffeeApi = {
     isDemoMode
       ? demoApi.confirmAccrual(payload)
       : request<BackendOperation>("/staff/operations/accrual", {
+          method: "POST",
+          body: jsonBody(payload),
+          idempotencyKey: uuid(),
+        }).then(normalizeOperationResult),
+  previewPurchase: async (payload: {
+    user_id: string;
+    purchase_amount_minor: number;
+    stamps_to_add: number;
+  }): Promise<PurchasePreview> =>
+    isDemoMode
+      ? demoApi.previewPurchase(payload)
+      : request<BackendPurchasePreview>("/staff/operations/purchase/preview", {
+          method: "POST",
+          body: jsonBody(payload),
+        }).then((preview) => ({
+          user_id: preview.user_id,
+          customer_name: "Клиент",
+          purchase_amount_minor: preview.purchase_amount_minor,
+          points_to_accrue: preview.awarded_points,
+          balance_before: preview.balance_before,
+          balance_after: preview.projected_balance_after,
+          stamps_to_add: preview.stamps_to_add,
+          stamps_before: preview.stamps_before,
+          stamps_after: preview.projected_stamps_after,
+          stamp_rewards_earned: preview.stamp_rewards_earned,
+          visit_will_be_recorded: preview.visit_will_be_recorded,
+          visit_already_counted: preview.visit_already_counted,
+          visit_streak_after: preview.projected_visit_streak,
+          requires_approval: preview.requires_approval,
+        })),
+  confirmPurchase: async (payload: {
+    user_id: string;
+    purchase_amount_minor: number;
+    stamps_to_add: number;
+  }): Promise<OperationResult> =>
+    isDemoMode
+      ? demoApi.confirmPurchase(payload)
+      : request<BackendOperation>("/staff/operations/purchase", {
           method: "POST",
           body: jsonBody(payload),
           idempotencyKey: uuid(),

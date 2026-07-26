@@ -10,8 +10,8 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { coffeeApi } from "../api/client";
 import type {
-  AccrualPreview,
   OperationResult,
+  PurchasePreview,
   RedemptionPreview,
   StaffClient,
   TipProfile,
@@ -345,9 +345,7 @@ export function QuickOperationsPanel({
   client: StaffClient;
   onCompleted: (operation: OperationResult) => void;
 }) {
-  const [mode, setMode] = useState<
-    "visit" | "stamp" | "redemption" | "rewards" | null
-  >(null);
+  const [mode, setMode] = useState<"redemption" | "rewards" | null>(null);
   const [amount, setAmount] = useState("");
   const [points, setPoints] = useState("");
   const [redemption, setRedemption] = useState<RedemptionPreview | null>(null);
@@ -359,25 +357,6 @@ export function QuickOperationsPanel({
   const complete = (operation: OperationResult) => {
     setResult(operation);
     onCompleted(operation);
-  };
-  const runSimple = async (kind: "visit" | "stamp") => {
-    setLoading(true);
-    setError(null);
-    try {
-      complete(
-        kind === "visit"
-          ? await coffeeApi.markVisit(client.user_id)
-          : await coffeeApi.addStamp(client.user_id),
-      );
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Не удалось выполнить операцию",
-      );
-    } finally {
-      setLoading(false);
-    }
   };
   const previewRedemption = async (event: FormEvent) => {
     event.preventDefault();
@@ -460,7 +439,7 @@ export function QuickOperationsPanel({
 
   return (
     <Panel className="operation-panel">
-      <h2>Другие действия</h2>
+      <h2>Списание и награды</h2>
       {result ? (
         <div className="operation-success" role="status">
           <span>✓</span>
@@ -472,37 +451,12 @@ export function QuickOperationsPanel({
         </div>
       ) : mode === null ? (
         <div className="action-grid">
-          <button type="button" onClick={() => setMode("visit")}>
-            <span aria-hidden="true">✓</span>Посещение
-          </button>
-          <button type="button" onClick={() => setMode("stamp")}>
-            <span aria-hidden="true">●</span>Штамп
-          </button>
           <button type="button" onClick={() => setMode("redemption")}>
             <span aria-hidden="true">−</span>Списать
           </button>
           <button type="button" onClick={() => setMode("rewards")}>
             <span aria-hidden="true">◇</span>Погасить награду
           </button>
-        </div>
-      ) : mode === "visit" || mode === "stamp" ? (
-        <div className="confirm-card">
-          <h3>
-            {mode === "visit" ? "Отметить посещение?" : "Добавить один штамп?"}
-          </h3>
-          <p>Клиент: {client.display_name}. Действие будет записано в аудит.</p>
-          <div className="action-row">
-            <Button
-              variant="secondary"
-              onClick={() => setMode(null)}
-              disabled={loading}
-            >
-              Отмена
-            </Button>
-            <Button onClick={() => void runSimple(mode)} disabled={loading}>
-              {loading ? "Подтверждаем…" : "Подтвердить"}
-            </Button>
-          </div>
         </div>
       ) : mode === "redemption" ? (
         redemption ? (
@@ -632,7 +586,8 @@ export function AccrualPanel({
   onCompleted?: (operation: OperationResult) => void;
 }) {
   const [amount, setAmount] = useState("");
-  const [preview, setPreview] = useState<AccrualPreview | null>(null);
+  const [stamps, setStamps] = useState("1");
+  const [preview, setPreview] = useState<PurchasePreview | null>(null);
   const [result, setResult] = useState<OperationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -642,22 +597,29 @@ export function AccrualPanel({
     event.preventDefault();
     setError(null);
     setResult(null);
-    if (purchaseMinor == null) {
-      setError("Введите корректную сумму больше нуля");
+    const stampsToAdd = Number(stamps);
+    if (
+      purchaseMinor == null ||
+      !Number.isInteger(stampsToAdd) ||
+      stampsToAdd < 0 ||
+      stampsToAdd > 100
+    ) {
+      setError("Введите сумму и целое количество штампов от 0 до 100");
       return;
     }
     setLoading(true);
     try {
-      const next = await coffeeApi.previewAccrual({
+      const next = await coffeeApi.previewPurchase({
         user_id: client.user_id,
         purchase_amount_minor: purchaseMinor,
+        stamps_to_add: stampsToAdd,
       });
       setPreview({ ...next, customer_name: client.display_name });
     } catch (reason) {
       setError(
         reason instanceof Error
           ? reason.message
-          : "Не удалось рассчитать начисление",
+          : "Не удалось рассчитать покупку",
       );
     } finally {
       setLoading(false);
@@ -669,18 +631,18 @@ export function AccrualPanel({
     setLoading(true);
     setError(null);
     try {
-      const operation = await coffeeApi.confirmAccrual({
+      const operation = await coffeeApi.confirmPurchase({
         user_id: client.user_id,
         purchase_amount_minor: preview.purchase_amount_minor,
+        stamps_to_add: preview.stamps_to_add,
       });
       setResult(operation);
-      setPreview(null);
       onCompleted?.(operation);
     } catch (reason) {
       setError(
         reason instanceof Error
           ? reason.message
-          : "Не удалось выполнить начисление",
+          : "Не удалось засчитать покупку",
       );
     } finally {
       setLoading(false);
@@ -689,6 +651,7 @@ export function AccrualPanel({
 
   const reset = () => {
     setAmount("");
+    setStamps("1");
     setPreview(null);
     setResult(null);
     setError(null);
@@ -697,8 +660,8 @@ export function AccrualPanel({
   return (
     <Panel className="operation-panel">
       <div className="section-heading">
-        <h2>Начислить за покупку</h2>
-        <Badge tone="accent">Backend расчёт</Badge>
+        <h2>Засчитать покупку</h2>
+        <Badge tone="accent">Автоматически</Badge>
       </div>
       {result ? (
         <div className="operation-success" role="status">
@@ -706,16 +669,33 @@ export function AccrualPanel({
           <h3>
             {result.status === "pending"
               ? "Отправлено на подтверждение"
-              : "Баллы начислены"}
+              : "Покупка засчитана"}
           </h3>
-          <strong>+{result.delta_points}</strong>
-          <p>Новый баланс: {result.balance_after ?? client.balance_points}</p>
+          <strong>+{result.delta_points} баллов</strong>
+          {result.status === "pending" ? (
+            <p>Баллы, штампы и посещение не изменятся до одобрения.</p>
+          ) : (
+            <>
+              <p>
+                Баланс: {result.balance_after ?? client.balance_points}. Штампы:{" "}
+                {result.stamps_after ?? preview?.stamps_after ?? client.stamps}.
+              </p>
+              <p>
+                {result.streak_after != null
+                  ? `Посещение учтено автоматически. Серия: ${result.streak_after}.`
+                  : preview?.visit_already_counted
+                    ? "Посещение за этот бизнес-день уже было учтено."
+                    : "Дополнительное посещение не требовалось."}
+              </p>
+            </>
+          )}
           <Button variant="secondary" onClick={reset}>
-            Новая операция
+            Следующая покупка
           </Button>
         </div>
       ) : preview ? (
-        <div className="confirm-card" aria-label="Предпросмотр начисления">
+        <div className="confirm-card" aria-label="Предпросмотр покупки">
+          <h3>Проверьте покупку</h3>
           <dl>
             <div>
               <dt>Клиент</dt>
@@ -726,18 +706,36 @@ export function AccrualPanel({
               <dd>{formatMoney(preview.purchase_amount_minor)}</dd>
             </div>
             <div>
-              <dt>Начисление</dt>
+              <dt>Баллы</dt>
               <dd className="positive">+{preview.points_to_accrue}</dd>
             </div>
             <div>
-              <dt>Текущий баланс</dt>
-              <dd>{preview.balance_before}</dd>
+              <dt>Штампы</dt>
+              <dd>
+                +{preview.stamps_to_add} ({preview.stamps_before} →{" "}
+                {preview.stamps_after})
+              </dd>
+            </div>
+            <div>
+              <dt>Посещение</dt>
+              <dd>
+                {preview.visit_will_be_recorded
+                  ? `Учтётся автоматически · серия ${preview.visit_streak_after}`
+                  : preview.visit_already_counted
+                    ? "Уже учтено сегодня"
+                    : "Не добавляется"}
+              </dd>
             </div>
             <div className="confirm-card__total">
-              <dt>Новый баланс</dt>
+              <dt>Баланс после покупки</dt>
               <dd>{preview.balance_after}</dd>
             </div>
           </dl>
+          {preview.stamp_rewards_earned > 0 && (
+            <div className="inline-warning">
+              Будет выдано наград: {preview.stamp_rewards_earned}.
+            </div>
+          )}
           {preview.requires_approval && (
             <div className="inline-warning">
               Крупная операция будет отправлена администратору.
@@ -752,17 +750,13 @@ export function AccrualPanel({
               Изменить
             </Button>
             <Button onClick={() => void confirm()} disabled={loading}>
-              {loading ? "Подтверждаем…" : "Подтвердить начисление"}
+              {loading ? "Подтверждаем…" : "Подтвердить покупку"}
             </Button>
           </div>
         </div>
       ) : (
         <form className="form" onSubmit={(event) => void makePreview(event)}>
-          <Field
-            label="Сумма покупки, ₽"
-            hint="Количество баллов рассчитает backend"
-            error={error ?? undefined}
-          >
+          <Field label="Сумма покупки, ₽" hint="Баллы рассчитает система">
             <input
               type="text"
               value={amount}
@@ -772,6 +766,26 @@ export function AccrualPanel({
               autoComplete="off"
             />
           </Field>
+          <Field
+            label="Штампы за покупку"
+            hint="Поставьте 0, если штамп не положен"
+            error={error ?? undefined}
+          >
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={stamps}
+              onChange={(event) => setStamps(event.target.value)}
+              inputMode="numeric"
+              autoComplete="off"
+            />
+          </Field>
+          <p className="muted">
+            Посещение добавится само, если оно ещё не учитывалось в текущем
+            бизнес-дне.
+          </p>
           <Button type="submit" disabled={loading}>
             {loading ? "Рассчитываем…" : "Рассчитать"}
           </Button>

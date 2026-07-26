@@ -19,6 +19,7 @@ import type {
   Promotion,
   PromotionDraft,
   PublicMoreData,
+  PurchasePreview,
   RedemptionPreview,
   Reward,
   Role,
@@ -45,6 +46,8 @@ let card: CardData = {
   blocked: false,
   updated_at: now(),
 };
+
+let lastAutomaticVisitDate: string | null = null;
 
 let history: HistoryItem[] = [
   {
@@ -490,6 +493,76 @@ export const demoApi = {
       delta_points: preview.points_to_accrue,
       balance_after: preview.balance_after,
       created_at: operation.created_at,
+    };
+  },
+  async previewPurchase(payload: {
+    user_id: string;
+    purchase_amount_minor: number;
+    stamps_to_add: number;
+  }): Promise<PurchasePreview> {
+    const accrual = await this.previewAccrual(payload);
+    if (!Number.isInteger(payload.stamps_to_add) || payload.stamps_to_add < 0)
+      throw new ApiError("Количество штампов должно быть целым", {
+        status: 422,
+        code: "invalid_stamp_state",
+      });
+    const stampTotal = card.stamps + payload.stamps_to_add;
+    const stampRewards = Math.floor(stampTotal / card.stamp_goal);
+    const today = new Date().toISOString().slice(0, 10);
+    const visitWillBeRecorded = lastAutomaticVisitDate !== today;
+    return {
+      ...accrual,
+      stamps_to_add: payload.stamps_to_add,
+      stamps_before: card.stamps,
+      stamps_after: stampTotal % card.stamp_goal,
+      stamp_rewards_earned: stampRewards,
+      visit_will_be_recorded: visitWillBeRecorded,
+      visit_already_counted: !visitWillBeRecorded,
+      visit_streak_after: visitWillBeRecorded
+        ? (card.visit_streak + 1) % card.visit_goal
+        : card.visit_streak,
+    };
+  },
+  async confirmPurchase(payload: {
+    user_id: string;
+    purchase_amount_minor: number;
+    stamps_to_add: number;
+  }): Promise<OperationResult> {
+    const preview = await this.previewPurchase(payload);
+    if (!preview.requires_approval) {
+      card = {
+        ...card,
+        balance_points: preview.balance_after,
+        stamps: preview.stamps_after,
+        visit_streak: preview.visit_streak_after,
+        updated_at: now(),
+      };
+      if (preview.visit_will_be_recorded) {
+        lastAutomaticVisitDate = new Date().toISOString().slice(0, 10);
+      }
+    }
+    const operation: HistoryItem = {
+      id: `purchase-${Date.now()}`,
+      type: "purchase_accrual",
+      description: `Покупка на ${Math.round(payload.purchase_amount_minor / 100)} ₽`,
+      delta_points: preview.points_to_accrue,
+      balance_after: preview.requires_approval ? null : preview.balance_after,
+      created_at: now(),
+      status: preview.requires_approval ? "pending" : "completed",
+    };
+    history = [operation, ...history];
+    return {
+      operation_id: operation.id,
+      operation_type: operation.type,
+      status: operation.status,
+      delta_points: preview.points_to_accrue,
+      balance_after: preview.balance_after,
+      created_at: operation.created_at,
+      streak_after: preview.requires_approval
+        ? null
+        : preview.visit_streak_after,
+      stamps_after: preview.requires_approval ? null : preview.stamps_after,
+      reward_ids: [],
     };
   },
   async previewRedemption(payload: {

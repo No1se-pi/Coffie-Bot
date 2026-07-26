@@ -144,6 +144,12 @@ compose run --rm migrate
 printf '%s\n' "Starting services and waiting for health checks..."
 compose up --detach --remove-orphans --wait
 
+# Nginx resolves a Compose service to its current container address. Recreate
+# the proxy after backend updates so even older frontend images cannot retain a
+# stale upstream address. --no-deps keeps the healthy backend and database up.
+printf '%s\n' "Refreshing the frontend proxy..."
+compose up --detach --no-deps --force-recreate --wait frontend
+
 frontend_port=$(sed -n 's/^PROD_FRONTEND_PORT=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r"' | tr -d "'")
 frontend_port=${frontend_port:-8080}
 curl --fail --silent --show-error --max-time 10 \

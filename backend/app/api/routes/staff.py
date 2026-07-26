@@ -18,6 +18,8 @@ from app.schemas.loyalty import (
     CardLookupResponse,
     OperationListResponse,
     OperationResponse,
+    PurchasePreviewResponse,
+    PurchaseRequest,
     ReasonRequest,
     RedemptionPreviewResponse,
     RedemptionRequest,
@@ -27,6 +29,7 @@ from app.schemas.loyalty import (
     card_lookup_response,
     operation_page_response,
     operation_response,
+    purchase_preview_response,
     redemption_preview_response,
 )
 from app.security.rbac import Actor, require_permissions, require_roles
@@ -87,6 +90,47 @@ async def confirm_accrual(
         actor,
         user_id=payload.user_id,
         purchase_amount_minor=payload.purchase_amount_minor,
+        location_id=payload.location_id,
+        idempotency_key=str(idempotency_key),
+        metadata=_request_metadata(request),
+    )
+    return operation_response(value)
+
+
+@router.post("/operations/purchase/preview", response_model=PurchasePreviewResponse)
+async def preview_purchase(
+    payload: PurchaseRequest,
+    session: DatabaseSession,
+    actor: Annotated[
+        Actor,
+        Depends(require_permissions(PermissionCode.POINTS_ACCRUE)),
+    ],
+) -> PurchasePreviewResponse:
+    value = await _service(session).preview_purchase(
+        actor,
+        user_id=payload.user_id,
+        purchase_amount_minor=payload.purchase_amount_minor,
+        stamps_to_add=payload.stamps_to_add,
+    )
+    return purchase_preview_response(value)
+
+
+@router.post("/operations/purchase", response_model=OperationResponse)
+async def confirm_purchase(
+    payload: PurchaseRequest,
+    request: Request,
+    session: DatabaseSession,
+    idempotency_key: IdempotencyKey,
+    actor: Annotated[
+        Actor,
+        Depends(require_permissions(PermissionCode.POINTS_ACCRUE)),
+    ],
+) -> OperationResponse:
+    value = await _service(session).confirm_purchase(
+        actor,
+        user_id=payload.user_id,
+        purchase_amount_minor=payload.purchase_amount_minor,
+        stamps_to_add=payload.stamps_to_add,
         location_id=payload.location_id,
         idempotency_key=str(idempotency_key),
         metadata=_request_metadata(request),

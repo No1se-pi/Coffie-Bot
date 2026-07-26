@@ -217,6 +217,16 @@ export interface AccrualPreview {
   requires_approval: boolean;
 }
 
+export interface PurchasePreview extends AccrualPreview {
+  stamps_to_add: number;
+  stamps_before: number;
+  stamps_after: number;
+  stamp_rewards_earned: number;
+  visit_will_be_recorded: boolean;
+  visit_already_counted: boolean;
+  visit_streak_after: number;
+}
+
 export interface RedemptionPreview {
   user_id: string;
   customer_name: string;

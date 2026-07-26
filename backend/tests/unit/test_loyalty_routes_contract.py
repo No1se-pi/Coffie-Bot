@@ -19,6 +19,8 @@ def test_loyalty_route_paths_match_api_contract() -> None:
         "/staff/cards/lookup",
         "/staff/operations/accrual/preview",
         "/staff/operations/accrual",
+        "/staff/operations/purchase/preview",
+        "/staff/operations/purchase",
         "/staff/operations/redemption/preview",
         "/staff/operations/redemption",
         "/staff/operations/visits",
@@ -43,6 +45,7 @@ def test_confirm_routes_require_uuid_idempotency_header() -> None:
 
     for path in (
         "/staff/operations/accrual",
+        "/staff/operations/purchase",
         "/staff/operations/redemption",
         "/staff/operations/visits",
         "/staff/operations/stamps",

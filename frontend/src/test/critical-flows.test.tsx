@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
 import type {
-  AccrualPreview,
   AdminFeedback,
   AdminStaffMember,
   AdminUserListItem,
@@ -12,6 +11,7 @@ import type {
   CardData,
   MenuCategory,
   OperationResult,
+  PurchasePreview,
   StaffClient,
 } from "../api/types";
 import { CardPage, HomePage } from "../pages/customer";
@@ -108,15 +108,22 @@ describe("critical Mini App flows", () => {
     expect(lookup).toHaveBeenCalledWith({ short_code: "BEAN2026" });
   });
 
-  it("previews and explicitly confirms an accrual", async () => {
+  it("previews and confirms a purchase with stamps and automatic visit", async () => {
     const user = userEvent.setup();
-    const preview: AccrualPreview = {
+    const preview: PurchasePreview = {
       user_id: client.user_id,
       customer_name: client.display_name,
       purchase_amount_minor: 46000,
       points_to_accrue: 46,
       balance_before: 284,
       balance_after: 330,
+      stamps_to_add: 2,
+      stamps_before: 6,
+      stamps_after: 8,
+      stamp_rewards_earned: 0,
+      visit_will_be_recorded: true,
+      visit_already_counted: false,
+      visit_streak_after: 4,
       requires_approval: false,
     };
     const operation: OperationResult = {
@@ -125,59 +132,54 @@ describe("critical Mini App flows", () => {
       delta_points: 46,
       balance_after: 330,
       created_at: "2026-07-21T10:00:00Z",
+      stamps_after: 8,
+      streak_after: 4,
     };
     const previewCall = vi
-      .spyOn(coffeeApi, "previewAccrual")
+      .spyOn(coffeeApi, "previewPurchase")
       .mockResolvedValue(preview);
     const confirmCall = vi
-      .spyOn(coffeeApi, "confirmAccrual")
+      .spyOn(coffeeApi, "confirmPurchase")
       .mockResolvedValue(operation);
     render(<AccrualPanel client={client} />);
 
     await user.type(screen.getByLabelText(/сумма покупки/i), "460");
+    await user.clear(screen.getByLabelText(/штампы за покупку/i));
+    await user.type(screen.getByLabelText(/штампы за покупку/i), "2");
     await user.click(screen.getByRole("button", { name: "Рассчитать" }));
     expect(
-      await screen.findByLabelText("Предпросмотр начисления"),
-    ).toHaveTextContent("Новый баланс");
-    expect(screen.getByLabelText("Предпросмотр начисления")).toHaveTextContent(
+      await screen.findByLabelText("Предпросмотр покупки"),
+    ).toHaveTextContent("Баланс после покупки");
+    expect(screen.getByLabelText("Предпросмотр покупки")).toHaveTextContent(
       "330",
     );
     await user.click(
-      screen.getByRole("button", { name: /подтвердить начисление/i }),
+      screen.getByRole("button", { name: /подтвердить покупку/i }),
     );
 
-    expect(await screen.findByText("Баллы начислены")).toBeInTheDocument();
+    expect(await screen.findByText("Покупка засчитана")).toBeInTheDocument();
     expect(previewCall).toHaveBeenCalledWith({
       user_id: "user-1",
       purchase_amount_minor: 46000,
+      stamps_to_add: 2,
     });
     expect(confirmCall).toHaveBeenCalledWith({
       user_id: "user-1",
       purchase_amount_minor: 46000,
+      stamps_to_add: 2,
     });
   });
 
-  it("requires explicit confirmation before marking a visit", async () => {
-    const user = userEvent.setup();
-    const markVisit = vi.spyOn(coffeeApi, "markVisit").mockResolvedValue({
-      operation_id: "visit-1",
-      operation_type: "visit_mark",
-      status: "completed",
-      delta_points: 0,
-      balance_after: 284,
-      created_at: "2026-07-21T10:00:00Z",
-      streak_after: 4,
-    });
-    const completed = vi.fn();
-    render(<QuickOperationsPanel client={client} onCompleted={completed} />);
+  it("keeps manual visits and stamps out of secondary actions", () => {
+    render(<QuickOperationsPanel client={client} onCompleted={vi.fn()} />);
 
-    await user.click(screen.getByRole("button", { name: "Посещение" }));
-    expect(markVisit).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Подтвердить" }));
-
-    expect(await screen.findByText("Операция выполнена")).toBeInTheDocument();
-    expect(markVisit).toHaveBeenCalledWith("user-1");
-    expect(completed).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("button", { name: "Посещение" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Штамп" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Списать" })).toBeInTheDocument();
   });
 
   it("shows a safe retryable error state", async () => {

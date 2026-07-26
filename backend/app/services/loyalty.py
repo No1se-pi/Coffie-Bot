@@ -55,6 +55,8 @@ from app.services.loyalty_calculations import (
     LoyaltyRuleViolation,
     RedemptionPolicy,
     RedemptionResult,
+    StampProgress,
+    VisitProgress,
     advance_stamps,
     advance_visit_streak,
     business_date_for,
@@ -215,6 +217,26 @@ class AccrualPreviewView:
     projected_balance_after: int
     limited_by_operation: bool
     limited_by_daily_total: bool
+    requires_approval: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PurchasePreviewView:
+    user_id: UUID
+    purchase_amount_minor: int
+    raw_points: int
+    awarded_points: int
+    balance_before: int
+    projected_balance_after: int
+    limited_by_operation: bool
+    limited_by_daily_total: bool
+    stamps_to_add: int
+    stamps_before: int
+    projected_stamps_after: int
+    stamp_rewards_earned: int
+    visit_will_be_recorded: bool
+    visit_already_counted: bool
+    projected_visit_streak: int
     requires_approval: bool
 
 
@@ -432,6 +454,264 @@ class LoyaltyService:
             await self._repository.flush()
             return await self._outcome(operation, replay=False)
 
+    async def preview_purchase(
+        self,
+        actor: Actor,
+        *,
+        user_id: UUID,
+        purchase_amount_minor: int,
+        stamps_to_add: int,
+        now: datetime | None = None,
+    ) -> PurchasePreviewView:
+        _require_permission(actor, PermissionCode.POINTS_ACCRUE)
+        if stamps_to_add > 0:
+            _require_permission(actor, PermissionCode.STAMPS_ADD)
+        current_time = _aware_now(now)
+        context = await self._require_context(user_id, for_update=False)
+        _require_not_self(actor, user_id)
+        accrual = await self._calculate_accrual(
+            context,
+            purchase_amount_minor=purchase_amount_minor,
+            now=current_time,
+        )
+        stamp_progress = self._purchase_stamp_progress(
+            context,
+            stamps_to_add=stamps_to_add,
+        )
+        business_date = _business_date(context.settings, current_time)
+        visit_count = await self._repository.count_visits(
+            user_id=user_id,
+            business_date=business_date,
+        )
+        visit_progress = self._purchase_visit_progress(
+            context,
+            business_date=business_date,
+            visit_count=visit_count,
+        )
+        return PurchasePreviewView(
+            user_id=user_id,
+            purchase_amount_minor=purchase_amount_minor,
+            raw_points=accrual.raw_points,
+            awarded_points=accrual.awarded_points,
+            balance_before=context.state.points_balance,
+            projected_balance_after=context.state.points_balance + accrual.awarded_points,
+            limited_by_operation=accrual.limited_by_operation,
+            limited_by_daily_total=accrual.limited_by_daily_total,
+            stamps_to_add=stamps_to_add,
+            stamps_before=context.state.stamp_count,
+            projected_stamps_after=(
+                stamp_progress.stamps_after if stamp_progress else context.state.stamp_count
+            ),
+            stamp_rewards_earned=(stamp_progress.rewards_earned if stamp_progress else 0),
+            visit_will_be_recorded=visit_progress is not None,
+            visit_already_counted=(
+                context.settings.visits_enabled
+                and visit_count >= context.settings.visit_daily_limit
+            ),
+            projected_visit_streak=(
+                visit_progress.streak_after if visit_progress else context.state.visit_streak
+            ),
+            requires_approval=accrual.requires_approval,
+        )
+
+    async def confirm_purchase(
+        self,
+        actor: Actor,
+        *,
+        user_id: UUID,
+        purchase_amount_minor: int,
+        stamps_to_add: int,
+        idempotency_key: str,
+        location_id: UUID | None = None,
+        metadata: RequestMetadata = EMPTY_REQUEST_METADATA,
+        now: datetime | None = None,
+    ) -> OperationOutcome:
+        _require_permission(actor, PermissionCode.POINTS_ACCRUE)
+        if stamps_to_add > 0:
+            _require_permission(actor, PermissionCode.STAMPS_ADD)
+        current_time = _aware_now(now)
+        operation_type = LoyaltyOperationType.PURCHASE_ACCRUAL
+        request_hash = _request_hash(
+            operation_type,
+            actor,
+            {
+                "user_id": user_id,
+                "purchase_amount_minor": purchase_amount_minor,
+                "stamps_to_add": stamps_to_add,
+                "location_id": location_id,
+            },
+        )
+        async with self._repository.transaction():
+            existing = await self._idempotent_operation(
+                operation_type,
+                idempotency_key,
+                request_hash,
+            )
+            if existing is not None:
+                return await self._outcome(existing, replay=True)
+
+            context = await self._require_context(user_id, for_update=True)
+            _require_not_self(actor, user_id)
+            accrual = await self._calculate_accrual(
+                context,
+                purchase_amount_minor=purchase_amount_minor,
+                now=current_time,
+            )
+            stamp_progress = self._purchase_stamp_progress(
+                context,
+                stamps_to_add=stamps_to_add,
+            )
+            business_date = _business_date(context.settings, current_time)
+            visit_count = await self._repository.count_visits(
+                user_id=user_id,
+                business_date=business_date,
+            )
+            visit_progress = self._purchase_visit_progress(
+                context,
+                business_date=business_date,
+                visit_count=visit_count,
+            )
+
+            committed = not accrual.requires_approval
+            balance_before = context.state.points_balance
+            balance_after = balance_before + accrual.awarded_points if committed else None
+            operation = LoyaltyOperation(
+                id=uuid4(),
+                user_id=user_id,
+                actor_user_id=actor.user_id,
+                actor_staff_id=actor.staff_member_id,
+                location_id=location_id,
+                operation_type=operation_type,
+                status=(OperationStatus.COMMITTED if committed else OperationStatus.PENDING),
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                purchase_amount_minor=purchase_amount_minor,
+                points_delta=accrual.awarded_points,
+                balance_before=balance_before,
+                balance_after=balance_after,
+                occurred_at=current_time,
+            )
+            objects: list[object] = [operation]
+            rewards: list[Reward] = []
+            visit: Visit | None = None
+            stamp_transaction: StampTransaction | None = None
+
+            if committed:
+                visit_template = None
+                if visit_progress is not None and visit_progress.reward_earned:
+                    visit_template = await self._required_template(
+                        context.settings.visit_reward_template_id,
+                        "visit_reward_template_missing",
+                    )
+                stamp_template = None
+                if stamp_progress is not None and stamp_progress.rewards_earned:
+                    stamp_template = await self._required_template(
+                        context.settings.stamp_reward_template_id,
+                        "stamp_reward_template_missing",
+                    )
+
+                context.state.points_balance = balance_after or 0
+                objects.append(
+                    PointTransaction(
+                        id=uuid4(),
+                        operation_id=operation.id,
+                        user_id=user_id,
+                        delta=accrual.awarded_points,
+                        balance_before=balance_before,
+                        balance_after=context.state.points_balance,
+                        purchase_amount_minor=purchase_amount_minor,
+                        created_at=current_time,
+                    )
+                )
+
+                if visit_progress is not None:
+                    visit = Visit(
+                        id=uuid4(),
+                        operation_id=operation.id,
+                        user_id=user_id,
+                        staff_member_id=_staff_member_id(actor),
+                        location_id=location_id,
+                        business_date=business_date,
+                        ordinal=visit_count + 1,
+                        visited_at=current_time,
+                        streak_after=visit_progress.streak_after,
+                    )
+                    context.state.visit_streak = visit_progress.streak_after
+                    context.state.allowed_misses_used = visit_progress.allowed_misses_used
+                    context.state.last_visit_business_date = business_date
+                    if context.state.visit_cycle_started_on is None:
+                        context.state.visit_cycle_started_on = business_date
+                    if visit_progress.reward_earned and context.settings.visit_restart_cycle:
+                        context.state.visit_cycle_started_on = None
+                    objects.append(visit)
+                    if visit_template is not None:
+                        rewards.append(
+                            _new_reward(
+                                visit_template,
+                                user_id=user_id,
+                                source_operation_id=operation.id,
+                                validity_days=context.settings.visit_reward_validity_days,
+                                now=current_time,
+                            )
+                        )
+
+                if stamp_progress is not None:
+                    stamp_rewards = [
+                        _new_reward(
+                            stamp_template,
+                            user_id=user_id,
+                            source_operation_id=operation.id,
+                            validity_days=context.settings.stamp_reward_validity_days,
+                            now=current_time,
+                        )
+                        for _ in range(stamp_progress.rewards_earned)
+                        if stamp_template is not None
+                    ]
+                    rewards.extend(stamp_rewards)
+                    stamp_transaction = StampTransaction(
+                        id=uuid4(),
+                        operation_id=operation.id,
+                        user_id=user_id,
+                        delta=stamps_to_add,
+                        stamps_before=context.state.stamp_count,
+                        stamps_after=stamp_progress.stamps_after,
+                        issued_reward_id=(stamp_rewards[0].id if stamp_rewards else None),
+                        created_at=current_time,
+                    )
+                    context.state.stamp_count = stamp_progress.stamps_after
+                    objects.append(stamp_transaction)
+
+                context.state.version += 1
+                objects.extend(rewards)
+
+            event_type = "points.accrued" if committed else "points.accrual_pending"
+            event_metadata = {
+                "customer_name": _display_name(context.user),
+                "points": accrual.awarded_points,
+                "purchase_amount_minor": purchase_amount_minor,
+                "stamps_added": stamps_to_add if committed else 0,
+                "stamps_after": (
+                    stamp_transaction.stamps_after if stamp_transaction is not None else None
+                ),
+                "visit_recorded": visit is not None,
+                "visit_streak": visit.streak_after if visit is not None else None,
+                "reward_ids": [str(reward.id) for reward in rewards],
+                "status": operation.status.value,
+            }
+            objects.extend(
+                _operation_side_effects(
+                    operation,
+                    actor=actor,
+                    event_type=event_type,
+                    event_metadata=event_metadata,
+                    metadata=metadata,
+                    severity=(AuditSeverity.INFO if committed else AuditSeverity.WARNING),
+                )
+            )
+            self._repository.add_all(objects)
+            await self._repository.flush()
+            return await self._outcome(operation, replay=False)
+
     async def preview_redemption(
         self,
         actor: Actor,
@@ -539,6 +819,52 @@ class LoyaltyService:
             self._repository.add_all(objects)
             await self._repository.flush()
             return await self._outcome(operation, replay=False)
+
+    def _purchase_stamp_progress(
+        self,
+        context: LoyaltyContext,
+        *,
+        stamps_to_add: int,
+    ) -> StampProgress | None:
+        if stamps_to_add == 0:
+            return None
+        if not context.settings.stamps_enabled:
+            _raise_validation("stamps_program_disabled", "Программа штампов отключена")
+        try:
+            return advance_stamps(
+                current_stamps=context.state.stamp_count,
+                stamps_to_add=stamps_to_add,
+                required_stamps=context.settings.stamp_required_count,
+                operation_limit=context.settings.stamp_operation_limit,
+                reset_after_reward=context.settings.reset_stamps_after_reward,
+            )
+        except LoyaltyRuleViolation as exc:
+            _raise_rule_violation(exc)
+
+    def _purchase_visit_progress(
+        self,
+        context: LoyaltyContext,
+        *,
+        business_date: date,
+        visit_count: int,
+    ) -> VisitProgress | None:
+        if not context.settings.visits_enabled or visit_count >= context.settings.visit_daily_limit:
+            return None
+        try:
+            return advance_visit_streak(
+                previous_business_date=context.state.last_visit_business_date,
+                current_business_date=business_date,
+                current_streak=context.state.visit_streak,
+                required_visits=context.settings.visit_required_count,
+                must_be_consecutive=context.settings.visits_must_be_consecutive,
+                allowed_misses=context.settings.visit_allowed_misses,
+                allowed_misses_used=context.state.allowed_misses_used,
+                reset_on_miss=context.settings.visit_reset_on_miss,
+                restart_cycle_after_reward=context.settings.visit_restart_cycle,
+                allow_same_business_date=visit_count > 0,
+            )
+        except LoyaltyRuleViolation as exc:
+            _raise_rule_violation(exc)
 
     async def _calculate_accrual(
         self,

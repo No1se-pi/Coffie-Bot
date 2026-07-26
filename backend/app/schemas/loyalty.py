@@ -29,6 +29,7 @@ from app.services.loyalty import (
     CardLookupView,
     CardReissueOutcome,
     OperationOutcome,
+    PurchasePreviewView,
     RedemptionPreviewView,
     UserStatusOutcome,
 )
@@ -111,6 +112,32 @@ class AccrualPreviewResponse(ApiSchema):
     projected_balance_after: int
     limited_by_operation: bool
     limited_by_daily_total: bool
+    requires_approval: bool
+
+
+class PurchaseRequest(ApiSchema):
+    user_id: UUID
+    purchase_amount_minor: int = Field(gt=0)
+    stamps_to_add: int = Field(default=0, ge=0, le=100)
+    location_id: UUID | None = None
+
+
+class PurchasePreviewResponse(ApiSchema):
+    user_id: UUID
+    purchase_amount_minor: int
+    raw_points: int
+    awarded_points: int
+    balance_before: int
+    projected_balance_after: int
+    limited_by_operation: bool
+    limited_by_daily_total: bool
+    stamps_to_add: int
+    stamps_before: int
+    projected_stamps_after: int
+    stamp_rewards_earned: int
+    visit_will_be_recorded: bool
+    visit_already_counted: bool
+    projected_visit_streak: int
     requires_approval: bool
 
 
@@ -353,6 +380,27 @@ def accrual_preview_response(value: AccrualPreviewView) -> AccrualPreviewRespons
         projected_balance_after=value.projected_balance_after,
         limited_by_operation=value.limited_by_operation,
         limited_by_daily_total=value.limited_by_daily_total,
+        requires_approval=value.requires_approval,
+    )
+
+
+def purchase_preview_response(value: PurchasePreviewView) -> PurchasePreviewResponse:
+    return PurchasePreviewResponse(
+        user_id=value.user_id,
+        purchase_amount_minor=value.purchase_amount_minor,
+        raw_points=value.raw_points,
+        awarded_points=value.awarded_points,
+        balance_before=value.balance_before,
+        projected_balance_after=value.projected_balance_after,
+        limited_by_operation=value.limited_by_operation,
+        limited_by_daily_total=value.limited_by_daily_total,
+        stamps_to_add=value.stamps_to_add,
+        stamps_before=value.stamps_before,
+        projected_stamps_after=value.projected_stamps_after,
+        stamp_rewards_earned=value.stamp_rewards_earned,
+        visit_will_be_recorded=value.visit_will_be_recorded,
+        visit_already_counted=value.visit_already_counted,
+        projected_visit_streak=value.projected_visit_streak,
         requires_approval=value.requires_approval,
     )
 

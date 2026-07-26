@@ -7,14 +7,14 @@ RUN_BACKEND := $(COMPOSE) run --rm backend
 RUN_FRONTEND := $(COMPOSE) run --rm frontend
 SEED_FILE ?= /app/configs/demo-seed.json
 
-.PHONY: help install dev up down logs migrate migration seed create-owner test lint format format-check typecheck backup restore compose-check prod-up prod-down prod-logs
+.PHONY: help install dev up down logs migrate migration seed create-owner test lint format format-check typecheck backup restore deploy compose-check prod-up prod-down prod-logs
 
 help: ## Show the supported developer commands.
 	@echo "Usage: make <target> [NAME=value]"
 	@echo ""
 	@echo "Core: install dev up down logs migrate migration seed create-owner"
 	@echo "Quality: test lint format format-check typecheck compose-check"
-	@echo "Operations: backup restore prod-up prod-down prod-logs"
+	@echo "Operations: backup restore deploy prod-up prod-down prod-logs"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make migration MESSAGE=add_reward_expiry"
@@ -78,6 +78,9 @@ restore: ## Restore PostgreSQL and media; requires BACKUP=path CONFIRM=YES.
 	@$(if $(strip $(BACKUP)),,$(error BACKUP is required))
 	@$(if $(filter YES,$(CONFIRM)),,$(error Restoring replaces data; pass CONFIRM=YES))
 	ENV_FILE="$(ENV_FILE)" COMPOSE_FILE="$(COMPOSE_FILE)" sh ./scripts/restore.sh --from "$(BACKUP)" --yes
+
+deploy: ## Safely update the current production branch; optionally pass BRANCH=main.
+	ENV_FILE="$(ENV_FILE)" COMPOSE_FILE="compose.prod.yaml" sh ./scripts/deploy.sh $(if $(strip $(BRANCH)),--branch "$(BRANCH)",)
 
 compose-check: ## Validate development and production Compose models.
 	docker compose --env-file "$(ENV_FILE)" -f compose.yaml config --quiet

@@ -1,6 +1,7 @@
 import { ApiError } from "./client";
 import type {
   AccrualPreview,
+  AdminFeedback,
   AdminOverview,
   AdminUser,
   AuditEvent,
@@ -10,10 +11,14 @@ import type {
   ListResponse,
   LoyaltySettings,
   MenuCategory,
+  MenuCategoryDraft,
   MenuItem,
+  MenuItemDraft,
   OperationResult,
   Promotion,
+  PromotionDraft,
   PublicMoreData,
+  RedemptionPreview,
   Reward,
   StaffClient,
   TipProfile,
@@ -66,7 +71,7 @@ let history: HistoryItem[] = [
   },
 ];
 
-const rewards: Reward[] = [
+let rewards: Reward[] = [
   {
     id: "reward-1",
     title: "Сироп в подарок",
@@ -107,7 +112,7 @@ let promotions: Promotion[] = [
   },
 ];
 
-const categories: MenuCategory[] = [
+let categories: MenuCategory[] = [
   {
     id: "cat-coffee",
     name: "Кофе",
@@ -177,15 +182,34 @@ let settings: LoyaltySettings = {
   points_enabled: true,
   currency_name: "бобы",
   rubles_per_point: 10,
+  redemption_rubles_per_point: 1,
   minimum_purchase_minor: 10000,
+  maximum_purchase_minor: 1_000_000,
   rounding: "floor",
   max_redemption_percent: 30,
+  minimum_redemption_points: 1,
+  welcome_bonus_points: 20,
+  points_validity_days: null,
+  daily_accrual_limit_points: null,
+  operation_accrual_limit_points: null,
+  large_operation_threshold_minor: 100_000,
+  large_operation_requires_approval: true,
   visit_enabled: true,
   visit_goal: 5,
+  visits_must_be_consecutive: true,
+  visit_daily_limit: 1,
   timezone: "Europe/Moscow",
   business_day_boundary: "04:00",
+  visit_allowed_misses: 1,
+  visit_reset_on_miss: true,
+  visit_reward_validity_days: 30,
+  visit_restart_cycle: true,
   stamps_enabled: true,
   stamp_goal: 9,
+  stamps_per_purchase: 1,
+  stamp_operation_limit: 1,
+  stamp_reward_validity_days: 30,
+  reset_stamps_after_reward: true,
 };
 
 let adminUsers: AdminUser[] = [
@@ -250,6 +274,32 @@ let events: AuditEvent[] = [
     severity: "warning",
     suspicious: true,
     created_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+  },
+];
+
+let feedback: AdminFeedback[] = [
+  {
+    id: "feedback-demo-1",
+    user_id: "user-anna",
+    user_display_name: "Анна",
+    rating: 5,
+    category: "service",
+    message: "Очень тёплая команда и отличный фильтр.",
+    may_contact: true,
+    status: "new",
+    created_at: new Date(Date.now() - 75 * 60_000).toISOString(),
+  },
+  {
+    id: "feedback-demo-2",
+    user_id: "user-demo",
+    user_display_name: "Ярослав",
+    rating: 3,
+    category: "application",
+    message: "Хочется быстрее находить историю начислений.",
+    may_contact: false,
+    status: "in_progress",
+    internal_note: "Проверить навигацию после следующего релиза.",
+    created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
   },
 ];
 
@@ -357,11 +407,14 @@ export const demoApi = {
     return {
       user_id: card.user_id,
       display_name: card.display_name,
+      short_code: card.short_code,
       masked_short_code: `••••${card.short_code.slice(-4)}`,
       balance_points: card.balance_points,
       currency_name: card.currency_name,
       visit_streak: card.visit_streak,
+      visit_goal: card.visit_goal,
       stamps: card.stamps,
+      stamp_goal: card.stamp_goal,
       available_rewards: rewards.filter((item) => item.status === "active"),
       blocked: card.blocked,
       suspicious: false,
@@ -416,6 +469,189 @@ export const demoApi = {
       status: preview.requires_approval ? "pending" : "completed",
       delta_points: preview.points_to_accrue,
       balance_after: preview.balance_after,
+      created_at: operation.created_at,
+    };
+  },
+  async previewRedemption(payload: {
+    user_id: string;
+    purchase_amount_minor: number;
+    requested_points: number;
+  }): Promise<RedemptionPreview> {
+    await wait();
+    const maximum = Math.min(
+      card.balance_points,
+      Math.floor(
+        (payload.purchase_amount_minor / 100) *
+          (settings.max_redemption_percent / 100),
+      ),
+    );
+    if (payload.requested_points > maximum)
+      throw new ApiError(`Можно списать не больше ${maximum} баллов`, {
+        status: 409,
+        code: "redemption_limit",
+      });
+    return {
+      user_id: payload.user_id,
+      customer_name: card.display_name,
+      purchase_amount_minor: payload.purchase_amount_minor,
+      requested_points: payload.requested_points,
+      discount_minor: payload.requested_points * 100,
+      maximum_points_for_purchase: maximum,
+      balance_before: card.balance_points,
+      balance_after: card.balance_points - payload.requested_points,
+    };
+  },
+  async confirmRedemption(payload: {
+    user_id: string;
+    purchase_amount_minor: number;
+    requested_points: number;
+  }): Promise<OperationResult> {
+    const preview = await this.previewRedemption(payload);
+    card = {
+      ...card,
+      balance_points: preview.balance_after,
+      updated_at: now(),
+    };
+    const operation: HistoryItem = {
+      id: `op-${Date.now()}`,
+      type: "points_redemption",
+      description: `Списано ${payload.requested_points} баллов`,
+      delta_points: -payload.requested_points,
+      balance_after: preview.balance_after,
+      created_at: now(),
+      status: "completed",
+    };
+    history = [operation, ...history];
+    return {
+      operation_id: operation.id,
+      operation_type: operation.type,
+      status: "completed",
+      delta_points: operation.delta_points ?? 0,
+      balance_after: preview.balance_after,
+      created_at: operation.created_at,
+    };
+  },
+  async markVisit(userId: string): Promise<OperationResult> {
+    void userId;
+    await wait();
+    card = { ...card, visit_streak: card.visit_streak + 1, updated_at: now() };
+    const operation: HistoryItem = {
+      id: `visit-${Date.now()}`,
+      type: "visit_mark",
+      description: "Отмечено посещение",
+      delta_points: 0,
+      balance_after: card.balance_points,
+      created_at: now(),
+      status: "completed",
+    };
+    history = [operation, ...history];
+    return {
+      operation_id: operation.id,
+      operation_type: operation.type,
+      status: "completed",
+      delta_points: 0,
+      balance_after: card.balance_points,
+      created_at: operation.created_at,
+      streak_after: card.visit_streak,
+    };
+  },
+  async addStamp(userId: string): Promise<OperationResult> {
+    void userId;
+    await wait();
+    card = { ...card, stamps: card.stamps + 1, updated_at: now() };
+    const operation: HistoryItem = {
+      id: `stamp-${Date.now()}`,
+      type: "stamp_added",
+      description: "Добавлен штамп",
+      delta_points: 0,
+      balance_after: card.balance_points,
+      created_at: now(),
+      status: "completed",
+    };
+    history = [operation, ...history];
+    return {
+      operation_id: operation.id,
+      operation_type: operation.type,
+      status: "completed",
+      delta_points: 0,
+      balance_after: card.balance_points,
+      created_at: operation.created_at,
+      stamps_after: card.stamps,
+    };
+  },
+  async redeemReward(rewardId: string): Promise<OperationResult> {
+    await wait();
+    const reward = rewards.find(
+      (candidate) => candidate.id === rewardId && candidate.status === "active",
+    );
+    if (!reward)
+      throw new ApiError("Активная награда не найдена", {
+        status: 404,
+        code: "reward_not_found",
+      });
+    rewards = rewards.map((candidate) =>
+      candidate.id === rewardId
+        ? { ...candidate, status: "redeemed", redeemed_at: now() }
+        : candidate,
+    );
+    const operation: HistoryItem = {
+      id: `reward-${Date.now()}`,
+      type: "reward_redeemed",
+      description: `Погашена награда «${reward.title}»`,
+      delta_points: 0,
+      balance_after: card.balance_points,
+      created_at: now(),
+      status: "completed",
+    };
+    history = [operation, ...history];
+    return {
+      operation_id: operation.id,
+      operation_type: operation.type,
+      status: "completed",
+      delta_points: 0,
+      balance_after: card.balance_points,
+      created_at: operation.created_at,
+      reward_ids: [rewardId],
+    };
+  },
+  async reverseOperation(
+    operationId: string,
+    reason: string,
+  ): Promise<OperationResult> {
+    await wait();
+    if (!reason.trim())
+      throw new ApiError("Укажите причину отмены", {
+        status: 422,
+        code: "reason_required",
+      });
+    const original = history.find((item) => item.id === operationId);
+    if (!original)
+      throw new ApiError("Операция не найдена", {
+        status: 404,
+        code: "operation_not_found",
+      });
+    const delta = -(original.delta_points ?? 0);
+    card = {
+      ...card,
+      balance_points: card.balance_points + delta,
+      updated_at: now(),
+    };
+    const operation: HistoryItem = {
+      id: `reverse-${Date.now()}`,
+      type: "operation_reversal",
+      description: `Операция отменена: ${reason.trim()}`,
+      delta_points: delta,
+      balance_after: card.balance_points,
+      created_at: now(),
+      status: "completed",
+    };
+    history = [operation, ...history];
+    return {
+      operation_id: operation.id,
+      operation_type: operation.type,
+      status: "completed",
+      delta_points: delta,
+      balance_after: card.balance_points,
       created_at: operation.created_at,
     };
   },
@@ -480,6 +716,39 @@ export const demoApi = {
       ),
     );
   },
+  async getAdminFeedback(status?: string) {
+    await wait();
+    return list(
+      status
+        ? feedback.filter((item) => item.status === status)
+        : [...feedback],
+    );
+  },
+  async updateAdminFeedback(
+    id: string,
+    payload: {
+      status: AdminFeedback["status"];
+      internal_note?: string | null;
+    },
+  ) {
+    await wait();
+    const item = feedback.find((candidate) => candidate.id === id);
+    if (!item)
+      throw new ApiError("Отзыв не найден", {
+        status: 404,
+        code: "feedback_not_found",
+      });
+    const updated: AdminFeedback = {
+      ...item,
+      ...payload,
+      resolved_at:
+        payload.status === "resolved" ? new Date().toISOString() : null,
+    };
+    feedback = feedback.map((candidate) =>
+      candidate.id === id ? updated : candidate,
+    );
+    return { ...updated };
+  },
   async getSettings() {
     await wait();
     return { ...settings };
@@ -497,6 +766,35 @@ export const demoApi = {
     );
     return updated;
   },
+  async saveMenuCategory(
+    category: MenuCategory | null,
+    payload: MenuCategoryDraft,
+  ) {
+    await wait();
+    const updated: MenuCategory = {
+      id: category?.id ?? `category-${Date.now()}`,
+      ...payload,
+    };
+    categories = category
+      ? categories.map((candidate) =>
+          candidate.id === category.id ? updated : candidate,
+        )
+      : [...categories, updated];
+    return { ...updated };
+  },
+  async saveMenuItem(item: MenuItem | null, payload: MenuItemDraft) {
+    await wait();
+    const updated: MenuItem = {
+      id: item?.id ?? `item-${Date.now()}`,
+      ...payload,
+    };
+    menuItems = item
+      ? menuItems.map((candidate) =>
+          candidate.id === item.id ? updated : candidate,
+        )
+      : [...menuItems, updated];
+    return { ...updated };
+  },
   async getAdminPromotions() {
     await wait();
     return list([...promotions]);
@@ -504,6 +802,30 @@ export const demoApi = {
   async publishPromotion(promotion: Promotion) {
     await wait();
     const updated: Promotion = { ...promotion, status: "published" };
+    promotions = promotions.map((candidate) =>
+      candidate.id === promotion.id ? updated : candidate,
+    );
+    return updated;
+  },
+  async savePromotion(promotion: Promotion | null, payload: PromotionDraft) {
+    await wait();
+    const updated: Promotion = {
+      id: promotion?.id ?? `promotion-${Date.now()}`,
+      status: promotion?.status ?? "draft",
+      ...payload,
+      created_at: promotion?.created_at ?? now(),
+      updated_at: now(),
+    };
+    promotions = promotion
+      ? promotions.map((candidate) =>
+          candidate.id === promotion.id ? updated : candidate,
+        )
+      : [...promotions, updated];
+    return { ...updated };
+  },
+  async archivePromotion(promotion: Promotion) {
+    await wait();
+    const updated: Promotion = { ...promotion, status: "archived" };
     promotions = promotions.map((candidate) =>
       candidate.id === promotion.id ? updated : candidate,
     );

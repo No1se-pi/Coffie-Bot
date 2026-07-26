@@ -200,6 +200,9 @@ class CardLookupView:
     visit_goal: int
     stamp_count: int
     stamp_goal: int
+    currency_name: str
+    active_rewards: tuple[Reward, ...]
+    recent_operations: tuple[LoyaltyOperation, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +290,18 @@ class LoyaltyService:
             UserStatus.ANONYMIZED,
         }:
             _raise_not_found("Активная карта не найдена")
+        rewards = await self._repository.list_rewards(
+            user_id=context.user.id,
+            reward_status=RewardStatus.ACTIVE,
+            page=1,
+            page_size=20,
+        )
+        operations = await self._repository.list_operations(
+            user_id=context.user.id,
+            actor_staff_id=None,
+            page=1,
+            page_size=5,
+        )
         return CardLookupView(
             user_id=context.user.id,
             card_id=context.card.id,
@@ -298,6 +313,9 @@ class LoyaltyService:
             visit_goal=context.settings.visit_required_count,
             stamp_count=context.state.stamp_count,
             stamp_goal=context.settings.stamp_required_count,
+            currency_name=context.settings.currency_name,
+            active_rewards=tuple(rewards.items),
+            recent_operations=tuple(operations.items),
         )
 
     async def preview_accrual(

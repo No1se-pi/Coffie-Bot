@@ -27,7 +27,12 @@ from app.models.loyalty import (
     PointTransaction,
     UserLoyaltyState,
 )
-from app.repositories.loyalty import LoyaltyContext, OperationArtifacts
+from app.repositories.loyalty import (
+    LoyaltyContext,
+    OperationArtifacts,
+    OperationPage,
+    RewardPage,
+)
 from app.security.rbac import Actor
 from app.services.loyalty import LoyaltyRepositoryPort, LoyaltyService
 
@@ -87,6 +92,22 @@ class FakeRepository:
         idempotency_key: str,
     ) -> LoyaltyOperation | None:
         return self.operations.get((operation_type, idempotency_key))
+
+    async def lookup_card(
+        self,
+        *,
+        qr_token: str | None,
+        short_code: str | None,
+    ) -> LoyaltyContext | None:
+        if qr_token == self.context.card.qr_token or short_code == self.context.card.short_code:
+            return self.context
+        return None
+
+    async def list_rewards(self, **_kwargs: object) -> RewardPage:
+        return RewardPage(items=[], total=0)
+
+    async def list_operations(self, **_kwargs: object) -> OperationPage:
+        return OperationPage(items=[], total=0)
 
     async def get_context(
         self,
@@ -213,6 +234,25 @@ def staff_actor(*permissions: PermissionCode) -> Actor:
         staff_member_id=uuid4(),
         permissions=frozenset(permissions),
     )
+
+
+@pytest.mark.asyncio
+async def test_lookup_card_returns_operational_customer_summary() -> None:
+    context = loyalty_context(points_balance=37)
+    repository = FakeRepository(context)
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+
+    result = await service.lookup_card(
+        staff_actor(PermissionCode.CARD_LOOKUP),
+        qr_token=context.card.qr_token,
+        short_code=None,
+    )
+
+    assert result.user_id == context.user.id
+    assert result.points_balance == 37
+    assert result.currency_name == context.settings.currency_name
+    assert result.active_rewards == ()
+    assert result.recent_operations == ()
 
 
 @pytest.mark.asyncio

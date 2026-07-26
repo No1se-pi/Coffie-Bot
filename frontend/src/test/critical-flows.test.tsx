@@ -5,18 +5,28 @@ import { describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
 import type {
   AccrualPreview,
+  AdminFeedback,
+  AdminUserListItem,
   AdminUser,
   CardData,
+  MenuCategory,
   OperationResult,
   StaffClient,
 } from "../api/types";
 import { CardPage, HomePage } from "../pages/customer";
 import {
   AccrualPanel,
+  QuickOperationsPanel,
   ScannerPage,
   StaffWorkspaceProvider,
 } from "../pages/staff";
-import { AdminAdjustmentPage } from "../pages/admin";
+import {
+  AdminAdjustmentPage,
+  AdminFeedbackPage,
+  AdminMenuPage,
+  AdminUsersPage,
+} from "../pages/admin";
+import { applyTheme, readTheme } from "../theme";
 
 const card: CardData = {
   user_id: "user-1",
@@ -36,11 +46,14 @@ const card: CardData = {
 const client: StaffClient = {
   user_id: "user-1",
   display_name: "Анна",
+  short_code: "BEAN2026",
   masked_short_code: "••••2026",
   balance_points: 284,
   currency_name: "бобов",
   visit_streak: 3,
+  visit_goal: 5,
   stamps: 6,
+  stamp_goal: 9,
   available_rewards: [],
   blocked: false,
   suspicious: false,
@@ -141,6 +154,29 @@ describe("critical Mini App flows", () => {
     });
   });
 
+  it("requires explicit confirmation before marking a visit", async () => {
+    const user = userEvent.setup();
+    const markVisit = vi.spyOn(coffeeApi, "markVisit").mockResolvedValue({
+      operation_id: "visit-1",
+      operation_type: "visit_mark",
+      status: "completed",
+      delta_points: 0,
+      balance_after: 284,
+      created_at: "2026-07-21T10:00:00Z",
+      streak_after: 4,
+    });
+    const completed = vi.fn();
+    render(<QuickOperationsPanel client={client} onCompleted={completed} />);
+
+    await user.click(screen.getByRole("button", { name: "Посещение" }));
+    expect(markVisit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Подтвердить" }));
+
+    expect(await screen.findByText("Операция выполнена")).toBeInTheDocument();
+    expect(markVisit).toHaveBeenCalledWith("user-1");
+    expect(completed).toHaveBeenCalledOnce();
+  });
+
   it("shows a safe retryable error state", async () => {
     vi.spyOn(coffeeApi, "getHome").mockRejectedValue(
       new Error("Сервис временно недоступен"),
@@ -211,5 +247,145 @@ describe("critical Mini App flows", () => {
       delta_points: 50,
       reason: "Компенсация за ошибку",
     });
+  });
+
+  it("shows only list-safe client fields before opening a client", async () => {
+    const clientItem: AdminUserListItem = {
+      id: "user-1",
+      telegram_id: "10001",
+      display_name: "Анна",
+      username: "anna",
+      status: "active",
+      created_at: "2026-07-01T10:00:00Z",
+      last_seen_at: "2026-07-21T10:00:00Z",
+    };
+    vi.spyOn(coffeeApi, "getAdminUsers").mockResolvedValue({
+      items: [clientItem],
+      page: 1,
+      page_size: 50,
+      total: 1,
+    });
+
+    render(
+      <MemoryRouter>
+        <AdminUsersPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Анна")).toBeInTheDocument();
+    expect(screen.getByText("@anna")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Открыть клиента" }),
+    ).toHaveAttribute("href", "/admin/users/user-1/adjust");
+    expect(screen.queryByText(/баллов/i)).not.toBeInTheDocument();
+  });
+
+  it("lets the owner process a customer review", async () => {
+    const user = userEvent.setup();
+    const feedback: AdminFeedback = {
+      id: "feedback-1",
+      user_id: "user-1",
+      user_display_name: "Анна",
+      rating: 2,
+      category: "service",
+      message: "Долго ждала напиток",
+      may_contact: true,
+      status: "new",
+      created_at: "2026-07-21T10:00:00Z",
+    };
+    vi.spyOn(coffeeApi, "getAdminFeedback").mockResolvedValue({
+      items: [feedback],
+      page: 1,
+      page_size: 50,
+      total: 1,
+    });
+    const update = vi
+      .spyOn(coffeeApi, "updateAdminFeedback")
+      .mockResolvedValue({
+        ...feedback,
+        status: "in_progress",
+        internal_note: "Связаться завтра",
+      });
+
+    render(
+      <MemoryRouter>
+        <AdminFeedbackPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Долго ждала напиток")).toBeInTheDocument();
+    await user.selectOptions(
+      screen.getAllByLabelText("Статус")[1]!,
+      "in_progress",
+    );
+    await user.type(
+      screen.getByLabelText("Внутренняя заметка"),
+      "Связаться завтра",
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(update).toHaveBeenCalledWith("feedback-1", {
+      status: "in_progress",
+      internal_note: "Связаться завтра",
+    });
+  });
+
+  it("creates a menu item from the owner content editor", async () => {
+    const user = userEvent.setup();
+    const category: MenuCategory = {
+      id: "category-1",
+      name: "Кофе",
+      description: "Классика",
+      sort_order: 1,
+      visible: true,
+    };
+    vi.spyOn(coffeeApi, "getAdminMenu").mockResolvedValue({
+      categories: [category],
+      items: [],
+    });
+    const save = vi.spyOn(coffeeApi, "saveMenuItem").mockResolvedValue({
+      id: "item-1",
+      category_id: category.id,
+      name: "Капучино",
+      price_minor: 29000,
+      labels: [],
+      available: true,
+      visible: true,
+      sort_order: 0,
+    });
+
+    render(
+      <MemoryRouter>
+        <AdminMenuPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Кофе")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Добавить позицию" }));
+    await user.type(screen.getByLabelText("Название позиции"), "Капучино");
+    await user.type(screen.getByLabelText("Цена, ₽"), "290");
+    await user.click(screen.getByRole("button", { name: "Сохранить позицию" }));
+
+    expect(save).toHaveBeenCalledWith(null, {
+      category_id: "category-1",
+      name: "Капучино",
+      description: null,
+      price_minor: 29000,
+      old_price_minor: null,
+      composition: null,
+      volume: null,
+      labels: [],
+      available: true,
+      visible: true,
+      sort_order: 0,
+    });
+  });
+
+  it("persists an explicit visual theme", () => {
+    applyTheme("matcha");
+
+    expect(document.documentElement.dataset.appTheme).toBe("matcha");
+    expect(readTheme()).toBe("matcha");
+    window.localStorage.removeItem("coffie.theme");
   });
 });

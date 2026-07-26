@@ -25,14 +25,25 @@ interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
+function operationalRoles(actor: Actor): Role[] {
+  const roles = [...actor.available_roles];
+  if (
+    (actor.role === "admin" || actor.role === "owner") &&
+    !roles.includes("staff")
+  ) {
+    const elevatedIndex = roles.indexOf(actor.role);
+    roles.splice(elevatedIndex < 0 ? roles.length : elevatedIndex, 0, "staff");
+  }
+  return roles;
+}
+
 function preferredRole(session: AuthSession): Role {
+  const roles = operationalRoles(session.actor);
   const stored = window.sessionStorage.getItem(
     "coffie.active-role",
   ) as Role | null;
-  if (stored && session.actor.available_roles.includes(stored)) return stored;
-  return session.actor.available_roles.includes("customer")
-    ? "customer"
-    : session.actor.role;
+  if (stored && roles.includes(stored)) return stored;
+  return roles.includes("customer") ? "customer" : session.actor.role;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -85,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [attempt]);
 
   const availableRoles = useMemo<Role[]>(
-    () => actor?.available_roles ?? ["customer"],
+    () => (actor ? operationalRoles(actor) : ["customer"]),
     [actor],
   );
   const setActiveRole = useCallback(

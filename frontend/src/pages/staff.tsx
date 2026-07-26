@@ -12,6 +12,7 @@ import { coffeeApi } from "../api/client";
 import type {
   AccrualPreview,
   OperationResult,
+  RedemptionPreview,
   StaffClient,
   TipProfile,
 } from "../api/types";
@@ -231,7 +232,7 @@ export function ScannerPage() {
 }
 
 export function ClientPreviewPage() {
-  const { client } = useStaffWorkspace();
+  const { client, setClient } = useStaffWorkspace();
   if (!client)
     return (
       <Page title="Карточка клиента">
@@ -246,6 +247,11 @@ export function ClientPreviewPage() {
         />
       </Page>
     );
+  const refreshClient = async () => {
+    setClient(
+      await coffeeApi.lookupStaffClient({ short_code: client.short_code }),
+    );
+  };
   return (
     <Page
       title={client.display_name}
@@ -282,38 +288,30 @@ export function ClientPreviewPage() {
           error={new Error("Операции с заблокированной картой недоступны")}
         />
       ) : (
-        <AccrualPanel client={client} />
+        <AccrualPanel
+          client={client}
+          onCompleted={() => void refreshClient()}
+        />
       )}
       <div className="metrics-grid">
-        <Metric value={client.visit_streak} label="визита подряд" />
-        <Metric value={client.stamps} label="штампов" />
+        <Metric
+          value={`${client.visit_streak}/${client.visit_goal}`}
+          label="визитов"
+        />
+        <Metric
+          value={`${client.stamps}/${client.stamp_goal}`}
+          label="штампов"
+        />
         <Metric
           value={client.available_rewards.length}
           label="наград"
           tone="accent"
         />
       </div>
-      <Panel>
-        <h2>Другие действия</h2>
-        <div className="action-grid">
-          <button type="button">
-            <span>✓</span>Посещение
-          </button>
-          <button type="button">
-            <span>●</span>Штамп
-          </button>
-          <button type="button">
-            <span>−</span>Списать
-          </button>
-          <button type="button">
-            <span>◇</span>Погасить награду
-          </button>
-        </div>
-        <p className="muted">
-          Действия будут доступны после подключения соответствующих confirm
-          endpoints.
-        </p>
-      </Panel>
+      <QuickOperationsPanel
+        client={client}
+        onCompleted={() => void refreshClient()}
+      />
       <Panel>
         <div className="section-heading">
           <h2>Последние операции</h2>
@@ -340,7 +338,299 @@ export function ClientPreviewPage() {
   );
 }
 
-export function AccrualPanel({ client }: { client: StaffClient }) {
+export function QuickOperationsPanel({
+  client,
+  onCompleted,
+}: {
+  client: StaffClient;
+  onCompleted: (operation: OperationResult) => void;
+}) {
+  const [mode, setMode] = useState<
+    "visit" | "stamp" | "redemption" | "rewards" | null
+  >(null);
+  const [amount, setAmount] = useState("");
+  const [points, setPoints] = useState("");
+  const [redemption, setRedemption] = useState<RedemptionPreview | null>(null);
+  const [rewardId, setRewardId] = useState<string | null>(null);
+  const [result, setResult] = useState<OperationResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const complete = (operation: OperationResult) => {
+    setResult(operation);
+    onCompleted(operation);
+  };
+  const runSimple = async (kind: "visit" | "stamp") => {
+    setLoading(true);
+    setError(null);
+    try {
+      complete(
+        kind === "visit"
+          ? await coffeeApi.markVisit(client.user_id)
+          : await coffeeApi.addStamp(client.user_id),
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось выполнить операцию",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+  const previewRedemption = async (event: FormEvent) => {
+    event.preventDefault();
+    const purchaseAmount = rublesToMinor(amount);
+    const requestedPoints = Number(points);
+    if (
+      purchaseAmount == null ||
+      !Number.isInteger(requestedPoints) ||
+      requestedPoints <= 0
+    ) {
+      setError("Укажите сумму покупки и целое количество баллов");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const preview = await coffeeApi.previewRedemption({
+        user_id: client.user_id,
+        purchase_amount_minor: purchaseAmount,
+        requested_points: requestedPoints,
+      });
+      setRedemption({ ...preview, customer_name: client.display_name });
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось рассчитать списание",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+  const confirmRedemption = async () => {
+    if (!redemption) return;
+    setLoading(true);
+    setError(null);
+    try {
+      complete(
+        await coffeeApi.confirmRedemption({
+          user_id: client.user_id,
+          purchase_amount_minor: redemption.purchase_amount_minor,
+          requested_points: redemption.requested_points,
+        }),
+      );
+      setRedemption(null);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось списать баллы",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+  const redeemReward = async () => {
+    if (!rewardId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      complete(await coffeeApi.redeemReward(rewardId));
+      setRewardId(null);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось погасить награду",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+  const reset = () => {
+    setMode(null);
+    setAmount("");
+    setPoints("");
+    setRedemption(null);
+    setRewardId(null);
+    setResult(null);
+    setError(null);
+  };
+
+  return (
+    <Panel className="operation-panel">
+      <h2>Другие действия</h2>
+      {result ? (
+        <div className="operation-success" role="status">
+          <span>✓</span>
+          <h3>Операция выполнена</h3>
+          <p>{result.audit_message || "Изменения записаны в журнал."}</p>
+          <Button variant="secondary" onClick={reset}>
+            Готово
+          </Button>
+        </div>
+      ) : mode === null ? (
+        <div className="action-grid">
+          <button type="button" onClick={() => setMode("visit")}>
+            <span aria-hidden="true">✓</span>Посещение
+          </button>
+          <button type="button" onClick={() => setMode("stamp")}>
+            <span aria-hidden="true">●</span>Штамп
+          </button>
+          <button type="button" onClick={() => setMode("redemption")}>
+            <span aria-hidden="true">−</span>Списать
+          </button>
+          <button type="button" onClick={() => setMode("rewards")}>
+            <span aria-hidden="true">◇</span>Погасить награду
+          </button>
+        </div>
+      ) : mode === "visit" || mode === "stamp" ? (
+        <div className="confirm-card">
+          <h3>
+            {mode === "visit" ? "Отметить посещение?" : "Добавить один штамп?"}
+          </h3>
+          <p>Клиент: {client.display_name}. Действие будет записано в аудит.</p>
+          <div className="action-row">
+            <Button
+              variant="secondary"
+              onClick={() => setMode(null)}
+              disabled={loading}
+            >
+              Отмена
+            </Button>
+            <Button onClick={() => void runSimple(mode)} disabled={loading}>
+              {loading ? "Подтверждаем…" : "Подтвердить"}
+            </Button>
+          </div>
+        </div>
+      ) : mode === "redemption" ? (
+        redemption ? (
+          <div className="confirm-card" aria-label="Предпросмотр списания">
+            <h3>Проверьте списание</h3>
+            <dl>
+              <div>
+                <dt>Покупка</dt>
+                <dd>{formatMoney(redemption.purchase_amount_minor)}</dd>
+              </div>
+              <div>
+                <dt>Баллов</dt>
+                <dd className="negative">−{redemption.requested_points}</dd>
+              </div>
+              <div>
+                <dt>Скидка</dt>
+                <dd>{formatMoney(redemption.discount_minor)}</dd>
+              </div>
+              <div className="confirm-card__total">
+                <dt>Новый баланс</dt>
+                <dd>{redemption.balance_after}</dd>
+              </div>
+            </dl>
+            <div className="action-row">
+              <Button
+                variant="secondary"
+                onClick={() => setRedemption(null)}
+                disabled={loading}
+              >
+                Изменить
+              </Button>
+              <Button
+                onClick={() => void confirmRedemption()}
+                disabled={loading}
+              >
+                {loading ? "Списываем…" : "Подтвердить списание"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <form
+            className="form"
+            onSubmit={(event) => void previewRedemption(event)}
+          >
+            <h3>Списать баллы</h3>
+            <Field label="Сумма покупки, ₽">
+              <input
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+                inputMode="decimal"
+              />
+            </Field>
+            <Field
+              label="Сколько баллов списать"
+              hint={`Доступно: ${client.balance_points}`}
+            >
+              <input
+                value={points}
+                onChange={(event) => setPoints(event.target.value)}
+                inputMode="numeric"
+              />
+            </Field>
+            <div className="action-row">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setMode(null)}
+              >
+                Отмена
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? "Рассчитываем…" : "Рассчитать"}
+              </Button>
+            </div>
+          </form>
+        )
+      ) : (
+        <div>
+          <h3>Активные награды</h3>
+          {client.available_rewards.length ? (
+            <div className="reward-action-list">
+              {client.available_rewards.map((reward) => (
+                <label key={reward.id} className="reward-action-list__item">
+                  <input
+                    type="radio"
+                    name="reward"
+                    checked={rewardId === reward.id}
+                    onChange={() => setRewardId(reward.id)}
+                  />
+                  <span>
+                    <strong>{reward.title}</strong>
+                    <small>{reward.description}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">У клиента нет активных наград.</p>
+          )}
+          <div className="action-row">
+            <Button variant="secondary" onClick={() => setMode(null)}>
+              Назад
+            </Button>
+            <Button
+              onClick={() => void redeemReward()}
+              disabled={!rewardId || loading}
+            >
+              {loading ? "Погашаем…" : "Подтвердить погашение"}
+            </Button>
+          </div>
+        </div>
+      )}
+      {error && (
+        <div className="inline-error" role="alert">
+          {error}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+export function AccrualPanel({
+  client,
+  onCompleted,
+}: {
+  client: StaffClient;
+  onCompleted?: (operation: OperationResult) => void;
+}) {
   const [amount, setAmount] = useState("");
   const [preview, setPreview] = useState<AccrualPreview | null>(null);
   const [result, setResult] = useState<OperationResult | null>(null);
@@ -358,12 +648,11 @@ export function AccrualPanel({ client }: { client: StaffClient }) {
     }
     setLoading(true);
     try {
-      setPreview(
-        await coffeeApi.previewAccrual({
-          user_id: client.user_id,
-          purchase_amount_minor: purchaseMinor,
-        }),
-      );
+      const next = await coffeeApi.previewAccrual({
+        user_id: client.user_id,
+        purchase_amount_minor: purchaseMinor,
+      });
+      setPreview({ ...next, customer_name: client.display_name });
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -386,6 +675,7 @@ export function AccrualPanel({ client }: { client: StaffClient }) {
       });
       setResult(operation);
       setPreview(null);
+      onCompleted?.(operation);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -419,7 +709,7 @@ export function AccrualPanel({ client }: { client: StaffClient }) {
               : "Баллы начислены"}
           </h3>
           <strong>+{result.delta_points}</strong>
-          <p>Новый баланс: {result.balance_after}</p>
+          <p>Новый баланс: {result.balance_after ?? client.balance_points}</p>
           <Button variant="secondary" onClick={reset}>
             Новая операция
           </Button>
@@ -498,6 +788,32 @@ export function AccrualPanel({ client }: { client: StaffClient }) {
 
 export function RecentOperationsPage() {
   const resource = useResource(coffeeApi.getRecentOperations);
+  const [reversingId, setReversingId] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reverse = async () => {
+    if (!reversingId || reason.trim().length < 3) {
+      setError("Укажите понятную причину отмены");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await coffeeApi.reverseOperation(reversingId, reason.trim());
+      setReversingId(null);
+      setReason("");
+      await resource.reload();
+    } catch (reasonValue) {
+      setError(
+        reasonValue instanceof Error
+          ? reasonValue.message
+          : "Не удалось отменить операцию",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
     <Page title="Мои операции" eyebrow="Последние действия">
       {resource.loading && <Loader />}
@@ -522,6 +838,19 @@ export function RecentOperationsPage() {
                     {item.delta_points}
                   </strong>
                 )}
+                {item.status === "completed" &&
+                  item.type !== "operation_reversal" && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setReversingId(item.id);
+                        setReason("");
+                        setError(null);
+                      }}
+                    >
+                      Отменить
+                    </Button>
+                  )}
               </article>
             ))}
           </div>
@@ -531,6 +860,34 @@ export function RecentOperationsPage() {
             text="Здесь появятся только доступные вашей роли операции."
           />
         ))}
+      {reversingId && (
+        <Panel>
+          <h2>Отмена операции</h2>
+          <p className="muted">
+            Будет создана компенсирующая операция. Исходная запись сохранится.
+          </p>
+          <Field label="Причина отмены">
+            <textarea
+              rows={3}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </Field>
+          {error && <div className="inline-error">{error}</div>}
+          <div className="action-row">
+            <Button variant="secondary" onClick={() => setReversingId(null)}>
+              Назад
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => void reverse()}
+              disabled={loading}
+            >
+              {loading ? "Отменяем…" : "Подтвердить отмену"}
+            </Button>
+          </div>
+        </Panel>
+      )}
     </Page>
   );
 }

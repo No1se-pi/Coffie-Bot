@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { coffeeApi } from "../api/client";
-import type { AdjustmentPreview, LoyaltySettings } from "../api/types";
+import type {
+  AdminFeedback,
+  AdjustmentPreview,
+  FeedbackStatus,
+  LoyaltySettings,
+  MenuCategory,
+  MenuItem,
+  Promotion,
+} from "../api/types";
 import { useResource } from "../hooks/useResource";
 import { formatDateTime, formatMoney } from "../utils/format";
 import {
@@ -62,6 +70,11 @@ export function AdminOverviewPage() {
               <strong>Контент</strong>
               <small>Меню и акции</small>
             </Link>
+            <Link to="/admin/feedback">
+              <span>★</span>
+              <strong>Отзывы</strong>
+              <small>Обратная связь клиентов</small>
+            </Link>
           </div>
           <Panel>
             <div className="section-heading">
@@ -111,14 +124,14 @@ export function AdminUsersPage() {
     setQuery(input.trim());
   };
   return (
-    <Page title="Пользователи" eyebrow="Поиск и управление">
+    <Page title="Клиенты" eyebrow="Поиск и управление">
       <Panel>
         <form className="search-form" onSubmit={search}>
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="Имя, username, Telegram ID или код"
-            aria-label="Поиск пользователей"
+            aria-label="Поиск клиентов"
           />
           <Button type="submit">Найти</Button>
         </form>
@@ -160,11 +173,13 @@ export function AdminUsersPage() {
                       ? `@${user.username}`
                       : `Telegram ${user.telegram_id}`}
                   </p>
-                  <small>Код {user.short_code}</small>
+                  <small>
+                    {user.last_seen_at
+                      ? `Был ${formatDateTime(user.last_seen_at)}`
+                      : `С нами с ${formatDateTime(user.created_at)}`}
+                  </small>
                 </div>
                 <div className="user-list__numbers">
-                  <strong>{user.balance_points}</strong>
-                  <small>баллов</small>
                   <Badge tone={user.status === "active" ? "success" : "danger"}>
                     {user.status === "active" ? "Активен" : "Заблокирован"}
                   </Badge>
@@ -173,7 +188,7 @@ export function AdminUsersPage() {
                   className="button button--secondary"
                   to={`/admin/users/${encodeURIComponent(user.id)}/adjust`}
                 >
-                  Корректировать
+                  Открыть клиента
                 </Link>
               </article>
             ))}
@@ -182,6 +197,160 @@ export function AdminUsersPage() {
           <EmptyState
             title="Никого не нашли"
             text="Проверьте запрос или измените фильтр статуса."
+          />
+        ))}
+    </Page>
+  );
+}
+
+const feedbackStatusLabels: Record<FeedbackStatus, string> = {
+  new: "Новый",
+  in_progress: "В работе",
+  resolved: "Решён",
+  archived: "В архиве",
+};
+
+const feedbackCategoryLabels: Record<AdminFeedback["category"], string> = {
+  service: "Обслуживание",
+  food_and_drinks: "Еда и напитки",
+  application: "Приложение",
+  loyalty: "Лояльность",
+  other: "Другое",
+};
+
+function FeedbackCard({
+  item,
+  onSaved,
+}: {
+  item: AdminFeedback;
+  onSaved: (item: AdminFeedback) => void;
+}) {
+  const [status, setStatus] = useState<FeedbackStatus>(item.status);
+  const [note, setNote] = useState(item.internal_note ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      onSaved(
+        await coffeeApi.updateAdminFeedback(item.id, {
+          status,
+          internal_note: note.trim() || null,
+        }),
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось сохранить отзыв",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Panel className="feedback-card">
+      <div className="feedback-card__heading">
+        <div>
+          <div className="tag-row">
+            <Badge tone={item.rating <= 2 ? "danger" : "neutral"}>
+              {"★".repeat(item.rating)}
+              {"☆".repeat(5 - item.rating)}
+            </Badge>
+            <Badge>{feedbackCategoryLabels[item.category]}</Badge>
+          </div>
+          <h2>{item.user_display_name || "Клиент"}</h2>
+          <small>{formatDateTime(item.created_at)}</small>
+        </div>
+        {!item.may_contact && <Badge tone="warning">Не связываться</Badge>}
+      </div>
+      <p className="feedback-card__message">{item.message}</p>
+      <div className="feedback-card__controls">
+        <Field label="Статус">
+          <select
+            value={status}
+            onChange={(event) =>
+              setStatus(event.target.value as FeedbackStatus)
+            }
+          >
+            {Object.entries(feedbackStatusLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Внутренняя заметка">
+          <textarea
+            rows={3}
+            maxLength={4000}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="Видна только команде кофейни"
+          />
+        </Field>
+      </div>
+      {error && <div className="inline-error">{error}</div>}
+      <Button onClick={() => void save()} disabled={saving}>
+        {saving ? "Сохраняем…" : "Сохранить"}
+      </Button>
+    </Panel>
+  );
+}
+
+export function AdminFeedbackPage() {
+  const [status, setStatus] = useState("");
+  const resource = useResource(
+    () => coffeeApi.getAdminFeedback(status || undefined),
+    [status],
+  );
+  const [updates, setUpdates] = useState<Record<string, AdminFeedback>>({});
+
+  return (
+    <Page title="Отзывы" eyebrow="Обратная связь клиентов">
+      <Panel>
+        <Field label="Статус">
+          <select
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+          >
+            <option value="">Все отзывы</option>
+            {Object.entries(feedbackStatusLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </Panel>
+      {resource.loading && <Loader />}
+      {resource.error && (
+        <ErrorState error={resource.error} onRetry={resource.reload} />
+      )}
+      {resource.data &&
+        (resource.data.items.length ? (
+          <div className="feedback-list">
+            {resource.data.items.map((item) => {
+              const current = updates[item.id] ?? item;
+              return (
+                <FeedbackCard
+                  key={`${current.id}:${current.status}:${current.internal_note ?? ""}`}
+                  item={current}
+                  onSaved={(saved) =>
+                    setUpdates((previous) => ({
+                      ...previous,
+                      [saved.id]: saved,
+                    }))
+                  }
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState
+            title="Отзывов нет"
+            text="По выбранному статусу обратной связи пока нет."
           />
         ))}
     </Page>
@@ -237,7 +406,10 @@ export function AdminAdjustmentPage() {
         delta_points: preview.delta_points,
         reason: preview.reason,
       });
-      setResult(operation);
+      setResult({
+        balance_after: operation.balance_after ?? preview.balance_after,
+        delta_points: operation.delta_points,
+      });
       setPreview(null);
     } catch (reasonValue) {
       setError(
@@ -544,6 +716,19 @@ export function AdminSettingsPage() {
                   }
                 />
               </Field>
+              <Field label="Скидка за один списанный балл, ₽">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.redemption_rubles_per_point}
+                  onChange={(event) =>
+                    update(
+                      "redemption_rubles_per_point",
+                      Number(event.target.value),
+                    )
+                  }
+                />
+              </Field>
               <Field label="Минимальная покупка, ₽">
                 <input
                   type="number"
@@ -552,6 +737,19 @@ export function AdminSettingsPage() {
                   onChange={(event) =>
                     update(
                       "minimum_purchase_minor",
+                      Number(event.target.value) * 100,
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Максимальная покупка, ₽">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.maximum_purchase_minor / 100}
+                  onChange={(event) =>
+                    update(
+                      "maximum_purchase_minor",
                       Number(event.target.value) * 100,
                     )
                   }
@@ -583,7 +781,111 @@ export function AdminSettingsPage() {
                   }
                 />
               </Field>
+              <Field label="Минимум баллов для списания">
+                <input
+                  type="number"
+                  min="0"
+                  value={form.minimum_redemption_points}
+                  onChange={(event) =>
+                    update(
+                      "minimum_redemption_points",
+                      Number(event.target.value),
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Приветственный бонус">
+                <input
+                  type="number"
+                  min="0"
+                  value={form.welcome_bonus_points}
+                  onChange={(event) =>
+                    update("welcome_bonus_points", Number(event.target.value))
+                  }
+                />
+              </Field>
+              <Field
+                label="Срок действия баллов, дней"
+                hint="Пусто — бессрочно"
+              >
+                <input
+                  type="number"
+                  min="1"
+                  value={form.points_validity_days ?? ""}
+                  onChange={(event) =>
+                    update(
+                      "points_validity_days",
+                      event.target.value ? Number(event.target.value) : null,
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Дневной лимит начисления" hint="Пусто — без лимита">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.daily_accrual_limit_points ?? ""}
+                  onChange={(event) =>
+                    update(
+                      "daily_accrual_limit_points",
+                      event.target.value ? Number(event.target.value) : null,
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Лимит одной операции" hint="Пусто — без лимита">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.operation_accrual_limit_points ?? ""}
+                  onChange={(event) =>
+                    update(
+                      "operation_accrual_limit_points",
+                      event.target.value ? Number(event.target.value) : null,
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Порог крупной покупки, ₽">
+                <input
+                  type="number"
+                  min="1"
+                  value={
+                    form.large_operation_threshold_minor == null
+                      ? ""
+                      : form.large_operation_threshold_minor / 100
+                  }
+                  onChange={(event) =>
+                    update(
+                      "large_operation_threshold_minor",
+                      event.target.value
+                        ? Number(event.target.value) * 100
+                        : null,
+                    )
+                  }
+                />
+              </Field>
             </div>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={form.large_operation_requires_approval}
+                onChange={(event) => {
+                  update(
+                    "large_operation_requires_approval",
+                    event.target.checked,
+                  );
+                  if (
+                    event.target.checked &&
+                    form.large_operation_threshold_minor == null
+                  )
+                    update("large_operation_threshold_minor", 100_000);
+                }}
+              />
+              <span>
+                Крупные начисления требуют подтверждения администратора
+              </span>
+            </label>
           </Panel>
           <Panel>
             <div className="toggle-heading">
@@ -613,6 +915,39 @@ export function AdminSettingsPage() {
                   }
                 />
               </Field>
+              <Field label="Посещений в день">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.visit_daily_limit}
+                  onChange={(event) =>
+                    update("visit_daily_limit", Number(event.target.value))
+                  }
+                />
+              </Field>
+              <Field label="Допустимых пропусков">
+                <input
+                  type="number"
+                  min="0"
+                  value={form.visit_allowed_misses}
+                  onChange={(event) =>
+                    update("visit_allowed_misses", Number(event.target.value))
+                  }
+                />
+              </Field>
+              <Field label="Срок награды, дней" hint="Пусто — бессрочно">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.visit_reward_validity_days ?? ""}
+                  onChange={(event) =>
+                    update(
+                      "visit_reward_validity_days",
+                      event.target.value ? Number(event.target.value) : null,
+                    )
+                  }
+                />
+              </Field>
               <Field label="Часовой пояс">
                 <input
                   value={form.timezone}
@@ -628,6 +963,38 @@ export function AdminSettingsPage() {
                   }
                 />
               </Field>
+            </div>
+            <div className="chip-row">
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.visits_must_be_consecutive}
+                  onChange={(event) =>
+                    update("visits_must_be_consecutive", event.target.checked)
+                  }
+                />
+                <span>Посещения должны идти подряд</span>
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.visit_reset_on_miss}
+                  onChange={(event) =>
+                    update("visit_reset_on_miss", event.target.checked)
+                  }
+                />
+                <span>Сбрасывать серию после пропуска</span>
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.visit_restart_cycle}
+                  onChange={(event) =>
+                    update("visit_restart_cycle", event.target.checked)
+                  }
+                />
+                <span>Начинать новый цикл после награды</span>
+              </label>
             </div>
           </Panel>
           <Panel>
@@ -647,16 +1014,61 @@ export function AdminSettingsPage() {
                 <span />
               </label>
             </div>
-            <Field label="Штампов до награды">
+            <div className="form-grid">
+              <Field label="Штампов до награды">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.stamp_goal}
+                  onChange={(event) =>
+                    update("stamp_goal", Number(event.target.value))
+                  }
+                />
+              </Field>
+              <Field label="Штампов за покупку">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.stamps_per_purchase}
+                  onChange={(event) =>
+                    update("stamps_per_purchase", Number(event.target.value))
+                  }
+                />
+              </Field>
+              <Field label="Лимит штампов за операцию">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.stamp_operation_limit}
+                  onChange={(event) =>
+                    update("stamp_operation_limit", Number(event.target.value))
+                  }
+                />
+              </Field>
+              <Field label="Срок награды, дней" hint="Пусто — бессрочно">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.stamp_reward_validity_days ?? ""}
+                  onChange={(event) =>
+                    update(
+                      "stamp_reward_validity_days",
+                      event.target.value ? Number(event.target.value) : null,
+                    )
+                  }
+                />
+              </Field>
+            </div>
+            <label className="checkbox">
               <input
-                type="number"
-                min="1"
-                value={form.stamp_goal}
+                type="checkbox"
+                checked={form.reset_stamps_after_reward}
                 onChange={(event) =>
-                  update("stamp_goal", Number(event.target.value))
+                  update("reset_stamps_after_reward", event.target.checked)
                 }
               />
-            </Field>
+              <span>Сбрасывать штампы после выдачи награды</span>
+            </label>
           </Panel>
           {error && (
             <div className="inline-error" role="alert">
@@ -672,9 +1084,281 @@ export function AdminSettingsPage() {
   );
 }
 
+function MenuCategoryEditor({
+  category,
+  onCancel,
+  onSaved,
+}: {
+  category: MenuCategory | null;
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [name, setName] = useState(category?.name ?? "");
+  const [description, setDescription] = useState(category?.description ?? "");
+  const [sortOrder, setSortOrder] = useState(category?.sort_order ?? 0);
+  const [visible, setVisible] = useState(category?.visible ?? true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      setError("Укажите название категории");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await coffeeApi.saveMenuCategory(category, {
+        name: name.trim(),
+        description: description.trim() || null,
+        sort_order: sortOrder,
+        visible,
+      });
+      await onSaved();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось сохранить категорию",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Panel>
+      <form className="form" onSubmit={(event) => void save(event)}>
+        <h2>{category ? "Редактировать категорию" : "Новая категория"}</h2>
+        <Field label="Название категории">
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </Field>
+        <Field label="Описание категории">
+          <textarea
+            rows={2}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </Field>
+        <div className="form-grid">
+          <Field label="Порядок">
+            <input
+              type="number"
+              value={sortOrder}
+              onChange={(event) => setSortOrder(Number(event.target.value))}
+            />
+          </Field>
+          <label className="checkbox checkbox--standalone">
+            <input
+              type="checkbox"
+              checked={visible}
+              onChange={(event) => setVisible(event.target.checked)}
+            />
+            <span>Показывать клиентам</span>
+          </label>
+        </div>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="action-row">
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Отмена
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "Сохраняем…" : "Сохранить категорию"}
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+function MenuItemEditor({
+  item,
+  categories,
+  onCancel,
+  onSaved,
+}: {
+  item: MenuItem | null;
+  categories: MenuCategory[];
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [categoryId, setCategoryId] = useState(
+    item?.category_id ?? categories[0]?.id ?? "",
+  );
+  const [name, setName] = useState(item?.name ?? "");
+  const [description, setDescription] = useState(item?.description ?? "");
+  const [price, setPrice] = useState(
+    item ? String(item.price_minor / 100) : "",
+  );
+  const [oldPrice, setOldPrice] = useState(
+    item?.old_price_minor ? String(item.old_price_minor / 100) : "",
+  );
+  const [volume, setVolume] = useState(item?.volume ?? "");
+  const [composition, setComposition] = useState(item?.composition ?? "");
+  const [labels, setLabels] = useState(item?.labels?.join(", ") ?? "");
+  const [available, setAvailable] = useState(item?.available ?? true);
+  const [visible, setVisible] = useState(item?.visible ?? true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    const priceMinor = Math.round(Number(price) * 100);
+    const oldPriceMinor = oldPrice ? Math.round(Number(oldPrice) * 100) : null;
+    if (
+      !categoryId ||
+      !name.trim() ||
+      !Number.isInteger(priceMinor) ||
+      priceMinor < 0
+    ) {
+      setError("Выберите категорию, укажите название и корректную цену");
+      return;
+    }
+    if (oldPriceMinor !== null && oldPriceMinor <= priceMinor) {
+      setError("Старая цена должна быть выше текущей");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await coffeeApi.saveMenuItem(item, {
+        category_id: categoryId,
+        name: name.trim(),
+        description: description.trim() || null,
+        price_minor: priceMinor,
+        old_price_minor: oldPriceMinor,
+        composition: composition.trim() || null,
+        volume: volume.trim() || null,
+        labels: labels
+          .split(",")
+          .map((label) => label.trim())
+          .filter(Boolean),
+        available,
+        visible,
+        sort_order: item?.sort_order ?? 0,
+      });
+      await onSaved();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось сохранить позицию",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Panel>
+      <form className="form" onSubmit={(event) => void save(event)}>
+        <h2>{item ? "Редактировать позицию" : "Новая позиция"}</h2>
+        <div className="form-grid">
+          <Field label="Категория">
+            <select
+              value={categoryId}
+              onChange={(event) => setCategoryId(event.target.value)}
+            >
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Название позиции">
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
+          <Field label="Цена, ₽">
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={price}
+              onChange={(event) => setPrice(event.target.value)}
+            />
+          </Field>
+          <Field label="Старая цена, ₽">
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={oldPrice}
+              onChange={(event) => setOldPrice(event.target.value)}
+            />
+          </Field>
+          <Field label="Объём">
+            <input
+              value={volume}
+              onChange={(event) => setVolume(event.target.value)}
+              placeholder="250 мл"
+            />
+          </Field>
+          <Field label="Метки" hint="Через запятую">
+            <input
+              value={labels}
+              onChange={(event) => setLabels(event.target.value)}
+              placeholder="хит, сезонное"
+            />
+          </Field>
+        </div>
+        <Field label="Описание">
+          <textarea
+            rows={2}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </Field>
+        <Field label="Состав">
+          <textarea
+            rows={2}
+            value={composition}
+            onChange={(event) => setComposition(event.target.value)}
+          />
+        </Field>
+        <div className="chip-row">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={available}
+              onChange={(event) => setAvailable(event.target.checked)}
+            />
+            <span>В наличии</span>
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={visible}
+              onChange={(event) => setVisible(event.target.checked)}
+            />
+            <span>Показывать</span>
+          </label>
+        </div>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="action-row">
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Отмена
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "Сохраняем…" : "Сохранить позицию"}
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
 export function AdminMenuPage() {
   const resource = useResource(coffeeApi.getAdminMenu);
   const data = resource.data;
+  const [categoryEditor, setCategoryEditor] = useState<MenuCategory | null>(
+    null,
+  );
+  const [itemEditor, setItemEditor] = useState<MenuItem | null>(null);
+  const [editor, setEditor] = useState<"category" | "item" | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const toggle = async (itemId: string) => {
@@ -713,6 +1397,49 @@ export function AdminMenuPage() {
         </Link>
         <Link to="/admin/promotions">Акции</Link>
       </div>
+      <div className="action-row">
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setCategoryEditor(null);
+            setEditor("category");
+          }}
+        >
+          Добавить категорию
+        </Button>
+        <Button
+          disabled={!data?.categories.length}
+          onClick={() => {
+            setItemEditor(null);
+            setEditor("item");
+          }}
+        >
+          Добавить позицию
+        </Button>
+      </div>
+      {editor === "category" && (
+        <MenuCategoryEditor
+          key={categoryEditor?.id ?? "new-category"}
+          category={categoryEditor}
+          onCancel={() => setEditor(null)}
+          onSaved={async () => {
+            await resource.reload();
+            setEditor(null);
+          }}
+        />
+      )}
+      {editor === "item" && data && (
+        <MenuItemEditor
+          key={itemEditor?.id ?? "new-item"}
+          item={itemEditor}
+          categories={data.categories}
+          onCancel={() => setEditor(null)}
+          onSaved={async () => {
+            await resource.reload();
+            setEditor(null);
+          }}
+        />
+      )}
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
@@ -734,6 +1461,15 @@ export function AdminMenuPage() {
                     ).length
                   }
                 </Badge>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setCategoryEditor(category);
+                    setEditor("category");
+                  }}
+                >
+                  Изменить
+                </Button>
               </div>
               {data.items
                 .filter((item) => item.category_id === category.id)
@@ -760,6 +1496,15 @@ export function AdminMenuPage() {
                             ? "Скрыть"
                             : "Показать"}
                       </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setItemEditor(item);
+                          setEditor("item");
+                        }}
+                      >
+                        Изменить
+                      </Button>
                     </div>
                   </article>
                 ))}
@@ -771,10 +1516,128 @@ export function AdminMenuPage() {
   );
 }
 
+function PromotionEditor({
+  promotion,
+  onCancel,
+  onSaved,
+}: {
+  promotion: Promotion | null;
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [title, setTitle] = useState(promotion?.title ?? "");
+  const [text, setText] = useState(promotion?.text ?? "");
+  const [buttonLabel, setButtonLabel] = useState(promotion?.button_label ?? "");
+  const [buttonUrl, setButtonUrl] = useState(promotion?.button_url ?? "");
+  const [startsAt, setStartsAt] = useState(
+    promotion?.starts_at?.slice(0, 16) ?? "",
+  );
+  const [endsAt, setEndsAt] = useState(promotion?.ends_at?.slice(0, 16) ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim() || !text.trim()) {
+      setError("Укажите заголовок и текст акции");
+      return;
+    }
+    if (buttonUrl && !/^https?:\/\//i.test(buttonUrl)) {
+      setError("Ссылка кнопки должна начинаться с http:// или https://");
+      return;
+    }
+    const startIso = startsAt ? new Date(startsAt).toISOString() : null;
+    const endIso = endsAt ? new Date(endsAt).toISOString() : null;
+    if (startIso && endIso && endIso <= startIso) {
+      setError("Окончание акции должно быть позже начала");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await coffeeApi.savePromotion(promotion, {
+        title: title.trim(),
+        text: text.trim(),
+        button_label: buttonLabel.trim() || null,
+        button_url: buttonUrl.trim() || null,
+        starts_at: startIso,
+        ends_at: endIso,
+      });
+      await onSaved();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось сохранить акцию",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Panel>
+      <form className="form" onSubmit={(event) => void save(event)}>
+        <h2>{promotion ? "Редактировать акцию" : "Новая акция"}</h2>
+        <Field label="Заголовок акции">
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </Field>
+        <Field label="Текст акции">
+          <textarea
+            rows={4}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+        </Field>
+        <div className="form-grid">
+          <Field label="Текст кнопки">
+            <input
+              value={buttonLabel}
+              onChange={(event) => setButtonLabel(event.target.value)}
+            />
+          </Field>
+          <Field label="Ссылка кнопки">
+            <input
+              type="url"
+              value={buttonUrl}
+              onChange={(event) => setButtonUrl(event.target.value)}
+              placeholder="https://…"
+            />
+          </Field>
+          <Field label="Начало">
+            <input
+              type="datetime-local"
+              value={startsAt}
+              onChange={(event) => setStartsAt(event.target.value)}
+            />
+          </Field>
+          <Field label="Окончание">
+            <input
+              type="datetime-local"
+              value={endsAt}
+              onChange={(event) => setEndsAt(event.target.value)}
+            />
+          </Field>
+        </div>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="action-row">
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Отмена
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "Сохраняем…" : "Сохранить черновик"}
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
 export function AdminPromotionsPage() {
   const resource = useResource(coffeeApi.getAdminPromotions);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<Promotion | null>(null);
   const publish = async (id: string) => {
     const promotion = resource.data?.items.find((item) => item.id === id);
     if (!promotion) return;
@@ -788,6 +1651,22 @@ export function AdminPromotionsPage() {
         reason instanceof Error
           ? reason.message
           : "Не удалось опубликовать акцию",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const archive = async (promotion: Promotion) => {
+    setBusyId(promotion.id);
+    setError(null);
+    try {
+      await coffeeApi.archivePromotion(promotion);
+      await resource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось архивировать акцию",
       );
     } finally {
       setBusyId(null);
@@ -810,6 +1689,25 @@ export function AdminPromotionsPage() {
           Акции
         </Link>
       </div>
+      <Button
+        onClick={() => {
+          setEditing(null);
+          setEditorOpen(true);
+        }}
+      >
+        Создать акцию
+      </Button>
+      {editorOpen && (
+        <PromotionEditor
+          key={editing?.id ?? "new-promotion"}
+          promotion={editing}
+          onCancel={() => setEditorOpen(false)}
+          onSaved={async () => {
+            await resource.reload();
+            setEditorOpen(false);
+          }}
+        />
+      )}
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
@@ -846,13 +1744,33 @@ export function AdminPromotionsPage() {
                     {busyId === promotion.id ? "Публикуем…" : "Опубликовать"}
                   </Button>
                 )}
+                {promotion.status !== "archived" && (
+                  <div className="action-row">
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setEditing(promotion);
+                        setEditorOpen(true);
+                      }}
+                    >
+                      Изменить
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => void archive(promotion)}
+                      disabled={busyId === promotion.id}
+                    >
+                      В архив
+                    </Button>
+                  </div>
+                )}
               </Panel>
             ))}
           </div>
         ) : (
           <EmptyState
             title="Акций пока нет"
-            text="Создайте первую публикацию через API или будущую форму редактора."
+            text="Создайте первую акцию и опубликуйте её после проверки."
           />
         ))}
     </Page>

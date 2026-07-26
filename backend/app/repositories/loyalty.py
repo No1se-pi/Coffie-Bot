@@ -357,7 +357,11 @@ class LoyaltyRepository:
         page: int,
         page_size: int,
     ) -> UserPage:
-        filters = []
+        # The owner-facing list is a customer list, not a directory of every
+        # technical account. Staff/owner bootstrap users may not have a card
+        # or loyalty state and therefore cannot be opened by the customer
+        # management endpoints.
+        filters = [UserCard.status == CardStatus.ACTIVE]
         if user_status is not None:
             filters.append(User.status == user_status)
         if query:
@@ -368,15 +372,25 @@ class LoyaltyRepository:
                     User.last_name.ilike(pattern),
                     User.username.ilike(pattern),
                     sql_cast(User.telegram_id, String).ilike(pattern),
+                    UserCard.short_code.ilike(pattern),
                 )
             )
         total = int(
-            await self._session.scalar(select(func.count()).select_from(User).where(*filters)) or 0
+            await self._session.scalar(
+                select(func.count())
+                .select_from(User)
+                .join(UserCard, UserCard.user_id == User.id)
+                .join(UserLoyaltyState, UserLoyaltyState.user_id == User.id)
+                .where(*filters)
+            )
+            or 0
         )
         items = list(
             (
                 await self._session.scalars(
                     select(User)
+                    .join(UserCard, UserCard.user_id == User.id)
+                    .join(UserLoyaltyState, UserLoyaltyState.user_id == User.id)
                     .where(*filters)
                     .order_by(User.created_at.desc(), User.id)
                     .offset((page - 1) * page_size)

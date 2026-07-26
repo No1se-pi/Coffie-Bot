@@ -21,6 +21,7 @@ import {
 import {
   AdminAdjustmentPage,
   AdminEventsPage,
+  AdminFeedbackPage,
   AdminMenuPage,
   AdminOverviewPage,
   AdminPromotionsPage,
@@ -80,6 +81,7 @@ export default function App() {
                   element={<AdminAdjustmentPage />}
                 />
                 <Route path="events" element={<AdminEventsPage />} />
+                <Route path="feedback" element={<AdminFeedbackPage />} />
                 <Route path="settings" element={<AdminSettingsPage />} />
                 <Route path="menu" element={<AdminMenuPage />} />
                 <Route path="promotions" element={<AdminPromotionsPage />} />

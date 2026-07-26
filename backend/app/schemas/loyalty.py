@@ -59,6 +59,26 @@ class CardLookupRequest(ApiSchema):
         return self
 
 
+class CardRewardResponse(ApiSchema):
+    id: UUID
+    name: str
+    description: str
+    type: RewardType
+    status: RewardStatus
+    terms: str | None
+    expires_at: datetime | None
+    created_at: datetime
+
+
+class CardOperationResponse(ApiSchema):
+    id: UUID
+    type: LoyaltyOperationType
+    status: OperationStatus
+    points_delta: int
+    balance_after: int | None
+    occurred_at: datetime
+
+
 class CardLookupResponse(ApiSchema):
     user_id: UUID
     card_id: UUID
@@ -71,6 +91,9 @@ class CardLookupResponse(ApiSchema):
     visit_goal: int
     stamp_count: int
     stamp_goal: int
+    currency_name: str
+    available_rewards: list[CardRewardResponse]
+    recent_operations: list[CardOperationResponse]
 
 
 class AccrualRequest(ApiSchema):
@@ -292,6 +315,31 @@ def card_lookup_response(value: CardLookupView) -> CardLookupResponse:
         visit_goal=value.visit_goal,
         stamp_count=value.stamp_count,
         stamp_goal=value.stamp_goal,
+        currency_name=value.currency_name,
+        available_rewards=[
+            CardRewardResponse(
+                id=reward.id,
+                name=reward.name,
+                description=reward.description,
+                type=reward.reward_type,
+                status=reward.status,
+                terms=reward.terms,
+                expires_at=reward.expires_at,
+                created_at=reward.created_at,
+            )
+            for reward in value.active_rewards
+        ],
+        recent_operations=[
+            CardOperationResponse(
+                id=operation.id,
+                type=operation.operation_type,
+                status=operation.status,
+                points_delta=operation.points_delta,
+                balance_after=operation.balance_after,
+                occurred_at=operation.occurred_at,
+            )
+            for operation in value.recent_operations
+        ],
     )
 
 

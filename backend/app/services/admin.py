@@ -126,15 +126,34 @@ class AdminService:
         points_enabled: bool,
         currency_name: str,
         rubles_per_point: int,
+        redemption_rubles_per_point: int,
         minimum_purchase_minor: int,
+        maximum_purchase_minor: int,
         rounding: str,
         max_redemption_percent: int,
+        minimum_redemption_points: int,
+        welcome_bonus_points: int,
+        points_validity_days: int | None,
+        daily_accrual_limit_points: int | None,
+        operation_accrual_limit_points: int | None,
+        large_operation_threshold_minor: int | None,
+        large_operation_requires_approval: bool,
         visit_enabled: bool,
         visit_goal: int,
+        visits_must_be_consecutive: bool,
+        visit_daily_limit: int,
         timezone: str,
         business_day_boundary_minutes: int,
+        visit_allowed_misses: int,
+        visit_reset_on_miss: bool,
+        visit_reward_validity_days: int | None,
+        visit_restart_cycle: bool,
         stamps_enabled: bool,
         stamp_goal: int,
+        stamps_per_purchase: int,
+        stamp_operation_limit: int,
+        stamp_reward_validity_days: int | None,
+        reset_stamps_after_reward: bool,
         metadata: RequestMetadata = EMPTY_METADATA,
     ) -> LoyaltySettings:
         from app.models.enums import RoundingMode
@@ -147,15 +166,34 @@ class AdminService:
             settings.points_enabled = points_enabled
             settings.currency_name = currency_name
             settings.minor_units_per_point = rubles_per_point * 100
+            settings.redemption_minor_units_per_point = redemption_rubles_per_point * 100
             settings.minimum_purchase_minor = minimum_purchase_minor
+            settings.maximum_purchase_minor = maximum_purchase_minor
             settings.rounding_mode = RoundingMode(rounding)
             settings.maximum_redemption_percent = max_redemption_percent
+            settings.minimum_redemption_points = minimum_redemption_points
+            settings.welcome_bonus_points = welcome_bonus_points
+            settings.points_validity_days = points_validity_days
+            settings.daily_accrual_limit_points = daily_accrual_limit_points
+            settings.operation_accrual_limit_points = operation_accrual_limit_points
+            settings.large_operation_threshold_minor = large_operation_threshold_minor
+            settings.large_operation_requires_approval = large_operation_requires_approval
             settings.visits_enabled = visit_enabled
             settings.visit_required_count = visit_goal
+            settings.visits_must_be_consecutive = visits_must_be_consecutive
+            settings.visit_daily_limit = visit_daily_limit
             settings.timezone = timezone
             settings.business_day_boundary_minutes = business_day_boundary_minutes
+            settings.visit_allowed_misses = visit_allowed_misses
+            settings.visit_reset_on_miss = visit_reset_on_miss
+            settings.visit_reward_validity_days = visit_reward_validity_days
+            settings.visit_restart_cycle = visit_restart_cycle
             settings.stamps_enabled = stamps_enabled
             settings.stamp_required_count = stamp_goal
+            settings.stamps_per_purchase = stamps_per_purchase
+            settings.stamp_operation_limit = stamp_operation_limit
+            settings.stamp_reward_validity_days = stamp_reward_validity_days
+            settings.reset_stamps_after_reward = reset_stamps_after_reward
             settings.updated_by_staff_id = actor.staff_member_id
             self._audit(
                 actor=actor,

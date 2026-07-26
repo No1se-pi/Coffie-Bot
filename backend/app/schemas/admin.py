@@ -41,15 +41,34 @@ class LoyaltySettingsResponse(ApiSchema):
     points_enabled: bool
     currency_name: str
     rubles_per_point: int
+    redemption_rubles_per_point: int
     minimum_purchase_minor: int
+    maximum_purchase_minor: int
     rounding: RoundingMode
     max_redemption_percent: int
+    minimum_redemption_points: int
+    welcome_bonus_points: int
+    points_validity_days: int | None
+    daily_accrual_limit_points: int | None
+    operation_accrual_limit_points: int | None
+    large_operation_threshold_minor: int | None
+    large_operation_requires_approval: bool
     visit_enabled: bool
     visit_goal: int
+    visits_must_be_consecutive: bool
+    visit_daily_limit: int
     timezone: str
     business_day_boundary: str
+    visit_allowed_misses: int
+    visit_reset_on_miss: bool
+    visit_reward_validity_days: int | None
+    visit_restart_cycle: bool
     stamps_enabled: bool
     stamp_goal: int
+    stamps_per_purchase: int
+    stamp_operation_limit: int
+    stamp_reward_validity_days: int | None
+    reset_stamps_after_reward: bool
 
     @field_validator("business_day_boundary")
     @classmethod
@@ -70,11 +89,33 @@ class LoyaltySettingsResponse(ApiSchema):
 class LoyaltySettingsUpdate(LoyaltySettingsResponse):
     currency_name: str = Field(min_length=1, max_length=64)
     rubles_per_point: int = Field(ge=1, le=1_000_000)
+    redemption_rubles_per_point: int = Field(ge=1, le=1_000_000)
     minimum_purchase_minor: int = Field(ge=0, le=1_000_000_000)
+    maximum_purchase_minor: int = Field(gt=0, le=1_000_000_000)
     max_redemption_percent: int = Field(ge=0, le=100)
+    minimum_redemption_points: int = Field(ge=0, le=1_000_000_000)
+    welcome_bonus_points: int = Field(ge=0, le=1_000_000_000)
+    points_validity_days: int | None = Field(default=None, gt=0, le=3_650)
+    daily_accrual_limit_points: int | None = Field(default=None, gt=0)
+    operation_accrual_limit_points: int | None = Field(default=None, gt=0)
+    large_operation_threshold_minor: int | None = Field(default=None, gt=0)
     visit_goal: int = Field(ge=1, le=365)
+    visit_daily_limit: int = Field(ge=1, le=100)
     timezone: str = Field(min_length=1, max_length=64)
+    visit_allowed_misses: int = Field(ge=0, le=365)
+    visit_reward_validity_days: int | None = Field(default=None, gt=0, le=3_650)
     stamp_goal: int = Field(ge=1, le=1_000)
+    stamps_per_purchase: int = Field(ge=1, le=100)
+    stamp_operation_limit: int = Field(ge=1, le=100)
+    stamp_reward_validity_days: int | None = Field(default=None, gt=0, le=3_650)
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> Self:
+        if self.maximum_purchase_minor < self.minimum_purchase_minor:
+            raise ValueError("maximum purchase must not be below minimum purchase")
+        if self.large_operation_requires_approval and self.large_operation_threshold_minor is None:
+            raise ValueError("approval threshold is required when approval is enabled")
+        return self
 
 
 class MenuCategoryResponse(ApiSchema):
@@ -411,15 +452,36 @@ def loyalty_settings_response(settings: LoyaltySettings) -> LoyaltySettingsRespo
         points_enabled=settings.points_enabled,
         currency_name=settings.currency_name,
         rubles_per_point=max(1, settings.minor_units_per_point // 100),
+        redemption_rubles_per_point=max(
+            1, (settings.redemption_minor_units_per_point or 100) // 100
+        ),
         minimum_purchase_minor=settings.minimum_purchase_minor,
+        maximum_purchase_minor=settings.maximum_purchase_minor or 1_000_000,
         rounding=settings.rounding_mode,
         max_redemption_percent=settings.maximum_redemption_percent,
+        minimum_redemption_points=settings.minimum_redemption_points or 0,
+        welcome_bonus_points=settings.welcome_bonus_points or 0,
+        points_validity_days=settings.points_validity_days,
+        daily_accrual_limit_points=settings.daily_accrual_limit_points,
+        operation_accrual_limit_points=settings.operation_accrual_limit_points,
+        large_operation_threshold_minor=settings.large_operation_threshold_minor,
+        large_operation_requires_approval=settings.large_operation_requires_approval or False,
         visit_enabled=settings.visits_enabled,
         visit_goal=settings.visit_required_count,
+        visits_must_be_consecutive=settings.visits_must_be_consecutive is not False,
+        visit_daily_limit=settings.visit_daily_limit or 1,
         timezone=settings.timezone,
         business_day_boundary=boundary_string(settings.business_day_boundary_minutes),
+        visit_allowed_misses=settings.visit_allowed_misses or 0,
+        visit_reset_on_miss=settings.visit_reset_on_miss is not False,
+        visit_reward_validity_days=settings.visit_reward_validity_days,
+        visit_restart_cycle=settings.visit_restart_cycle is not False,
         stamps_enabled=settings.stamps_enabled,
         stamp_goal=settings.stamp_required_count,
+        stamps_per_purchase=settings.stamps_per_purchase or 1,
+        stamp_operation_limit=settings.stamp_operation_limit or 1,
+        stamp_reward_validity_days=settings.stamp_reward_validity_days,
+        reset_stamps_after_reward=settings.reset_stamps_after_reward is not False,
     )
 
 

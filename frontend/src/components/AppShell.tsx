@@ -5,10 +5,11 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Role } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { brand } from "../config";
+import { appThemes, applyTheme, readTheme, type AppTheme } from "../theme";
 import { Button, ErrorState, Loader } from "./ui";
 
 const roleLabels: Record<Role, string> = {
@@ -47,6 +48,7 @@ const navItems: Record<
     { to: "/admin", label: "Обзор", icon: "⌂", end: true },
     { to: "/admin/users", label: "Клиенты", icon: "○" },
     { to: "/admin/events", label: "События", icon: "↻" },
+    { to: "/admin/feedback", label: "Отзывы", icon: "★" },
     { to: "/admin/settings", label: "Настройки", icon: "⚙" },
     { to: "/admin/menu", label: "Контент", icon: "☕" },
   ],
@@ -88,11 +90,22 @@ function AppShell() {
     useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [theme, setTheme] = useState<AppTheme>(readTheme);
   const navRole = effectiveNavRole(activeRole);
   const changeRole = (value: Role) => {
     setActiveRole(value);
     navigate(roleHome[value]);
   };
+  const cycleTheme = () => {
+    const currentIndex = appThemes.findIndex((item) => item.id === theme);
+    const next =
+      appThemes[(currentIndex + 1) % appThemes.length] ?? appThemes[0];
+    if (!next) return;
+    setTheme(next.id);
+    applyTheme(next.id);
+  };
+  const currentTheme =
+    appThemes.find((item) => item.id === theme) ?? appThemes[0];
 
   return (
     <div className="app-shell">
@@ -108,20 +121,31 @@ function AppShell() {
             <small>{brand.greeting}</small>
           </span>
         </button>
-        <label className="role-picker">
-          <span className="sr-only">Режим приложения</span>
-          <select
-            value={activeRole}
-            onChange={(event) => changeRole(event.target.value as Role)}
-            aria-label="Режим приложения"
+        <div className="topbar-controls">
+          <button
+            className="theme-cycle"
+            type="button"
+            onClick={cycleTheme}
+            aria-label={`Тема: ${currentTheme?.label}. Переключить тему`}
+            title={`Тема: ${currentTheme?.label}`}
           >
-            {availableRoles.map((role) => (
-              <option key={role} value={role}>
-                {roleLabels[role]}
-              </option>
-            ))}
-          </select>
-        </label>
+            {currentTheme?.icon}
+          </button>
+          <label className="role-picker">
+            <span className="sr-only">Режим приложения</span>
+            <select
+              value={activeRole}
+              onChange={(event) => changeRole(event.target.value as Role)}
+              aria-label="Режим приложения"
+            >
+              {availableRoles.map((role) => (
+                <option key={role} value={role}>
+                  {roleLabels[role]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </header>
       {isDemo && (
         <div className="demo-banner" role="status">

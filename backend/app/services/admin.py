@@ -778,6 +778,8 @@ class AdminService:
             if locked is None:
                 _not_found("Staff member was not found")
             staff = locked.target
+            if staff.archived_at is not None:
+                _not_found("Staff member was not found")
             self._validate_role_assignment(actor, current_role=staff.role, new_role=staff.role)
             if permissions is not None:
                 self._validate_permission_overrides(staff.role, permissions)
@@ -797,6 +799,7 @@ class AdminService:
                 staff.disabled_at = None
             if permissions is not None:
                 self._repository.replace_staff_permissions(staff, dict(permissions))
+            staff.updated_at = current_time
             self._audit(
                 actor=actor,
                 event_type="staff.updated",
@@ -820,12 +823,16 @@ class AdminService:
         staff_id: UUID,
         new_role: Role,
         metadata: RequestMetadata = EMPTY_METADATA,
+        now: datetime | None = None,
     ) -> StaffMember:
+        current_time = _aware_now(now)
         async with self._repository.transaction():
             locked = await self._repository.lock_staff_management(staff_id)
             if locked is None:
                 _not_found("Staff member was not found")
             staff = locked.target
+            if staff.archived_at is not None:
+                _not_found("Staff member was not found")
             self._validate_role_assignment(actor, current_role=staff.role, new_role=new_role)
             if staff.role is Role.OWNER and new_role is not Role.OWNER and staff.is_active:
                 self._guard_last_owner(staff, locked.active_owner_count)
@@ -833,6 +840,7 @@ class AdminService:
             staff.role = new_role
             if new_role is not Role.STAFF:
                 self._repository.replace_staff_permissions(staff, {})
+            staff.updated_at = current_time
             self._audit(
                 actor=actor,
                 event_type="staff.role_changed",
@@ -846,6 +854,47 @@ class AdminService:
             await self._repository.flush()
             return staff
 
+    async def archive_staff(
+        self,
+        *,
+        actor: Actor,
+        staff_id: UUID,
+        metadata: RequestMetadata = EMPTY_METADATA,
+        now: datetime | None = None,
+    ) -> None:
+        current_time = _aware_now(now)
+        async with self._repository.transaction():
+            locked = await self._repository.lock_staff_management(staff_id)
+            if locked is None:
+                _not_found("Staff member was not found")
+            staff = locked.target
+            if staff.archived_at is not None:
+                return
+            self._validate_role_assignment(actor, current_role=staff.role, new_role=staff.role)
+            if staff.user_id == actor.user_id:
+                _conflict("self_staff_archive", "You cannot delete your own staff profile")
+            if staff.role is Role.OWNER and staff.is_active:
+                self._guard_last_owner(staff, locked.active_owner_count)
+            staff.is_active = False
+            staff.disabled_at = current_time
+            staff.archived_at = current_time
+            revoked = await self._repository.revoke_user_sessions(
+                user_id=staff.user_id,
+                now=current_time,
+                reason="staff_archived",
+            )
+            self._audit(
+                actor=actor,
+                event_type="staff.archived",
+                subject_user_id=staff.user_id,
+                object_type="staff_member",
+                object_id=staff.id,
+                event_metadata={"revoked_sessions": revoked},
+                severity=AuditSeverity.WARNING,
+                metadata=metadata,
+            )
+            await self._repository.flush()
+
     async def revoke_staff_sessions(
         self,
         *,
@@ -858,6 +907,8 @@ class AdminService:
         async with self._repository.transaction():
             staff = await self._repository.get_staff(staff_id, for_update=True)
             if staff is None:
+                _not_found("Staff member was not found")
+            if staff.archived_at is not None:
                 _not_found("Staff member was not found")
             self._validate_role_assignment(actor, current_role=staff.role, new_role=staff.role)
             revoked = await self._repository.revoke_user_sessions(

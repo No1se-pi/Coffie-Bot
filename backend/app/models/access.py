@@ -92,6 +92,7 @@ class StaffMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default="true",
     )
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
     user: Mapped[User] = relationship(back_populates="staff_member")
     permissions: Mapped[list[StaffPermission]] = relationship(

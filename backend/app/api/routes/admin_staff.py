@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
@@ -127,6 +127,21 @@ async def revoke_staff_sessions(
         actor=actor, staff_id=staff_id, metadata=_metadata(request)
     )
     return SessionsRevokedResponse(revoked_sessions=revoked)
+
+
+@router.delete("/{staff_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_staff(
+    staff_id: UUID,
+    request: Request,
+    actor: StaffActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> Response:
+    await _service(session).archive_staff(
+        actor=actor,
+        staff_id=staff_id,
+        metadata=_metadata(request),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

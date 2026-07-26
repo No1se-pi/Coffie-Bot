@@ -739,6 +739,12 @@ export const coffeeApi = {
           method: "PATCH",
           body: jsonBody(payload),
         }),
+  deleteAdminStaff: (id: string): Promise<void> =>
+    isDemoMode
+      ? demoApi.deleteAdminStaff(id)
+      : request(`/admin/staff/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
   changeAdminStaffRole: (
     id: string,
     role: Exclude<Role, "customer">,

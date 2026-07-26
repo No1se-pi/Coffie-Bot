@@ -946,6 +946,15 @@ export const demoApi = {
     );
     return { ...updated };
   },
+  async deleteAdminStaff(id: string) {
+    await wait();
+    if (!adminStaff.some((candidate) => candidate.id === id))
+      throw new ApiError("Сотрудник не найден", {
+        status: 404,
+        code: "staff_not_found",
+      });
+    adminStaff = adminStaff.filter((candidate) => candidate.id !== id);
+  },
   async changeAdminStaffRole(id: string, role: Exclude<Role, "customer">) {
     await wait();
     const item = adminStaff.find((candidate) => candidate.id === id);

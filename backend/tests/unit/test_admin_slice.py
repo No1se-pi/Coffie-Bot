@@ -11,10 +11,11 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes import admin_content, admin_staff, media, staff_profile
 from app.core.errors import AppError
-from app.models.access import StaffMember, User
+from app.models.access import StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
 from app.models.enums import (
     FeedbackCategory,
@@ -25,7 +26,7 @@ from app.models.enums import (
 )
 from app.models.loyalty import LoyaltySettings
 from app.models.staff import FeedbackItem
-from app.repositories.admin import AdminRepository, FeedbackRecord
+from app.repositories.admin import AdminRepository, FeedbackRecord, LockedStaffManagement
 from app.schemas.admin import (
     MenuItemUpdate,
     PromotionCreate,
@@ -51,6 +52,8 @@ class RecordingAdminRepository:
         self.staff_user: User | None = None
         self.permission_overrides: dict[PermissionCode, bool] | None = None
         self.staff_permissions_were_initialized = False
+        self.locked_staff: LockedStaffManagement | None = None
+        self.revoked_staff_user_id: object | None = None
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
@@ -94,6 +97,24 @@ class RecordingAdminRepository:
         self.staff_permissions_were_initialized = "permissions" in staff.__dict__
         self.permission_overrides = permissions
 
+    async def lock_staff_management(
+        self,
+        _staff_id: object,
+    ) -> LockedStaffManagement | None:
+        return self.locked_staff
+
+    async def revoke_user_sessions(
+        self,
+        *,
+        user_id: object,
+        now: datetime,
+        reason: str,
+    ) -> int:
+        assert now == NOW
+        assert reason == "staff_archived"
+        self.revoked_staff_user_id = user_id
+        return 2
+
 
 def _actor(role: Role = Role.OWNER) -> Actor:
     return Actor(
@@ -119,6 +140,7 @@ def test_admin_routes_import_and_publish_expected_paths() -> None:
     paths = app.openapi()["paths"]
     assert "/api/v1/admin/loyalty-settings" in paths
     assert "delete" in paths["/api/v1/admin/feedback/{feedback_id}"]
+    assert "delete" in paths["/api/v1/admin/staff/{staff_id}"]
     assert "/api/v1/admin/staff/invites" in paths
     assert "/api/v1/staff/me/tip-profile" in paths
     assert "/api/v1/admin/media" in paths
@@ -284,3 +306,96 @@ async def test_created_staff_keeps_loaded_user_for_response_and_permissions() ->
     assert staff.user is repository.staff_user
     assert repository.staff_permissions_were_initialized is True
     assert repository.permission_overrides == {PermissionCode.POINTS_REDEEM: False}
+
+
+@pytest.mark.asyncio
+async def test_archiving_staff_revokes_access_but_preserves_the_record() -> None:
+    repository = RecordingAdminRepository()
+    staff = StaffMember(
+        id=uuid4(),
+        user_id=uuid4(),
+        role=Role.STAFF,
+        is_active=True,
+        disabled_at=None,
+        archived_at=None,
+    )
+    repository.locked_staff = LockedStaffManagement(target=staff, active_owner_count=1)
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    await service.archive_staff(
+        actor=_actor(),
+        staff_id=staff.id,
+        now=NOW,
+    )
+
+    assert staff.is_active is False
+    assert staff.disabled_at == NOW
+    assert staff.archived_at == NOW
+    assert repository.revoked_staff_user_id == staff.user_id
+    audit = next(item for item in repository.added if isinstance(item, AuditEvent))
+    assert audit.event_type == "staff.archived"
+    assert audit.event_metadata == {"revoked_sessions": 2}
+
+
+def test_staff_permission_replacement_updates_existing_rows_without_duplicates() -> None:
+    staff_id = uuid4()
+    existing = StaffPermission(
+        id=uuid4(),
+        staff_member_id=staff_id,
+        permission=PermissionCode.CARD_LOOKUP,
+        allowed=False,
+    )
+    obsolete = StaffPermission(
+        id=uuid4(),
+        staff_member_id=staff_id,
+        permission=PermissionCode.POINTS_REDEEM,
+        allowed=True,
+    )
+    staff = StaffMember(
+        id=staff_id,
+        user_id=uuid4(),
+        role=Role.STAFF,
+        permissions=[existing, obsolete],
+    )
+    repository = AdminRepository(cast(AsyncSession, object()))
+
+    repository.replace_staff_permissions(
+        staff,
+        {
+            PermissionCode.CARD_LOOKUP: True,
+            PermissionCode.STAMPS_ADD: False,
+        },
+    )
+
+    by_permission = {item.permission: item for item in staff.permissions}
+    assert by_permission[PermissionCode.CARD_LOOKUP] is existing
+    assert by_permission[PermissionCode.CARD_LOOKUP].allowed is True
+    assert by_permission[PermissionCode.STAMPS_ADD].allowed is False
+    assert PermissionCode.POINTS_REDEEM not in by_permission
+
+
+@pytest.mark.asyncio
+async def test_staff_update_keeps_updated_at_loaded_for_the_api_response() -> None:
+    repository = RecordingAdminRepository()
+    staff = StaffMember(
+        id=uuid4(),
+        user_id=uuid4(),
+        role=Role.STAFF,
+        display_name="Before",
+        is_active=True,
+        archived_at=None,
+        permissions=[],
+    )
+    repository.locked_staff = LockedStaffManagement(target=staff, active_owner_count=1)
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    updated = await service.update_staff(
+        actor=_actor(),
+        staff_id=staff.id,
+        updates={"display_name": "After"},
+        permissions=None,
+        now=NOW,
+    )
+
+    assert updated.display_name == "After"
+    assert updated.updated_at == NOW

@@ -446,7 +446,7 @@ describe("critical Mini App flows", () => {
     expect(remove).toHaveBeenCalledWith("feedback-archived");
   });
 
-  it("lets the owner revoke an employee access immediately", async () => {
+  it("shows employee actions only in settings and supports disable and delete", async () => {
     const user = userEvent.setup();
     const member: AdminStaffMember = {
       id: "staff-1",
@@ -477,6 +477,7 @@ describe("critical Mini App flows", () => {
     const update = vi
       .spyOn(coffeeApi, "updateAdminStaff")
       .mockResolvedValue({ ...member, is_active: false });
+    const remove = vi.spyOn(coffeeApi, "deleteAdminStaff").mockResolvedValue();
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(
@@ -507,9 +508,20 @@ describe("critical Mini App flows", () => {
     );
 
     expect(await screen.findByText("Анна")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Отключить доступ" }));
+    expect(
+      screen.queryByRole("button", { name: "Сохранить" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Завершить сеансы")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Настройки" }));
+    expect(screen.getByRole("button", { name: "Сохранить" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Отключить" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Удалить" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Отключить" }));
 
     expect(update).toHaveBeenCalledWith("staff-1", { is_active: false });
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    expect(remove).toHaveBeenCalledWith("staff-1");
   });
 
   it("creates a menu item from the owner content editor", async () => {

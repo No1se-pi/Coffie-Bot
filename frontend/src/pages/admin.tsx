@@ -245,12 +245,15 @@ function resolvedStaffPermissions(
 function StaffMemberEditor({
   member,
   canManageAdmins,
+  currentUserId,
   onSaved,
 }: {
   member: AdminStaffMember;
   canManageAdmins: boolean;
+  currentUserId?: string;
   onSaved: () => Promise<void>;
 }) {
+  const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(member.display_name);
   const [position, setPosition] = useState(member.position ?? "");
   const [bio, setBio] = useState(member.bio ?? "");
@@ -263,15 +266,16 @@ function StaffMemberEditor({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const manageable =
-    member.role === "staff" || (member.role === "admin" && canManageAdmins);
+    member.user_id !== currentUserId &&
+    (member.role === "staff" ||
+      (canManageAdmins &&
+        (member.role === "admin" || member.role === "owner")));
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
-    setMessage(null);
     try {
       if (role !== member.role) {
         await coffeeApi.changeAdminStaffRole(member.id, role);
@@ -283,8 +287,8 @@ function StaffMemberEditor({
         can_edit_tip_profile: canEditTipProfile,
         permissions: role === "staff" ? permissions : undefined,
       });
-      setMessage("Изменения сохранены");
       await onSaved();
+      setEditing(false);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -307,7 +311,6 @@ function StaffMemberEditor({
       return;
     setBusy(true);
     setError(null);
-    setMessage(null);
     try {
       await coffeeApi.updateAdminStaff(member.id, { is_active: nextActive });
       await onSaved();
@@ -322,18 +325,23 @@ function StaffMemberEditor({
     }
   };
 
-  const revokeSessions = async () => {
+  const remove = async () => {
+    if (
+      !window.confirm(
+        "Удалить сотрудника из списка? Доступ будет отключён, а история операций сохранится.",
+      )
+    )
+      return;
     setBusy(true);
     setError(null);
-    setMessage(null);
     try {
-      const result = await coffeeApi.revokeAdminStaffSessions(member.id);
-      setMessage(`Завершено сеансов: ${result.revoked_sessions}`);
+      await coffeeApi.deleteAdminStaff(member.id);
+      await onSaved();
     } catch (reason) {
       setError(
         reason instanceof Error
           ? reason.message
-          : "Не удалось завершить сеансы",
+          : "Не удалось удалить сотрудника",
       );
     } finally {
       setBusy(false);
@@ -363,80 +371,92 @@ function StaffMemberEditor({
               : `Telegram ${member.telegram_id}`}
           </small>
         </div>
+        {manageable && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setEditing((value) => !value)}
+          >
+            {editing ? "Закрыть настройки" : "Настройки"}
+          </Button>
+        )}
       </div>
-      <form className="form" onSubmit={(event) => void save(event)}>
-        <div className="form-grid">
-          <Field label="Отображаемое имя">
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
+      {editing && manageable && (
+        <form className="form" onSubmit={(event) => void save(event)}>
+          <div className="form-grid">
+            <Field label="Отображаемое имя">
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                disabled={!manageable}
+              />
+            </Field>
+            <Field label="Должность">
+              <input
+                value={position}
+                onChange={(event) => setPosition(event.target.value)}
+                disabled={!manageable}
+                placeholder="Бариста"
+              />
+            </Field>
+            <Field label="Роль">
+              <select
+                value={role}
+                onChange={(event) =>
+                  setRole(event.target.value as AdminStaffMember["role"])
+                }
+                disabled={!manageable}
+              >
+                <option value="staff">Сотрудник</option>
+                {canManageAdmins && (
+                  <option value="admin">Администратор</option>
+                )}
+                {member.role === "owner" && (
+                  <option value="owner">Владелец</option>
+                )}
+              </select>
+            </Field>
+          </div>
+          <Field label="Описание">
+            <textarea
+              rows={2}
+              value={bio}
+              onChange={(event) => setBio(event.target.value)}
               disabled={!manageable}
             />
           </Field>
-          <Field label="Должность">
-            <input
-              value={position}
-              onChange={(event) => setPosition(event.target.value)}
-              disabled={!manageable}
-              placeholder="Бариста"
-            />
-          </Field>
-          <Field label="Роль">
-            <select
-              value={role}
-              onChange={(event) =>
-                setRole(event.target.value as AdminStaffMember["role"])
-              }
-              disabled={!manageable}
-            >
-              <option value="staff">Сотрудник</option>
-              {canManageAdmins && <option value="admin">Администратор</option>}
-              {member.role === "owner" && (
-                <option value="owner">Владелец</option>
-              )}
-            </select>
-          </Field>
-        </div>
-        <Field label="Описание">
-          <textarea
-            rows={2}
-            value={bio}
-            onChange={(event) => setBio(event.target.value)}
-            disabled={!manageable}
-          />
-        </Field>
-        {role === "staff" && (
-          <div className="permission-grid">
-            {operationalPermissions.map((permission) => (
-              <label className="checkbox" key={permission}>
+          {role === "staff" && (
+            <div className="permission-grid">
+              {operationalPermissions.map((permission) => (
+                <label className="checkbox" key={permission}>
+                  <input
+                    type="checkbox"
+                    checked={permissions[permission]}
+                    disabled={!manageable}
+                    onChange={(event) =>
+                      setPermissions((current) => ({
+                        ...current,
+                        [permission]: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>{staffPermissionLabels[permission]}</span>
+                </label>
+              ))}
+              <label className="checkbox">
                 <input
                   type="checkbox"
-                  checked={permissions[permission]}
+                  checked={canEditTipProfile}
                   disabled={!manageable}
                   onChange={(event) =>
-                    setPermissions((current) => ({
-                      ...current,
-                      [permission]: event.target.checked,
-                    }))
+                    setCanEditTipProfile(event.target.checked)
                   }
                 />
-                <span>{staffPermissionLabels[permission]}</span>
+                <span>Разрешить профиль и реквизиты чаевых</span>
               </label>
-            ))}
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={canEditTipProfile}
-                disabled={!manageable}
-                onChange={(event) => setCanEditTipProfile(event.target.checked)}
-              />
-              <span>Разрешить профиль и реквизиты чаевых</span>
-            </label>
-          </div>
-        )}
-        {error && <div className="inline-error">{error}</div>}
-        {message && <div className="inline-success">{message}</div>}
-        {manageable && (
+            </div>
+          )}
+          {error && <div className="inline-error">{error}</div>}
           <div className="action-row">
             <Button type="submit" disabled={busy}>
               {busy ? "Сохраняем…" : "Сохранить"}
@@ -447,21 +467,19 @@ function StaffMemberEditor({
               onClick={() => void toggleAccess()}
               disabled={busy}
             >
-              {member.is_active ? "Отключить доступ" : "Включить доступ"}
+              {member.is_active ? "Отключить" : "Включить"}
             </Button>
-            {member.is_active && (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => void revokeSessions()}
-                disabled={busy}
-              >
-                Завершить сеансы
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => void remove()}
+              disabled={busy}
+            >
+              Удалить
+            </Button>
           </div>
-        )}
-      </form>
+        </form>
+      )}
     </Panel>
   );
 }
@@ -474,7 +492,7 @@ export function AdminStaffPage() {
     coffeeApi.getAdminUsers(undefined, "active"),
   );
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState<"all" | "active" | "inactive">("all");
+  const [active, setActive] = useState<"all" | "active" | "inactive">("active");
   const [showCreate, setShowCreate] = useState(false);
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState<"staff" | "admin">("staff");
@@ -679,6 +697,7 @@ export function AdminStaffPage() {
                 key={`${member.id}:${member.updated_at}:${member.is_active}`}
                 member={member}
                 canManageAdmins={canManageAdmins}
+                currentUserId={actor?.id}
                 onSaved={staffResource.reload}
               />
             ))}

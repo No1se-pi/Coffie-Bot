@@ -296,7 +296,7 @@ class AdminRepository:
         page: int,
         page_size: int,
     ) -> StaffPage:
-        filters = []
+        filters: list[ColumnElement[bool]] = [StaffMember.archived_at.is_(None)]
         if role is not None:
             filters.append(StaffMember.role == role)
         if active is not None:
@@ -377,7 +377,10 @@ class AdminRepository:
             (
                 await self._session.scalars(
                     select(StaffMember)
-                    .where(StaffMember.role == Role.OWNER)
+                    .where(
+                        StaffMember.role == Role.OWNER,
+                        StaffMember.archived_at.is_(None),
+                    )
                     .order_by(StaffMember.id)
                     .with_for_update()
                 )
@@ -396,14 +399,21 @@ class AdminRepository:
         staff: StaffMember,
         permissions: dict[PermissionCode, bool],
     ) -> None:
-        staff.permissions[:] = [
-            StaffPermission(
-                staff_member_id=staff.id,
-                permission=permission,
-                allowed=allowed,
-            )
-            for permission, allowed in sorted(permissions.items(), key=lambda item: item[0].value)
-        ]
+        existing = {value.permission: value for value in staff.permissions}
+        for permission, allowed in sorted(permissions.items(), key=lambda item: item[0].value):
+            current = existing.pop(permission, None)
+            if current is None:
+                staff.permissions.append(
+                    StaffPermission(
+                        staff_member_id=staff.id,
+                        permission=permission,
+                        allowed=allowed,
+                    )
+                )
+            else:
+                current.allowed = allowed
+        for obsolete in existing.values():
+            staff.permissions.remove(obsolete)
 
     async def revoke_user_sessions(
         self,

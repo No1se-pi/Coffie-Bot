@@ -50,6 +50,7 @@ class RecordingAdminRepository:
         self.deleted_feedback: list[FeedbackItem] = []
         self.staff_user: User | None = None
         self.permission_overrides: dict[PermissionCode, bool] | None = None
+        self.staff_permissions_were_initialized = False
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
@@ -87,9 +88,10 @@ class RecordingAdminRepository:
 
     def replace_staff_permissions(
         self,
-        _staff: StaffMember,
+        staff: StaffMember,
         permissions: dict[PermissionCode, bool],
     ) -> None:
+        self.staff_permissions_were_initialized = "permissions" in staff.__dict__
         self.permission_overrides = permissions
 
 
@@ -280,4 +282,5 @@ async def test_created_staff_keeps_loaded_user_for_response_and_permissions() ->
     )
 
     assert staff.user is repository.staff_user
+    assert repository.staff_permissions_were_initialized is True
     assert repository.permission_overrides == {PermissionCode.POINTS_REDEEM: False}

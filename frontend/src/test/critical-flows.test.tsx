@@ -234,7 +234,15 @@ describe("critical Mini App flows", () => {
     );
 
     expect(await screen.findByText("Анна")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Изменение баллов"), "50");
+    expect(screen.getByRole("button", { name: "Начислить" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const amountInput = screen.getByLabelText("Количество баллов");
+    expect(amountInput).toHaveAttribute("type", "number");
+    expect(amountInput).toHaveAttribute("inputmode", "numeric");
+    expect(amountInput).toHaveAttribute("min", "1");
+    await user.type(amountInput, "50");
     await user.type(screen.getByLabelText("Причина"), "Компенсация за ошибку");
     await user.click(screen.getByRole("button", { name: "Показать итог" }));
     expect(
@@ -251,6 +259,69 @@ describe("critical Mini App flows", () => {
       user_id: "user-1",
       delta_points: 50,
       reason: "Компенсация за ошибку",
+    });
+  });
+
+  it("forms a negative adjustment after an explicit debit choice", async () => {
+    const user = userEvent.setup();
+    const adminUser: AdminUser = {
+      id: "user-1",
+      telegram_id: "10001",
+      display_name: "Анна",
+      short_code: "BEAN2026",
+      balance_points: 284,
+      status: "active",
+      visit_streak: 3,
+      stamps: 6,
+      active_rewards: 1,
+      created_at: "2026-07-01T10:00:00Z",
+    };
+    vi.spyOn(coffeeApi, "getAdminUser").mockResolvedValue(adminUser);
+    const confirm = vi.spyOn(coffeeApi, "confirmAdjustment").mockResolvedValue({
+      operation_id: "adjustment-2",
+      status: "completed",
+      delta_points: -20,
+      balance_after: 264,
+      created_at: "2026-07-21T10:00:00Z",
+    });
+    render(
+      <MemoryRouter initialEntries={["/admin/users/user-1/adjust"]}>
+        <Routes>
+          <Route
+            path="/admin/users/:userId/adjust"
+            element={<AdminAdjustmentPage />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Анна")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Списать" }));
+    expect(screen.getByRole("button", { name: "Списать" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.type(screen.getByLabelText("Количество баллов"), "20");
+    await user.type(screen.getByLabelText("Причина"), "Исправление начисления");
+    await user.click(screen.getByRole("button", { name: "Показать итог" }));
+
+    expect(
+      screen.getByLabelText("Предпросмотр корректировки"),
+    ).toHaveTextContent("-20");
+    expect(
+      screen.getByLabelText("Предпросмотр корректировки"),
+    ).toHaveTextContent("264");
+    await user.click(
+      screen.getByRole("button", { name: /подтвердить корректировку/i }),
+    );
+
+    expect(
+      await screen.findByText("Баланс скорректирован"),
+    ).toBeInTheDocument();
+    expect(confirm).toHaveBeenCalledWith({
+      user_id: "user-1",
+      delta_points: -20,
+      reason: "Исправление начисления",
     });
   });
 

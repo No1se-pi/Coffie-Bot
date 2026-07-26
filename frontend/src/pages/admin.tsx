@@ -955,7 +955,8 @@ export function AdminFeedbackPage() {
 export function AdminAdjustmentPage() {
   const { userId = "" } = useParams();
   const resource = useResource(() => coffeeApi.getAdminUser(userId), [userId]);
-  const [delta, setDelta] = useState("");
+  const [direction, setDirection] = useState<"credit" | "debit">("credit");
+  const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<AdjustmentPreview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -969,11 +970,12 @@ export function AdminAdjustmentPage() {
     event.preventDefault();
     setError(null);
     setResult(null);
-    const value = Number(delta);
-    if (!Number.isInteger(value) || value === 0) {
-      setError("Введите целое количество баллов со знаком");
+    const unsignedValue = Number(amount);
+    if (!Number.isInteger(unsignedValue) || unsignedValue <= 0) {
+      setError("Введите целое положительное количество баллов");
       return;
     }
+    const value = direction === "credit" ? unsignedValue : -unsignedValue;
     if (reason.trim().length < 3) {
       setError("Укажите понятную причину корректировки");
       return;
@@ -1108,12 +1110,52 @@ export function AdminAdjustmentPage() {
               </div>
             ) : (
               <form className="form" onSubmit={makePreview}>
-                <Field label="Изменение баллов" hint="Например, 50 или -20">
+                <div className="field">
+                  <span className="field__label">Действие с балансом</span>
+                  <div
+                    className="action-row"
+                    role="group"
+                    aria-label="Действие с балансом"
+                  >
+                    <Button
+                      type="button"
+                      variant={direction === "credit" ? "primary" : "secondary"}
+                      aria-pressed={direction === "credit"}
+                      onClick={() => {
+                        setDirection("credit");
+                        setError(null);
+                      }}
+                    >
+                      Начислить
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={direction === "debit" ? "danger" : "secondary"}
+                      aria-pressed={direction === "debit"}
+                      onClick={() => {
+                        setDirection("debit");
+                        setError(null);
+                      }}
+                    >
+                      Списать
+                    </Button>
+                  </div>
+                </div>
+                <Field
+                  label="Количество баллов"
+                  hint="Введите целое число без знака"
+                >
                   <input
-                    value={delta}
-                    onChange={(event) => setDelta(event.target.value)}
+                    type="number"
+                    value={amount}
+                    onChange={(event) => {
+                      setAmount(event.target.value);
+                      setError(null);
+                    }}
                     inputMode="numeric"
-                    placeholder="+50"
+                    min={1}
+                    step={1}
+                    placeholder="50"
                   />
                 </Field>
                 <Field label="Причина" hint="Причина попадёт в журнал аудита">

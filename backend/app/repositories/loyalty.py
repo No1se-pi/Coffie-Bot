@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import cast
@@ -10,7 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import Select, String, func, or_, select, update
 from sqlalchemy import cast as sql_cast
-from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import Session, User
 from app.models.audit import AuditEvent
@@ -81,8 +83,22 @@ class LoyaltyRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    def transaction(self) -> AsyncSessionTransaction:
-        return self._session.begin()
+    def transaction(self) -> AbstractAsyncContextManager[None]:
+        return self._transaction()
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncIterator[None]:
+        if not self._session.in_transaction():
+            async with self._session.begin():
+                yield
+            return
+        try:
+            yield
+        except BaseException:
+            await self._session.rollback()
+            raise
+        else:
+            await self._session.commit()
 
     async def acquire_idempotency_lock(self, namespace: str, key: str) -> None:
         """Serialise creation of an idempotency row that does not exist yet."""

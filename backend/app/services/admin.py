@@ -743,6 +743,7 @@ class AdminService:
                 bio=bio,
                 is_active=True,
                 can_edit_tip_profile=can_edit_tip_profile,
+                permissions=[],
             )
             self._repository.add(staff)
             await self._repository.flush()

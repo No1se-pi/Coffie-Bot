@@ -242,7 +242,11 @@ class AdminRepository:
         page: int,
         page_size: int,
     ) -> FeedbackPage:
-        filters = [] if feedback_status is None else [FeedbackItem.status == feedback_status]
+        filters = (
+            [FeedbackItem.status != FeedbackStatus.ARCHIVED]
+            if feedback_status is None
+            else [FeedbackItem.status == feedback_status]
+        )
         total = int(
             await self._session.scalar(
                 select(func.count()).select_from(FeedbackItem).where(*filters)
@@ -279,6 +283,9 @@ class AdminRepository:
             statement = statement.with_for_update(of=FeedbackItem)
         row = (await self._session.execute(statement)).one_or_none()
         return None if row is None else FeedbackRecord(feedback=row[0], user=row[1])
+
+    async def delete_feedback(self, feedback: FeedbackItem) -> None:
+        await self._session.delete(feedback)
 
     async def list_staff(
         self,

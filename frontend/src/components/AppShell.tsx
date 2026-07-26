@@ -47,6 +47,7 @@ const navItems: Record<
   admin: [
     { to: "/admin", label: "Обзор", icon: "⌂", end: true },
     { to: "/admin/users", label: "Клиенты", icon: "○" },
+    { to: "/admin/staff", label: "Сотрудники", icon: "◇" },
     { to: "/admin/events", label: "События", icon: "↻" },
     { to: "/admin/feedback", label: "Отзывы", icon: "★" },
     { to: "/admin/settings", label: "Настройки", icon: "⚙" },

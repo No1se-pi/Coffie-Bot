@@ -81,6 +81,7 @@ Preview не принимает и не возвращает секреты; con
 - `GET|POST|PATCH /admin/promotions`; explicit `/publish` and `/archive` actions.
 - `GET|POST|PATCH /admin/menu/categories`, `/admin/menu/items`; hide вместо destructive delete.
 - `GET /admin/feedback`, `PATCH /admin/feedback/{id}`.
+- `DELETE /admin/feedback/{id}` — только после переноса в архив; audit event сохраняется.
 - `POST /admin/media` multipart upload; metadata response, no client-controlled storage path.
 - `GET|POST /admin/broadcasts`, `GET /admin/broadcasts/{id}`; `/preview`, `/{id}/confirm`, `/{id}/cancel`.
 - `GET /admin/tip-profiles/pending`; `POST /admin/tip-profiles/{id}/approve|hide`.

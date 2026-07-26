@@ -3,13 +3,16 @@ import { Link, useParams } from "react-router-dom";
 import { coffeeApi } from "../api/client";
 import type {
   AdminFeedback,
+  AdminStaffMember,
   AdjustmentPreview,
   FeedbackStatus,
   LoyaltySettings,
   MenuCategory,
   MenuItem,
+  OperationalPermission,
   Promotion,
 } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
 import { useResource } from "../hooks/useResource";
 import { formatDateTime, formatMoney } from "../utils/format";
 import {
@@ -59,6 +62,11 @@ export function AdminOverviewPage() {
               <span>↻</span>
               <strong>События</strong>
               <small>Аудит действий</small>
+            </Link>
+            <Link to="/admin/staff">
+              <span>◇</span>
+              <strong>Сотрудники</strong>
+              <small>Роли, права и доступ</small>
             </Link>
             <Link to="/admin/settings">
               <span>⚙</span>
@@ -203,6 +211,488 @@ export function AdminUsersPage() {
   );
 }
 
+const staffPermissionLabels: Record<OperationalPermission, string> = {
+  "card.lookup": "Поиск и сканирование карт",
+  "points.accrue": "Начисление баллов",
+  "points.redeem": "Списание баллов",
+  "visits.mark": "Отметка посещений",
+  "stamps.add": "Добавление штампов",
+  "rewards.redeem": "Погашение наград",
+  "operations.reverse_own": "Отмена собственных операций",
+  "tip_profile.manage_own": "Редактирование профиля и чаевых",
+};
+
+const operationalPermissions = Object.keys(
+  staffPermissionLabels,
+) as OperationalPermission[];
+
+function defaultStaffPermissions(): Record<OperationalPermission, boolean> {
+  return Object.fromEntries(
+    operationalPermissions.map((permission) => [permission, true]),
+  ) as Record<OperationalPermission, boolean>;
+}
+
+function resolvedStaffPermissions(
+  member: AdminStaffMember,
+): Record<OperationalPermission, boolean> {
+  const values = defaultStaffPermissions();
+  member.permissions.forEach((override) => {
+    values[override.permission] = override.allowed;
+  });
+  return values;
+}
+
+function StaffMemberEditor({
+  member,
+  canManageAdmins,
+  onSaved,
+}: {
+  member: AdminStaffMember;
+  canManageAdmins: boolean;
+  onSaved: () => Promise<void>;
+}) {
+  const [displayName, setDisplayName] = useState(member.display_name);
+  const [position, setPosition] = useState(member.position ?? "");
+  const [bio, setBio] = useState(member.bio ?? "");
+  const [role, setRole] = useState<AdminStaffMember["role"]>(member.role);
+  const [canEditTipProfile, setCanEditTipProfile] = useState(
+    member.can_edit_tip_profile,
+  );
+  const [permissions, setPermissions] = useState(() =>
+    resolvedStaffPermissions(member),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const manageable =
+    member.role === "staff" || (member.role === "admin" && canManageAdmins);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      if (role !== member.role) {
+        await coffeeApi.changeAdminStaffRole(member.id, role);
+      }
+      await coffeeApi.updateAdminStaff(member.id, {
+        display_name: displayName.trim() || null,
+        position: position.trim() || null,
+        bio: bio.trim() || null,
+        can_edit_tip_profile: canEditTipProfile,
+        permissions: role === "staff" ? permissions : undefined,
+      });
+      setMessage("Изменения сохранены");
+      await onSaved();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось обновить сотрудника",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleAccess = async () => {
+    const nextActive = !member.is_active;
+    if (
+      !nextActive &&
+      !window.confirm(
+        "Отключить сотрудника? Все его активные сеансы будут завершены.",
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await coffeeApi.updateAdminStaff(member.id, { is_active: nextActive });
+      await onSaved();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось изменить доступ сотрудника",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revokeSessions = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await coffeeApi.revokeAdminStaffSessions(member.id);
+      setMessage(`Завершено сеансов: ${result.revoked_sessions}`);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось завершить сеансы",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel className="staff-admin-card">
+      <div className="section-heading">
+        <div>
+          <div className="tag-row">
+            <Badge tone={member.is_active ? "success" : "danger"}>
+              {member.is_active ? "Активен" : "Отключён"}
+            </Badge>
+            <Badge>
+              {member.role === "owner"
+                ? "Владелец"
+                : member.role === "admin"
+                  ? "Администратор"
+                  : "Сотрудник"}
+            </Badge>
+          </div>
+          <h2>{member.display_name}</h2>
+          <small>
+            {member.username
+              ? `@${member.username}`
+              : `Telegram ${member.telegram_id}`}
+          </small>
+        </div>
+      </div>
+      <form className="form" onSubmit={(event) => void save(event)}>
+        <div className="form-grid">
+          <Field label="Отображаемое имя">
+            <input
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              disabled={!manageable}
+            />
+          </Field>
+          <Field label="Должность">
+            <input
+              value={position}
+              onChange={(event) => setPosition(event.target.value)}
+              disabled={!manageable}
+              placeholder="Бариста"
+            />
+          </Field>
+          <Field label="Роль">
+            <select
+              value={role}
+              onChange={(event) =>
+                setRole(event.target.value as AdminStaffMember["role"])
+              }
+              disabled={!manageable}
+            >
+              <option value="staff">Сотрудник</option>
+              {canManageAdmins && <option value="admin">Администратор</option>}
+              {member.role === "owner" && (
+                <option value="owner">Владелец</option>
+              )}
+            </select>
+          </Field>
+        </div>
+        <Field label="Описание">
+          <textarea
+            rows={2}
+            value={bio}
+            onChange={(event) => setBio(event.target.value)}
+            disabled={!manageable}
+          />
+        </Field>
+        {role === "staff" && (
+          <div className="permission-grid">
+            {operationalPermissions.map((permission) => (
+              <label className="checkbox" key={permission}>
+                <input
+                  type="checkbox"
+                  checked={permissions[permission]}
+                  disabled={!manageable}
+                  onChange={(event) =>
+                    setPermissions((current) => ({
+                      ...current,
+                      [permission]: event.target.checked,
+                    }))
+                  }
+                />
+                <span>{staffPermissionLabels[permission]}</span>
+              </label>
+            ))}
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={canEditTipProfile}
+                disabled={!manageable}
+                onChange={(event) => setCanEditTipProfile(event.target.checked)}
+              />
+              <span>Разрешить профиль и реквизиты чаевых</span>
+            </label>
+          </div>
+        )}
+        {error && <div className="inline-error">{error}</div>}
+        {message && <div className="inline-success">{message}</div>}
+        {manageable && (
+          <div className="action-row">
+            <Button type="submit" disabled={busy}>
+              {busy ? "Сохраняем…" : "Сохранить"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void toggleAccess()}
+              disabled={busy}
+            >
+              {member.is_active ? "Отключить доступ" : "Включить доступ"}
+            </Button>
+            {member.is_active && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void revokeSessions()}
+                disabled={busy}
+              >
+                Завершить сеансы
+              </Button>
+            )}
+          </div>
+        )}
+      </form>
+    </Panel>
+  );
+}
+
+export function AdminStaffPage() {
+  const { actor } = useAuth();
+  const canManageAdmins = actor?.role === "owner";
+  const staffResource = useResource(coffeeApi.getAdminStaff);
+  const customersResource = useResource(() =>
+    coffeeApi.getAdminUsers(undefined, "active"),
+  );
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState<"all" | "active" | "inactive">("all");
+  const [showCreate, setShowCreate] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [role, setRole] = useState<"staff" | "admin">("staff");
+  const [displayName, setDisplayName] = useState("");
+  const [position, setPosition] = useState("");
+  const [permissions, setPermissions] = useState(defaultStaffPermissions);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const existingUserIds = useMemo(
+    () => new Set(staffResource.data?.items.map((item) => item.user_id) ?? []),
+    [staffResource.data],
+  );
+  const availableCustomers = useMemo(
+    () =>
+      customersResource.data?.items.filter(
+        (user) => !existingUserIds.has(user.id),
+      ) ?? [],
+    [customersResource.data, existingUserIds],
+  );
+  const visibleStaff = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return (staffResource.data?.items ?? []).filter((member) => {
+      const matchesQuery =
+        !normalized ||
+        [
+          member.display_name,
+          member.username,
+          member.position,
+          member.telegram_id,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized));
+      const matchesActive =
+        active === "all" || member.is_active === (active === "active");
+      return matchesQuery && matchesActive;
+    });
+  }, [active, query, staffResource.data]);
+
+  const create = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!userId) {
+      setError("Выберите зарегистрированного клиента");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      await coffeeApi.createAdminStaff({
+        user_id: userId,
+        role,
+        display_name: displayName.trim() || null,
+        position: position.trim() || null,
+        bio: null,
+        can_edit_tip_profile: true,
+        permissions: role === "staff" ? permissions : {},
+      });
+      setUserId("");
+      setDisplayName("");
+      setPosition("");
+      setPermissions(defaultStaffPermissions());
+      setShowCreate(false);
+      await staffResource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось добавить сотрудника",
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Page
+      title="Сотрудники"
+      eyebrow="Роли и доступ"
+      action={
+        <Button onClick={() => setShowCreate((value) => !value)}>
+          {showCreate ? "Закрыть" : "Добавить сотрудника"}
+        </Button>
+      }
+    >
+      {showCreate && (
+        <Panel>
+          <form className="form" onSubmit={(event) => void create(event)}>
+            <h2>Новый сотрудник</h2>
+            <p className="muted">
+              Человек должен хотя бы один раз открыть бота, после чего появится
+              в списке клиентов.
+            </p>
+            <div className="form-grid">
+              <Field label="Клиент">
+                <select
+                  value={userId}
+                  onChange={(event) => setUserId(event.target.value)}
+                >
+                  <option value="">Выберите клиента</option>
+                  {availableCustomers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.display_name} · {user.telegram_id}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Роль">
+                <select
+                  value={role}
+                  onChange={(event) =>
+                    setRole(event.target.value as "staff" | "admin")
+                  }
+                >
+                  <option value="staff">Сотрудник</option>
+                  {canManageAdmins && (
+                    <option value="admin">Администратор</option>
+                  )}
+                </select>
+              </Field>
+              <Field label="Отображаемое имя">
+                <input
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="Можно оставить пустым"
+                />
+              </Field>
+              <Field label="Должность">
+                <input
+                  value={position}
+                  onChange={(event) => setPosition(event.target.value)}
+                  placeholder="Бариста"
+                />
+              </Field>
+            </div>
+            {role === "staff" && (
+              <div className="permission-grid">
+                {operationalPermissions.map((permission) => (
+                  <label className="checkbox" key={permission}>
+                    <input
+                      type="checkbox"
+                      checked={permissions[permission]}
+                      onChange={(event) =>
+                        setPermissions((current) => ({
+                          ...current,
+                          [permission]: event.target.checked,
+                        }))
+                      }
+                    />
+                    <span>{staffPermissionLabels[permission]}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {error && <div className="inline-error">{error}</div>}
+            <Button type="submit" disabled={creating}>
+              {creating ? "Добавляем…" : "Добавить"}
+            </Button>
+          </form>
+        </Panel>
+      )}
+      <Panel>
+        <div className="form-grid">
+          <Field label="Поиск">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Имя, username, должность или Telegram ID"
+            />
+          </Field>
+          <Field label="Доступ">
+            <select
+              value={active}
+              onChange={(event) =>
+                setActive(event.target.value as typeof active)
+              }
+            >
+              <option value="all">Все</option>
+              <option value="active">Активные</option>
+              <option value="inactive">Отключённые</option>
+            </select>
+          </Field>
+        </div>
+      </Panel>
+      {(staffResource.loading || customersResource.loading) && <Loader />}
+      {staffResource.error && (
+        <ErrorState
+          error={staffResource.error}
+          onRetry={staffResource.reload}
+        />
+      )}
+      {customersResource.error && (
+        <ErrorState
+          error={customersResource.error}
+          onRetry={customersResource.reload}
+        />
+      )}
+      {staffResource.data &&
+        (visibleStaff.length ? (
+          <div className="card-list">
+            {visibleStaff.map((member) => (
+              <StaffMemberEditor
+                key={`${member.id}:${member.updated_at}:${member.is_active}`}
+                member={member}
+                canManageAdmins={canManageAdmins}
+                onSaved={staffResource.reload}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="Сотрудников не нашли"
+            text="Измените фильтр или добавьте нового сотрудника."
+          />
+        ))}
+    </Page>
+  );
+}
+
 const feedbackStatusLabels: Record<FeedbackStatus, string> = {
   new: "Новый",
   in_progress: "В работе",
@@ -220,10 +710,12 @@ const feedbackCategoryLabels: Record<AdminFeedback["category"], string> = {
 
 function FeedbackCard({
   item,
-  onSaved,
+  onChanged,
+  onDeleted,
 }: {
   item: AdminFeedback;
-  onSaved: (item: AdminFeedback) => void;
+  onChanged: () => Promise<void>;
+  onDeleted: () => Promise<void>;
 }) {
   const [status, setStatus] = useState<FeedbackStatus>(item.status);
   const [note, setNote] = useState(item.internal_note ?? "");
@@ -234,15 +726,76 @@ function FeedbackCard({
     setSaving(true);
     setError(null);
     try {
-      onSaved(
-        await coffeeApi.updateAdminFeedback(item.id, {
-          status,
-          internal_note: note.trim() || null,
-        }),
-      );
+      await coffeeApi.updateAdminFeedback(item.id, {
+        status,
+        internal_note: note.trim() || null,
+        assigned_to_staff_id: item.assigned_to_staff_id ?? null,
+      });
+      await onChanged();
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Не удалось сохранить отзыв",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const archive = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await coffeeApi.updateAdminFeedback(item.id, {
+        status: "archived",
+        internal_note: note.trim() || null,
+        assigned_to_staff_id: item.assigned_to_staff_id ?? null,
+      });
+      await onChanged();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось скрыть отзыв",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const restore = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await coffeeApi.updateAdminFeedback(item.id, {
+        status: "new",
+        internal_note: note.trim() || null,
+        assigned_to_staff_id: item.assigned_to_staff_id ?? null,
+      });
+      await onChanged();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить отзыв",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (
+      !window.confirm(
+        "Удалить отзыв без возможности восстановления? Запись аудита сохранится.",
+      )
+    )
+      return;
+    setSaving(true);
+    setError(null);
+    try {
+      await coffeeApi.deleteAdminFeedback(item.id);
+      await onDeleted();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось удалить отзыв",
       );
     } finally {
       setSaving(false);
@@ -292,37 +845,86 @@ function FeedbackCard({
         </Field>
       </div>
       {error && <div className="inline-error">{error}</div>}
-      <Button onClick={() => void save()} disabled={saving}>
-        {saving ? "Сохраняем…" : "Сохранить"}
-      </Button>
+      <div className="action-row">
+        <Button onClick={() => void save()} disabled={saving}>
+          {saving ? "Сохраняем…" : "Сохранить"}
+        </Button>
+        {item.status === "archived" ? (
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => void restore()}
+              disabled={saving}
+            >
+              Восстановить
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => void remove()}
+              disabled={saving}
+            >
+              Удалить навсегда
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={() => void archive()}
+            disabled={saving}
+          >
+            Спрятать в архив
+          </Button>
+        )}
+      </div>
     </Panel>
   );
 }
 
 export function AdminFeedbackPage() {
+  const [view, setView] = useState<"active" | "archive">("active");
   const [status, setStatus] = useState("");
   const resource = useResource(
-    () => coffeeApi.getAdminFeedback(status || undefined),
-    [status],
+    () =>
+      coffeeApi.getAdminFeedback(
+        view === "archive" ? "archived" : status || undefined,
+      ),
+    [status, view],
   );
-  const [updates, setUpdates] = useState<Record<string, AdminFeedback>>({});
 
   return (
     <Page title="Отзывы" eyebrow="Обратная связь клиентов">
       <Panel>
-        <Field label="Статус">
-          <select
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
+        <div className="chip-row">
+          <button
+            className={`chip ${view === "active" ? "is-active" : ""}`}
+            onClick={() => setView("active")}
           >
-            <option value="">Все отзывы</option>
-            {Object.entries(feedbackStatusLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </Field>
+            Текущие
+          </button>
+          <button
+            className={`chip ${view === "archive" ? "is-active" : ""}`}
+            onClick={() => setView("archive")}
+          >
+            Архив
+          </button>
+        </div>
+        {view === "active" && (
+          <Field label="Статус">
+            <select
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+            >
+              <option value="">Все текущие</option>
+              {Object.entries(feedbackStatusLabels)
+                .filter(([value]) => value !== "archived")
+                .map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        )}
       </Panel>
       {resource.loading && <Loader />}
       {resource.error && (
@@ -331,21 +933,14 @@ export function AdminFeedbackPage() {
       {resource.data &&
         (resource.data.items.length ? (
           <div className="feedback-list">
-            {resource.data.items.map((item) => {
-              const current = updates[item.id] ?? item;
-              return (
-                <FeedbackCard
-                  key={`${current.id}:${current.status}:${current.internal_note ?? ""}`}
-                  item={current}
-                  onSaved={(saved) =>
-                    setUpdates((previous) => ({
-                      ...previous,
-                      [saved.id]: saved,
-                    }))
-                  }
-                />
-              );
-            })}
+            {resource.data.items.map((item) => (
+              <FeedbackCard
+                key={`${item.id}:${item.status}:${item.internal_note ?? ""}`}
+                item={item}
+                onChanged={resource.reload}
+                onDeleted={resource.reload}
+              />
+            ))}
           </div>
         ) : (
           <EmptyState

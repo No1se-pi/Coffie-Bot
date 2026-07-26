@@ -6,6 +6,7 @@ import { coffeeApi } from "../api/client";
 import type {
   AccrualPreview,
   AdminFeedback,
+  AdminStaffMember,
   AdminUserListItem,
   AdminUser,
   CardData,
@@ -24,8 +25,10 @@ import {
   AdminAdjustmentPage,
   AdminFeedbackPage,
   AdminMenuPage,
+  AdminStaffPage,
   AdminUsersPage,
 } from "../pages/admin";
+import { AuthContext } from "../auth/AuthContext";
 import { applyTheme, readTheme } from "../theme";
 
 const card: CardData = {
@@ -327,7 +330,113 @@ describe("critical Mini App flows", () => {
     expect(update).toHaveBeenCalledWith("feedback-1", {
       status: "in_progress",
       internal_note: "Связаться завтра",
+      assigned_to_staff_id: null,
     });
+  });
+
+  it("keeps hidden reviews in an archive and deletes only from there", async () => {
+    const user = userEvent.setup();
+    const archived: AdminFeedback = {
+      id: "feedback-archived",
+      user_id: "user-1",
+      user_display_name: "Анна",
+      rating: 1,
+      category: "service",
+      message: "Архивный отзыв",
+      may_contact: false,
+      status: "archived",
+      created_at: "2026-07-21T10:00:00Z",
+    };
+    vi.spyOn(coffeeApi, "getAdminFeedback").mockImplementation(
+      async (status) => ({
+        items: status === "archived" ? [archived] : [],
+        page: 1,
+        page_size: 50,
+        total: status === "archived" ? 1 : 0,
+      }),
+    );
+    const remove = vi
+      .spyOn(coffeeApi, "deleteAdminFeedback")
+      .mockResolvedValue();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <MemoryRouter>
+        <AdminFeedbackPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Архив" }));
+    expect(await screen.findByText("Архивный отзыв")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Удалить навсегда" }));
+
+    expect(remove).toHaveBeenCalledWith("feedback-archived");
+  });
+
+  it("lets the owner revoke an employee access immediately", async () => {
+    const user = userEvent.setup();
+    const member: AdminStaffMember = {
+      id: "staff-1",
+      user_id: "user-1",
+      telegram_id: "10001",
+      username: "anna",
+      display_name: "Анна",
+      position: "Бариста",
+      role: "staff",
+      is_active: true,
+      can_edit_tip_profile: true,
+      permissions: [],
+      created_at: "2026-07-01T10:00:00Z",
+      updated_at: "2026-07-21T10:00:00Z",
+    };
+    vi.spyOn(coffeeApi, "getAdminStaff").mockResolvedValue({
+      items: [member],
+      page: 1,
+      page_size: 100,
+      total: 1,
+    });
+    vi.spyOn(coffeeApi, "getAdminUsers").mockResolvedValue({
+      items: [],
+      page: 1,
+      page_size: 50,
+      total: 0,
+    });
+    const update = vi
+      .spyOn(coffeeApi, "updateAdminStaff")
+      .mockResolvedValue({ ...member, is_active: false });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <AuthContext.Provider
+        value={{
+          actor: {
+            id: "owner-1",
+            telegram_id: "1",
+            display_name: "Владелец",
+            role: "owner",
+            available_roles: ["customer", "owner"],
+            permissions: [],
+          },
+          activeRole: "owner",
+          availableRoles: ["customer", "staff", "owner"],
+          loading: false,
+          error: null,
+          isDemo: false,
+          setActiveRole: vi.fn(),
+          retry: vi.fn(),
+          logout: vi.fn().mockResolvedValue(undefined),
+        }}
+      >
+        <MemoryRouter>
+          <AdminStaffPage />
+        </MemoryRouter>
+      </AuthContext.Provider>,
+    );
+
+    expect(await screen.findByText("Анна")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Отключить доступ" }));
+
+    expect(update).toHaveBeenCalledWith("staff-1", { is_active: false });
   });
 
   it("creates a menu item from the owner content editor", async () => {

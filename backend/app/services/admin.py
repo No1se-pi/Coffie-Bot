@@ -660,6 +660,38 @@ class AdminService:
             await self._repository.flush()
             return record
 
+    async def delete_feedback(
+        self,
+        *,
+        actor: Actor,
+        feedback_id: UUID,
+        metadata: RequestMetadata = EMPTY_METADATA,
+    ) -> None:
+        async with self._repository.transaction():
+            record = await self._repository.get_feedback(feedback_id, for_update=True)
+            if record is None:
+                _not_found("Feedback was not found")
+            if record.feedback.status is not FeedbackStatus.ARCHIVED:
+                _conflict(
+                    "feedback_not_archived",
+                    "Feedback must be archived before permanent deletion",
+                )
+            self._audit(
+                actor=actor,
+                event_type="feedback.deleted",
+                subject_user_id=record.feedback.user_id,
+                object_type="feedback",
+                object_id=record.feedback.id,
+                event_metadata={
+                    "rating": record.feedback.rating,
+                    "category": record.feedback.category.value,
+                },
+                severity=AuditSeverity.WARNING,
+                metadata=metadata,
+            )
+            await self._repository.delete_feedback(record.feedback)
+            await self._repository.flush()
+
     async def list_staff(
         self,
         *,
@@ -704,6 +736,7 @@ class AdminService:
             staff = StaffMember(
                 id=uuid4(),
                 user_id=user_id,
+                user=user,
                 role=role,
                 display_name=display_name,
                 position=position,

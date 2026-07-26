@@ -26,6 +26,7 @@ import {
   AdminOverviewPage,
   AdminPromotionsPage,
   AdminSettingsPage,
+  AdminStaffPage,
   AdminUsersPage,
 } from "./pages/admin";
 
@@ -76,6 +77,7 @@ export default function App() {
               >
                 <Route index element={<AdminOverviewPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
+                <Route path="staff" element={<AdminStaffPage />} />
                 <Route
                   path="users/:userId/adjust"
                   element={<AdminAdjustmentPage />}

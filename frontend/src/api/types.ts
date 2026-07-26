@@ -300,6 +300,45 @@ export interface AdminFeedback {
   created_at: string;
 }
 
+export type OperationalPermission =
+  | "card.lookup"
+  | "points.accrue"
+  | "points.redeem"
+  | "visits.mark"
+  | "stamps.add"
+  | "rewards.redeem"
+  | "operations.reverse_own"
+  | "tip_profile.manage_own";
+
+export interface PermissionOverride {
+  permission: OperationalPermission;
+  allowed: boolean;
+}
+
+export interface AdminStaffMember {
+  id: string;
+  user_id: string;
+  telegram_id: string | number;
+  username?: string | null;
+  display_name: string;
+  position?: string | null;
+  bio?: string | null;
+  role: Exclude<Role, "customer">;
+  is_active: boolean;
+  can_edit_tip_profile: boolean;
+  permissions: PermissionOverride[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StaffMemberDraft {
+  display_name?: string | null;
+  position?: string | null;
+  bio?: string | null;
+  can_edit_tip_profile: boolean;
+  permissions: Partial<Record<OperationalPermission, boolean>>;
+}
+
 export interface LoyaltySettings {
   points_enabled: boolean;
   currency_name: string;

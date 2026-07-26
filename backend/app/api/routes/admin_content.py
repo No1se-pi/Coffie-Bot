@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
@@ -352,3 +352,18 @@ async def update_feedback(
         metadata=_metadata(request),
     )
     return feedback_response(record)
+
+
+@router.delete("/feedback/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_feedback(
+    feedback_id: UUID,
+    request: Request,
+    actor: FeedbackActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> Response:
+    await _service(session).delete_feedback(
+        actor=actor,
+        feedback_id=feedback_id,
+        metadata=_metadata(request),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

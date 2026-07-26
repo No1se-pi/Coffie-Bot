@@ -1704,6 +1704,21 @@ details p {
   gap: 0.7rem;
   margin-bottom: 0.7rem;
 }
+.staff-admin-card .section-heading {
+  margin-bottom: 0.85rem;
+}
+.staff-admin-card .section-heading h2 {
+  margin: 0.4rem 0 0.1rem;
+}
+.permission-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
 .checkbox--standalone {
   align-self: flex-end;
 }
@@ -1861,6 +1876,9 @@ details p {
     padding-inline: 1.25rem;
   }
   .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .permission-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .filter-grid {

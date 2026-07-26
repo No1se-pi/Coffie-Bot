@@ -14,10 +14,18 @@ from pydantic import ValidationError
 
 from app.api.routes import admin_content, admin_staff, media, staff_profile
 from app.core.errors import AppError
-from app.models.access import StaffMember
-from app.models.enums import Role, RoundingMode
+from app.models.access import StaffMember, User
+from app.models.audit import AuditEvent
+from app.models.enums import (
+    FeedbackCategory,
+    FeedbackStatus,
+    PermissionCode,
+    Role,
+    RoundingMode,
+)
 from app.models.loyalty import LoyaltySettings
-from app.repositories.admin import AdminRepository
+from app.models.staff import FeedbackItem
+from app.repositories.admin import AdminRepository, FeedbackRecord
 from app.schemas.admin import (
     MenuItemUpdate,
     PromotionCreate,
@@ -38,6 +46,10 @@ NOW = datetime(2026, 7, 21, 12, tzinfo=UTC)
 class RecordingAdminRepository:
     def __init__(self) -> None:
         self.added: list[object] = []
+        self.feedback_record: FeedbackRecord | None = None
+        self.deleted_feedback: list[FeedbackItem] = []
+        self.staff_user: User | None = None
+        self.permission_overrides: dict[PermissionCode, bool] | None = None
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
@@ -48,6 +60,37 @@ class RecordingAdminRepository:
 
     async def flush(self) -> None:
         return None
+
+    async def get_feedback(
+        self,
+        _feedback_id: object,
+        *,
+        for_update: bool,
+    ) -> FeedbackRecord | None:
+        assert for_update is True
+        return self.feedback_record
+
+    async def delete_feedback(self, feedback: FeedbackItem) -> None:
+        self.deleted_feedback.append(feedback)
+
+    async def get_user_for_staff_creation(self, _user_id: object) -> User | None:
+        return self.staff_user
+
+    async def get_staff_by_user(
+        self,
+        _user_id: object,
+        *,
+        for_update: bool,
+    ) -> StaffMember | None:
+        assert for_update is True
+        return None
+
+    def replace_staff_permissions(
+        self,
+        _staff: StaffMember,
+        permissions: dict[PermissionCode, bool],
+    ) -> None:
+        self.permission_overrides = permissions
 
 
 def _actor(role: Role = Role.OWNER) -> Actor:
@@ -73,6 +116,7 @@ def test_admin_routes_import_and_publish_expected_paths() -> None:
 
     paths = app.openapi()["paths"]
     assert "/api/v1/admin/loyalty-settings" in paths
+    assert "delete" in paths["/api/v1/admin/feedback/{feedback_id}"]
     assert "/api/v1/admin/staff/invites" in paths
     assert "/api/v1/staff/me/tip-profile" in paths
     assert "/api/v1/admin/media" in paths
@@ -180,3 +224,60 @@ def test_admin_cannot_manage_privileged_roles_and_last_owner_is_guarded() -> Non
     with pytest.raises(AppError) as conflict:
         AdminService._guard_last_owner(owner, 1)
     assert conflict.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_feedback_must_be_archived_before_deletion_and_keeps_audit() -> None:
+    repository = RecordingAdminRepository()
+    feedback = FeedbackItem(
+        id=uuid4(),
+        user_id=uuid4(),
+        rating=2,
+        category=FeedbackCategory.SERVICE,
+        message="Long wait",
+        may_contact=False,
+        status=FeedbackStatus.NEW,
+    )
+    repository.feedback_record = FeedbackRecord(
+        feedback=feedback,
+        user=User(id=feedback.user_id, telegram_id=100, first_name="Anna"),
+    )
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    with pytest.raises(AppError) as conflict:
+        await service.delete_feedback(actor=_actor(), feedback_id=feedback.id)
+    assert conflict.value.status_code == 409
+    assert repository.deleted_feedback == []
+
+    feedback.status = FeedbackStatus.ARCHIVED
+    await service.delete_feedback(actor=_actor(), feedback_id=feedback.id)
+
+    assert repository.deleted_feedback == [feedback]
+    audit = next(item for item in repository.added if isinstance(item, AuditEvent))
+    assert audit.event_type == "feedback.deleted"
+    assert audit.object_id == feedback.id
+
+
+@pytest.mark.asyncio
+async def test_created_staff_keeps_loaded_user_for_response_and_permissions() -> None:
+    repository = RecordingAdminRepository()
+    repository.staff_user = User(
+        id=uuid4(),
+        telegram_id=101,
+        first_name="Anna",
+    )
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    staff = await service.create_staff(
+        actor=_actor(),
+        user_id=repository.staff_user.id,
+        role=Role.STAFF,
+        display_name="Anna",
+        position="Barista",
+        bio=None,
+        can_edit_tip_profile=True,
+        permissions={PermissionCode.POINTS_REDEEM: False},
+    )
+
+    assert staff.user is repository.staff_user
+    assert repository.permission_overrides == {PermissionCode.POINTS_REDEEM: False}

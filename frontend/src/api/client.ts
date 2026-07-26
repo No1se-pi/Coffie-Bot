@@ -1,6 +1,7 @@
 import type {
   AccrualPreview,
   Actor,
+  AdminStaffMember,
   AdminOverview,
   AdminFeedback,
   AdminUser,
@@ -26,6 +27,7 @@ import type {
   Reward,
   Role,
   StaffClient,
+  StaffMemberDraft,
   StaffProfile,
   TipProfile,
 } from "./types";
@@ -634,13 +636,69 @@ export const coffeeApi = {
     payload: {
       status: AdminFeedback["status"];
       internal_note?: string | null;
+      assigned_to_staff_id?: string | null;
     },
   ): Promise<AdminFeedback> =>
     isDemoMode
       ? demoApi.updateAdminFeedback(id, payload)
       : request(`/admin/feedback/${encodeURIComponent(id)}`, {
           method: "PATCH",
-          body: jsonBody({ ...payload, assigned_to_staff_id: null }),
+          body: jsonBody(payload),
+        }),
+  deleteAdminFeedback: (id: string): Promise<void> =>
+    isDemoMode
+      ? demoApi.deleteAdminFeedback(id)
+      : request(`/admin/feedback/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
+  getAdminStaff: (
+    query?: string,
+    active?: boolean,
+  ): Promise<ListResponse<AdminStaffMember>> =>
+    isDemoMode
+      ? demoApi.getAdminStaff(query, active)
+      : request(
+          `/admin/staff${queryString({ query, active, page: 1, page_size: 100 })}`,
+        ),
+  createAdminStaff: (
+    payload: StaffMemberDraft & {
+      user_id: string;
+      role: Exclude<Role, "customer">;
+    },
+  ): Promise<AdminStaffMember> =>
+    isDemoMode
+      ? demoApi.createAdminStaff(payload)
+      : request("/admin/staff", {
+          method: "POST",
+          body: jsonBody(payload),
+        }),
+  updateAdminStaff: (
+    id: string,
+    payload: Partial<StaffMemberDraft> & { is_active?: boolean },
+  ): Promise<AdminStaffMember> =>
+    isDemoMode
+      ? demoApi.updateAdminStaff(id, payload)
+      : request(`/admin/staff/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: jsonBody(payload),
+        }),
+  changeAdminStaffRole: (
+    id: string,
+    role: Exclude<Role, "customer">,
+  ): Promise<AdminStaffMember> =>
+    isDemoMode
+      ? demoApi.changeAdminStaffRole(id, role)
+      : request(`/admin/staff/${encodeURIComponent(id)}/role`, {
+          method: "POST",
+          body: jsonBody({ role }),
+        }),
+  revokeAdminStaffSessions: (
+    id: string,
+  ): Promise<{ revoked_sessions: number }> =>
+    isDemoMode
+      ? demoApi.revokeAdminStaffSessions(id)
+      : request(`/admin/staff/${encodeURIComponent(id)}/revoke-sessions`, {
+          method: "POST",
         }),
   getSettings: (): Promise<LoyaltySettings> =>
     isDemoMode ? demoApi.getSettings() : request("/admin/loyalty-settings"),

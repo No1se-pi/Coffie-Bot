@@ -3,6 +3,7 @@ import type {
   AccrualPreview,
   AdminFeedback,
   AdminOverview,
+  AdminStaffMember,
   AdminUser,
   AuditEvent,
   AuthSession,
@@ -20,7 +21,9 @@ import type {
   PublicMoreData,
   RedemptionPreview,
   Reward,
+  Role,
   StaffClient,
+  StaffMemberDraft,
   TipProfile,
 } from "./types";
 
@@ -250,6 +253,23 @@ let adminUsers: AdminUser[] = [
     stamps: 1,
     active_rewards: 0,
     created_at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+  },
+];
+
+let adminStaff: AdminStaffMember[] = [
+  {
+    id: "staff-owner",
+    user_id: "user-demo",
+    telegram_id: "100000001",
+    username: "yaroslav",
+    display_name: "Ярослав",
+    position: "Владелец",
+    role: "owner",
+    is_active: true,
+    can_edit_tip_profile: true,
+    permissions: [],
+    created_at: new Date(Date.now() - 45 * 86_400_000).toISOString(),
+    updated_at: now(),
   },
 ];
 
@@ -748,6 +768,133 @@ export const demoApi = {
       candidate.id === id ? updated : candidate,
     );
     return { ...updated };
+  },
+  async deleteAdminFeedback(id: string) {
+    await wait();
+    const item = feedback.find((candidate) => candidate.id === id);
+    if (!item)
+      throw new ApiError("Отзыв не найден", {
+        status: 404,
+        code: "feedback_not_found",
+      });
+    if (item.status !== "archived")
+      throw new ApiError("Сначала переместите отзыв в архив", {
+        status: 409,
+        code: "feedback_not_archived",
+      });
+    feedback = feedback.filter((candidate) => candidate.id !== id);
+  },
+  async getAdminStaff(query?: string, active?: boolean) {
+    await wait();
+    const normalized = query?.trim().toLowerCase();
+    return list(
+      adminStaff.filter((item) => {
+        const matchesQuery =
+          !normalized ||
+          [item.display_name, item.username, item.position, item.telegram_id]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(normalized));
+        return (
+          matchesQuery && (active === undefined || item.is_active === active)
+        );
+      }),
+    );
+  },
+  async createAdminStaff(
+    payload: StaffMemberDraft & {
+      user_id: string;
+      role: Exclude<Role, "customer">;
+    },
+  ) {
+    await wait();
+    const user = adminUsers.find(
+      (candidate) => candidate.id === payload.user_id,
+    );
+    if (!user)
+      throw new ApiError("Клиент не найден", {
+        status: 404,
+        code: "user_not_found",
+      });
+    if (adminStaff.some((candidate) => candidate.user_id === payload.user_id))
+      throw new ApiError("У клиента уже есть профиль сотрудника", {
+        status: 409,
+        code: "staff_exists",
+      });
+    const item: AdminStaffMember = {
+      id: `staff-${Date.now()}`,
+      user_id: user.id,
+      telegram_id: user.telegram_id,
+      username: user.username,
+      display_name: payload.display_name || user.display_name,
+      position: payload.position,
+      bio: payload.bio,
+      role: payload.role,
+      is_active: true,
+      can_edit_tip_profile: payload.can_edit_tip_profile,
+      permissions: Object.entries(payload.permissions).map(
+        ([permission, allowed]) => ({
+          permission:
+            permission as AdminStaffMember["permissions"][number]["permission"],
+          allowed: Boolean(allowed),
+        }),
+      ),
+      created_at: now(),
+      updated_at: now(),
+    };
+    adminStaff = [...adminStaff, item];
+    return { ...item };
+  },
+  async updateAdminStaff(
+    id: string,
+    payload: Partial<StaffMemberDraft> & { is_active?: boolean },
+  ) {
+    await wait();
+    const item = adminStaff.find((candidate) => candidate.id === id);
+    if (!item)
+      throw new ApiError("Сотрудник не найден", {
+        status: 404,
+        code: "staff_not_found",
+      });
+    const updated: AdminStaffMember = {
+      ...item,
+      ...payload,
+      display_name: payload.display_name ?? item.display_name,
+      permissions: payload.permissions
+        ? Object.entries(payload.permissions).map(([permission, allowed]) => ({
+            permission:
+              permission as AdminStaffMember["permissions"][number]["permission"],
+            allowed: Boolean(allowed),
+          }))
+        : item.permissions,
+      updated_at: now(),
+    };
+    adminStaff = adminStaff.map((candidate) =>
+      candidate.id === id ? updated : candidate,
+    );
+    return { ...updated };
+  },
+  async changeAdminStaffRole(id: string, role: Exclude<Role, "customer">) {
+    await wait();
+    const item = adminStaff.find((candidate) => candidate.id === id);
+    if (!item)
+      throw new ApiError("Сотрудник не найден", {
+        status: 404,
+        code: "staff_not_found",
+      });
+    const updated = { ...item, role, permissions: [], updated_at: now() };
+    adminStaff = adminStaff.map((candidate) =>
+      candidate.id === id ? updated : candidate,
+    );
+    return { ...updated };
+  },
+  async revokeAdminStaffSessions(id: string) {
+    await wait();
+    if (!adminStaff.some((candidate) => candidate.id === id))
+      throw new ApiError("Сотрудник не найден", {
+        status: 404,
+        code: "staff_not_found",
+      });
+    return { revoked_sessions: 1 };
   },
   async getSettings() {
     await wait();

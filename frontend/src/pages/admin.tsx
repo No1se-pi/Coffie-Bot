@@ -491,6 +491,7 @@ export function AdminStaffPage() {
   const customersResource = useResource(() =>
     coffeeApi.getAdminUsers(undefined, "active"),
   );
+  const tipProfilesResource = useResource(coffeeApi.getPendingTipProfiles);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<"all" | "active" | "inactive">("active");
   const [showCreate, setShowCreate] = useState(false);
@@ -501,6 +502,25 @@ export function AdminStaffPage() {
   const [permissions, setPermissions] = useState(defaultStaffPermissions);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [moderatingId, setModeratingId] = useState<string | null>(null);
+
+  const moderateTipProfile = async (id: string, approve: boolean) => {
+    setModeratingId(id);
+    setError(null);
+    try {
+      if (approve) await coffeeApi.approveTipProfile(id);
+      else await coffeeApi.hideTipProfile(id, "Нужна корректировка профиля");
+      await tipProfilesResource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось обработать профиль",
+      );
+    } finally {
+      setModeratingId(null);
+    }
+  };
 
   const existingUserIds = useMemo(
     () => new Set(staffResource.data?.items.map((item) => item.user_id) ?? []),
@@ -652,6 +672,55 @@ export function AdminStaffPage() {
             </Button>
           </form>
         </Panel>
+      )}
+      {tipProfilesResource.data?.items.length ? (
+        <Panel>
+          <div className="section-heading">
+            <div>
+              <h2>Профили на модерации</h2>
+              <p className="muted">Аватар, описание и ссылка на чаевые.</p>
+            </div>
+            <Badge tone="warning">{tipProfilesResource.data.total}</Badge>
+          </div>
+          <div className="compact-list">
+            {tipProfilesResource.data.items.map((profile) => (
+              <article key={profile.id}>
+                <div>
+                  <strong>
+                    {profile.pending_name || profile.staff_display_name}
+                  </strong>
+                  <small>{profile.position || "Сотрудник"}</small>
+                  {profile.pending_bio && <p>{profile.pending_bio}</p>}
+                  {profile.pending_tip_url && (
+                    <small>{profile.pending_tip_url}</small>
+                  )}
+                </div>
+                <div className="action-row">
+                  <Button
+                    variant="secondary"
+                    disabled={moderatingId === profile.id}
+                    onClick={() => void moderateTipProfile(profile.id, false)}
+                  >
+                    Отклонить
+                  </Button>
+                  <Button
+                    disabled={moderatingId === profile.id}
+                    onClick={() => void moderateTipProfile(profile.id, true)}
+                  >
+                    Одобрить
+                  </Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+      {tipProfilesResource.error && (
+        <ErrorState
+          error={tipProfilesResource.error}
+          onRetry={tipProfilesResource.reload}
+          compact
+        />
       )}
       <Panel>
         <div className="form-grid">
@@ -1753,6 +1822,11 @@ function MenuCategoryEditor({
   const [description, setDescription] = useState(category?.description ?? "");
   const [sortOrder, setSortOrder] = useState(category?.sort_order ?? 0);
   const [visible, setVisible] = useState(category?.visible ?? true);
+  const [iconMediaId, setIconMediaId] = useState<string | null>(
+    category?.icon_media_id ?? null,
+  );
+  const [iconUrl, setIconUrl] = useState(category?.icon_url ?? "");
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async (event: FormEvent) => {
@@ -1767,6 +1841,7 @@ function MenuCategoryEditor({
       await coffeeApi.saveMenuCategory(category, {
         name: name.trim(),
         description: description.trim() || null,
+        icon_media_id: iconMediaId,
         sort_order: sortOrder,
         visible,
       });
@@ -1798,6 +1873,40 @@ function MenuCategoryEditor({
             onChange={(event) => setDescription(event.target.value)}
           />
         </Field>
+        <Field label="Иконка категории" hint="JPG, PNG или WebP, до 5 МБ">
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            disabled={uploading}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              setUploading(true);
+              setError(null);
+              void coffeeApi
+                .uploadAdminMedia(file, "menu_category")
+                .then((media) => {
+                  setIconMediaId(media.id);
+                  setIconUrl(media.url);
+                })
+                .catch((reason: unknown) =>
+                  setError(
+                    reason instanceof Error
+                      ? reason.message
+                      : "Не удалось загрузить иконку",
+                  ),
+                )
+                .finally(() => setUploading(false));
+            }}
+          />
+        </Field>
+        {iconUrl && (
+          <img
+            className="avatar avatar--large"
+            src={iconUrl}
+            alt="Предпросмотр иконки"
+          />
+        )}
         <div className="form-grid">
           <Field label="Порядок">
             <input
@@ -1820,7 +1929,7 @@ function MenuCategoryEditor({
           <Button type="button" variant="secondary" onClick={onCancel}>
             Отмена
           </Button>
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving || uploading}>
             {saving ? "Сохраняем…" : "Сохранить категорию"}
           </Button>
         </div>
@@ -1851,6 +1960,14 @@ function MenuItemEditor({
   const [oldPrice, setOldPrice] = useState(
     item?.old_price_minor ? String(item.old_price_minor / 100) : "",
   );
+  const [pointsPrice, setPointsPrice] = useState(
+    item?.points_price ? String(item.points_price) : "",
+  );
+  const [imageMediaId, setImageMediaId] = useState<string | null>(
+    item?.image_media_id ?? null,
+  );
+  const [imageUrl, setImageUrl] = useState(item?.image_url ?? "");
+  const [uploading, setUploading] = useState(false);
   const [volume, setVolume] = useState(item?.volume ?? "");
   const [composition, setComposition] = useState(item?.composition ?? "");
   const [labels, setLabels] = useState(item?.labels?.join(", ") ?? "");
@@ -1862,6 +1979,7 @@ function MenuItemEditor({
     event.preventDefault();
     const priceMinor = Math.round(Number(price) * 100);
     const oldPriceMinor = oldPrice ? Math.round(Number(oldPrice) * 100) : null;
+    const pointsPriceValue = pointsPrice ? Number(pointsPrice) : null;
     if (
       !categoryId ||
       !name.trim() ||
@@ -1875,6 +1993,13 @@ function MenuItemEditor({
       setError("Старая цена должна быть выше текущей");
       return;
     }
+    if (
+      pointsPriceValue !== null &&
+      (!Number.isInteger(pointsPriceValue) || pointsPriceValue <= 0)
+    ) {
+      setError("Цена в баллах должна быть целым положительным числом");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -1882,8 +2007,10 @@ function MenuItemEditor({
         category_id: categoryId,
         name: name.trim(),
         description: description.trim() || null,
+        image_media_id: imageMediaId,
         price_minor: priceMinor,
         old_price_minor: oldPriceMinor,
+        points_price: pointsPriceValue,
         composition: composition.trim() || null,
         volume: volume.trim() || null,
         labels: labels
@@ -1946,6 +2073,18 @@ function MenuItemEditor({
               onChange={(event) => setOldPrice(event.target.value)}
             />
           </Field>
+          <Field
+            label="Цена в баллах"
+            hint="Оставьте пустым, если позицию нельзя купить за баллы"
+          >
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={pointsPrice}
+              onChange={(event) => setPointsPrice(event.target.value)}
+            />
+          </Field>
           <Field label="Объём">
             <input
               value={volume}
@@ -1961,6 +2100,52 @@ function MenuItemEditor({
             />
           </Field>
         </div>
+        <Field label="Фото позиции" hint="JPG, PNG или WebP, до 5 МБ">
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            disabled={uploading}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              setUploading(true);
+              setError(null);
+              void coffeeApi
+                .uploadAdminMedia(file, "menu_item")
+                .then((media) => {
+                  setImageMediaId(media.id);
+                  setImageUrl(media.url);
+                })
+                .catch((reason: unknown) =>
+                  setError(
+                    reason instanceof Error
+                      ? reason.message
+                      : "Не удалось загрузить фото",
+                  ),
+                )
+                .finally(() => setUploading(false));
+            }}
+          />
+        </Field>
+        {imageUrl && (
+          <div className="profile-heading">
+            <img
+              className="avatar avatar--large"
+              src={imageUrl}
+              alt="Предпросмотр"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setImageMediaId(null);
+                setImageUrl("");
+              }}
+            >
+              Убрать фото
+            </Button>
+          </div>
+        )}
         <Field label="Описание">
           <textarea
             rows={2}
@@ -1998,7 +2183,7 @@ function MenuItemEditor({
           <Button type="button" variant="secondary" onClick={onCancel}>
             Отмена
           </Button>
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving || uploading}>
             {saving ? "Сохраняем…" : "Сохранить позицию"}
           </Button>
         </div>
@@ -2185,6 +2370,11 @@ function PromotionEditor({
   const [text, setText] = useState(promotion?.text ?? "");
   const [buttonLabel, setButtonLabel] = useState(promotion?.button_label ?? "");
   const [buttonUrl, setButtonUrl] = useState(promotion?.button_url ?? "");
+  const [imageMediaId, setImageMediaId] = useState<string | null>(
+    promotion?.image_media_id ?? null,
+  );
+  const [imageUrl, setImageUrl] = useState(promotion?.image_url ?? "");
+  const [uploading, setUploading] = useState(false);
   const [startsAt, setStartsAt] = useState(
     promotion?.starts_at?.slice(0, 16) ?? "",
   );
@@ -2213,7 +2403,10 @@ function PromotionEditor({
       await coffeeApi.savePromotion(promotion, {
         title: title.trim(),
         text: text.trim(),
-        button_label: buttonLabel.trim() || null,
+        image_media_id: imageMediaId,
+        button_label: buttonUrl.trim()
+          ? buttonLabel.trim() || "Подробнее"
+          : null,
         button_url: buttonUrl.trim() || null,
         starts_at: startIso,
         ends_at: endIso,
@@ -2244,14 +2437,51 @@ function PromotionEditor({
             onChange={(event) => setText(event.target.value)}
           />
         </Field>
+        <Field label="Обложка акции" hint="JPG, PNG или WebP, до 5 МБ">
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            disabled={uploading}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              setUploading(true);
+              setError(null);
+              void coffeeApi
+                .uploadAdminMedia(file, "promotion")
+                .then((media) => {
+                  setImageMediaId(media.id);
+                  setImageUrl(media.url);
+                })
+                .catch((reason: unknown) =>
+                  setError(
+                    reason instanceof Error
+                      ? reason.message
+                      : "Не удалось загрузить фото",
+                  ),
+                )
+                .finally(() => setUploading(false));
+            }}
+          />
+        </Field>
+        {imageUrl && (
+          <img
+            className="avatar avatar--large"
+            src={imageUrl}
+            alt="Предпросмотр"
+          />
+        )}
         <div className="form-grid">
-          <Field label="Текст кнопки">
+          <Field
+            label="Надпись на кнопке"
+            hint="Если оставить пустой, будет «Подробнее»"
+          >
             <input
               value={buttonLabel}
               onChange={(event) => setButtonLabel(event.target.value)}
             />
           </Field>
-          <Field label="Ссылка кнопки">
+          <Field label="Ссылка акции" hint="Куда попадёт клиент по кнопке">
             <input
               type="url"
               value={buttonUrl}
@@ -2279,7 +2509,7 @@ function PromotionEditor({
           <Button type="button" variant="secondary" onClick={onCancel}>
             Отмена
           </Button>
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving || uploading}>
             {saving ? "Сохраняем…" : "Сохранить черновик"}
           </Button>
         </div>

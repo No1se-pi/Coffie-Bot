@@ -55,6 +55,7 @@ class OperationStatus(StrEnum):
 class LoyaltyOperationType(StrEnum):
     PURCHASE_ACCRUAL = "purchase_accrual"
     POINTS_REDEMPTION = "points_redemption"
+    POINTS_PRODUCT_PURCHASE = "points_product_purchase"
     WELCOME_BONUS = "welcome_bonus"
     ADMIN_ADJUSTMENT = "admin_adjustment"
     OPERATION_REVERSAL = "operation_reversal"

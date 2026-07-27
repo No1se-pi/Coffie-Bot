@@ -23,6 +23,10 @@ MediaActor = Annotated[
     Actor,
     Depends(require_permissions(PermissionCode.ADMIN_CONTENT_MANAGE)),
 ]
+StaffMediaActor = Annotated[
+    Actor,
+    Depends(require_permissions(PermissionCode.OWN_TIP_PROFILE_MANAGE)),
+]
 
 
 @router.post(
@@ -36,6 +40,41 @@ async def upload_media(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     upload: Annotated[UploadFile, File()],
     kind: Annotated[str, Form(min_length=1, max_length=32, pattern=r"^[a-z][a-z0-9_-]*$")],
+) -> MediaUploadResponse:
+    try:
+        content = await upload.read(MAX_MEDIA_BYTES + 1)
+    finally:
+        await upload.close()
+    settings = cast(Settings, request.app.state.settings)
+    result = await AdminService(repository=AdminRepository(session)).upload_media(
+        actor=actor,
+        content=content,
+        original_filename=upload.filename,
+        claimed_content_type=upload.content_type,
+        kind=kind,
+        media_root=settings.media_root,
+        metadata=RequestMetadata(
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("User-Agent"),
+        ),
+    )
+    return media_upload_response(result)
+
+
+@router.post(
+    "/staff/me/media",
+    response_model=MediaUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_staff_media(
+    request: Request,
+    actor: StaffMediaActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    upload: Annotated[UploadFile, File()],
+    kind: Annotated[
+        str,
+        Form(pattern=r"^(staff_profile|tip_qr)$"),
+    ],
 ) -> MediaUploadResponse:
     try:
         content = await upload.read(MAX_MEDIA_BYTES + 1)

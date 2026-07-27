@@ -17,6 +17,7 @@ class OutboundMessage:
     button_label: str | None = None
     button_url: str | None = None
     image_path: Path | None = None
+    open_as_web_app: bool = False
 
 
 class MessageSender(Protocol):
@@ -197,10 +198,26 @@ def render_notification(
     else:
         text = "В программе лояльности появилось обновление."
 
+    operation_id = _short_text(payload.get("operation_id"))
+    post_purchase_event = event_type in {
+        "points.accrued",
+        "loyalty.points_accrued",
+        "points.redeemed",
+        "loyalty.points_redeemed",
+        "reward.redeemed",
+    }
+    post_purchase_url = (
+        f"{webapp_url.rstrip('/')}/after-purchase/{operation_id}"
+        if webapp_url and operation_id and post_purchase_event
+        else None
+    )
     return OutboundMessage(
         text=text,
-        button_label="Открыть приложение" if webapp_url else None,
-        button_url=webapp_url,
+        button_label=("Оценить бариста" if post_purchase_url else "Открыть приложение")
+        if webapp_url
+        else None,
+        button_url=post_purchase_url or webapp_url,
+        open_as_web_app=bool(post_purchase_url),
     )
 
 

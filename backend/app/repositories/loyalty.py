@@ -14,9 +14,10 @@ from sqlalchemy import Select, String, func, or_, select, update
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.access import Session, User
+from app.models.access import Session, StaffMember, User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.content import MenuItem
 from app.models.delivery import NotificationOutbox
 from app.models.enums import (
     AuditSeverity,
@@ -24,6 +25,7 @@ from app.models.enums import (
     LoyaltyOperationType,
     OperationStatus,
     RewardStatus,
+    TipProfileStatus,
     UserStatus,
 )
 from app.models.loyalty import (
@@ -35,6 +37,7 @@ from app.models.loyalty import (
     UserLoyaltyState,
     Visit,
 )
+from app.models.staff import StaffTipProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +66,20 @@ class OperationPage:
 class RewardPage:
     items: list[Reward]
     total: int
+
+
+@dataclass(frozen=True, slots=True)
+class RewardQrRecord:
+    reward: Reward
+    user: User
+
+
+@dataclass(frozen=True, slots=True)
+class PostPurchaseRecord:
+    operation: LoyaltyOperation
+    staff: StaffMember
+    staff_user: User
+    tip_profile: StaffTipProfile | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +295,62 @@ class LoyaltyRepository:
             statement = statement.with_for_update()
         value = await self._session.scalar(statement)
         return value
+
+    async def get_reward_by_source_operation(self, operation_id: UUID) -> Reward | None:
+        value: Reward | None = await self._session.scalar(
+            select(Reward).where(Reward.source_operation_id == operation_id)
+        )
+        return value
+
+    async def get_reward_by_qr(self, qr_payload: str) -> RewardQrRecord | None:
+        row = (
+            await self._session.execute(
+                select(Reward, User)
+                .join(User, User.id == Reward.user_id)
+                .where(Reward.qr_payload == qr_payload)
+            )
+        ).one_or_none()
+        return None if row is None else RewardQrRecord(reward=row[0], user=row[1])
+
+    async def get_menu_item(self, item_id: UUID, *, for_update: bool) -> MenuItem | None:
+        statement = select(MenuItem).where(MenuItem.id == item_id)
+        if for_update:
+            statement = statement.with_for_update()
+        value: MenuItem | None = await self._session.scalar(statement)
+        return value
+
+    async def get_post_purchase(
+        self, *, operation_id: UUID, user_id: UUID
+    ) -> PostPurchaseRecord | None:
+        row = (
+            await self._session.execute(
+                select(LoyaltyOperation, StaffMember, User, StaffTipProfile)
+                .join(StaffMember, StaffMember.id == LoyaltyOperation.actor_staff_id)
+                .join(User, User.id == StaffMember.user_id)
+                .outerjoin(
+                    StaffTipProfile,
+                    StaffTipProfile.staff_member_id == StaffMember.id,
+                )
+                .where(
+                    LoyaltyOperation.id == operation_id,
+                    LoyaltyOperation.user_id == user_id,
+                    LoyaltyOperation.status == OperationStatus.COMMITTED,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        profile = row[3]
+        if profile is not None and (
+            profile.status is not TipProfileStatus.APPROVED or not profile.is_visible
+        ):
+            profile = None
+        return PostPurchaseRecord(
+            operation=row[0],
+            staff=row[1],
+            staff_user=row[2],
+            tip_profile=profile,
+        )
 
     async def get_outbox_by_key(self, idempotency_key: str) -> NotificationOutbox | None:
         value = await self._session.scalar(

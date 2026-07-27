@@ -22,14 +22,16 @@ from app.models.content import MenuCategory, MenuItem, Promotion
 from app.models.enums import (
     AuditSeverity,
     FeedbackStatus,
+    LoyaltyProgram,
     MediaStatus,
     PermissionCode,
     PromotionStatus,
+    RewardType,
     Role,
     TipProfileStatus,
     UserStatus,
 )
-from app.models.loyalty import LoyaltySettings
+from app.models.loyalty import LoyaltySettings, RewardTemplate
 from app.models.media import MediaFile
 from app.models.staff import StaffTipProfile
 from app.repositories.admin import (
@@ -229,6 +231,7 @@ class AdminService:
         actor: Actor,
         name: str,
         description: str | None,
+        icon_media_id: UUID | None,
         sort_order: int,
         visible: bool,
         metadata: RequestMetadata = EMPTY_METADATA,
@@ -237,10 +240,12 @@ class AdminService:
             id=uuid4(),
             name=name,
             description=description,
+            icon_media_id=icon_media_id,
             sort_order=sort_order,
             is_visible=visible,
         )
         async with self._repository.transaction():
+            await self._require_media(icon_media_id)
             self._repository.add(category)
             self._audit(
                 actor=actor,
@@ -261,7 +266,7 @@ class AdminService:
         updates: Mapping[str, Any],
         metadata: RequestMetadata = EMPTY_METADATA,
     ) -> MenuCategory:
-        allowed = {"name", "description", "sort_order", "visible"}
+        allowed = {"name", "description", "icon_media_id", "sort_order", "visible"}
         _require_update_keys(updates, allowed)
         async with self._repository.transaction():
             category = await self._repository.get_menu_category(category_id, for_update=True)
@@ -269,6 +274,8 @@ class AdminService:
                 _not_found("Menu category was not found")
             if category.archived_at is not None:
                 _conflict("archived_content", "Archived menu category cannot be changed")
+            if "icon_media_id" in updates:
+                await self._require_media(updates["icon_media_id"])
             for key, value in updates.items():
                 setattr(category, "is_visible" if key == "visible" else key, value)
             self._audit(
@@ -333,6 +340,7 @@ class AdminService:
         image_media_id: UUID | None,
         price_minor: int,
         old_price_minor: int | None,
+        points_price: int | None,
         composition: str | None,
         volume: str | None,
         labels: list[str],
@@ -349,6 +357,7 @@ class AdminService:
             image_media_id=image_media_id,
             price_minor=price_minor,
             old_price_minor=old_price_minor,
+            points_price=points_price,
             composition=composition,
             volume=volume,
             labels=labels,
@@ -359,7 +368,12 @@ class AdminService:
         async with self._repository.transaction():
             await self._require_category(category_id)
             await self._require_media(image_media_id)
-            self._repository.add(item)
+            objects: list[object] = [item]
+            if points_price is not None:
+                template = self._points_menu_template(item=item, actor=actor)
+                item.points_reward_template_id = template.id
+                objects.append(template)
+            self._repository.add_all(objects)
             self._audit(
                 actor=actor,
                 event_type="menu.item_created",
@@ -386,6 +400,7 @@ class AdminService:
             "image_media_id",
             "price_minor",
             "old_price_minor",
+            "points_price",
             "composition",
             "volume",
             "labels",
@@ -407,6 +422,7 @@ class AdminService:
             attribute_names = {"available": "is_available", "visible": "is_visible"}
             for key, value in updates.items():
                 setattr(item, attribute_names.get(key, key), value)
+            await self._sync_points_menu_template(item=item, actor=actor)
             self._audit(
                 actor=actor,
                 event_type="menu.item_updated",
@@ -417,6 +433,42 @@ class AdminService:
             )
             await self._repository.flush()
             return item
+
+    def _points_menu_template(self, *, item: MenuItem, actor: Actor) -> RewardTemplate:
+        return RewardTemplate(
+            id=uuid4(),
+            name=item.name,
+            description=item.description or f"Награда: {item.name}",
+            image_media_id=item.image_media_id,
+            reward_type=RewardType.FREE_PRODUCT,
+            source_program=LoyaltyProgram.POINTS,
+            value_int=item.points_price,
+            terms="Покажите QR-код бариста до получения товара.",
+            validity_days=30,
+            is_active=True,
+            created_by_staff_id=actor.staff_member_id,
+        )
+
+    async def _sync_points_menu_template(self, *, item: MenuItem, actor: Actor) -> None:
+        template = (
+            await self._repository.get_reward_template(item.points_reward_template_id)
+            if item.points_reward_template_id is not None
+            else None
+        )
+        if item.points_price is None:
+            if template is not None:
+                template.is_active = False
+            return
+        if template is None:
+            template = self._points_menu_template(item=item, actor=actor)
+            item.points_reward_template_id = template.id
+            self._repository.add(template)
+            return
+        template.name = item.name
+        template.description = item.description or f"Награда: {item.name}"
+        template.image_media_id = item.image_media_id
+        template.value_int = item.points_price
+        template.is_active = True
 
     async def hide_menu_item(
         self,
@@ -723,16 +775,40 @@ class AdminService:
         can_edit_tip_profile: bool,
         permissions: Mapping[PermissionCode, bool],
         metadata: RequestMetadata = EMPTY_METADATA,
+        now: datetime | None = None,
     ) -> StaffMember:
         self._validate_role_assignment(actor, current_role=None, new_role=role)
         self._validate_permission_overrides(role, permissions)
+        current_time = _aware_now(now)
         async with self._repository.transaction():
             user = await self._repository.get_user_for_staff_creation(user_id)
             if user is None or user.status in {UserStatus.INACTIVE, UserStatus.ANONYMIZED}:
                 _not_found("User was not found")
             existing = await self._repository.get_staff_by_user(user_id, for_update=True)
             if existing is not None:
-                _conflict("staff_exists", "User already has a staff profile")
+                if existing.archived_at is None:
+                    _conflict("staff_exists", "User already has a staff profile")
+                existing.role = role
+                existing.display_name = display_name
+                existing.position = position
+                existing.bio = bio
+                existing.is_active = True
+                existing.can_edit_tip_profile = can_edit_tip_profile
+                existing.disabled_at = None
+                existing.archived_at = None
+                existing.updated_at = current_time
+                self._repository.replace_staff_permissions(existing, dict(permissions))
+                self._audit(
+                    actor=actor,
+                    event_type="staff.restored",
+                    subject_user_id=user_id,
+                    object_type="staff_member",
+                    object_id=existing.id,
+                    event_metadata={"role": role.value},
+                    metadata=metadata,
+                )
+                await self._repository.flush()
+                return existing
             staff = StaffMember(
                 id=uuid4(),
                 user_id=user_id,
@@ -1065,6 +1141,41 @@ class AdminService:
 
     async def list_pending_tip_profiles(self, *, page: int, page_size: int) -> TipProfilePage:
         return await self._repository.list_pending_tip_profiles(page=page, page_size=page_size)
+
+    async def cancel_own_tip_profile_review(
+        self,
+        *,
+        actor: Actor,
+        metadata: RequestMetadata = EMPTY_METADATA,
+    ) -> TipProfileView:
+        staff_id = self._require_staff_actor(actor)
+        async with self._repository.transaction():
+            record = await self._repository.get_tip_profile_for_staff(staff_id, for_update=True)
+            if record is None or record.profile.status is not TipProfileStatus.PENDING_REVIEW:
+                _conflict("tip_profile_not_pending", "Профиль не ожидает модерации")
+            profile = record.profile
+            profile.pending_name = None
+            profile.pending_bio = None
+            profile.pending_tip_url = None
+            profile.pending_photo_media_id = None
+            profile.pending_tip_qr_media_id = None
+            profile.submitted_at = None
+            profile.status = (
+                TipProfileStatus.APPROVED if profile.published_name else TipProfileStatus.DRAFT
+            )
+            if profile.status is TipProfileStatus.DRAFT:
+                profile.is_visible = False
+            self._audit(
+                actor=actor,
+                event_type="tip_profile.review_cancelled",
+                subject_user_id=record.staff.user_id,
+                object_type="staff_tip_profile",
+                object_id=profile.id,
+                event_metadata={},
+                metadata=metadata,
+            )
+            await self._repository.flush()
+            return _tip_profile_view(record)
 
     async def approve_tip_profile(
         self,

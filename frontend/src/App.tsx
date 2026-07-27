@@ -7,6 +7,7 @@ import {
   HomePage,
   MenuPage,
   MorePage,
+  PostPurchasePage,
   RewardsPage,
 } from "./pages/customer";
 import {
@@ -39,6 +40,10 @@ export default function App() {
         <StaffWorkspaceProvider>
           <Routes>
             <Route element={<AuthGate />}>
+              <Route
+                path="after-purchase/:operationId"
+                element={<PostPurchasePage />}
+              />
               <Route
                 element={
                   <RoleGuard allow={["customer"]}>

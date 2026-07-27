@@ -16,7 +16,7 @@ from aiogram.exceptions import (
     TelegramNetworkError,
     TelegramRetryAfter,
 )
-from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
@@ -200,7 +200,17 @@ def _keyboard(message: OutboundMessage) -> InlineKeyboardMarkup | None:
     if not message.button_label or not message.button_url:
         return None
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text=message.button_label, url=message.button_url)]]
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=message.button_label,
+                    web_app=(
+                        WebAppInfo(url=message.button_url) if message.open_as_web_app else None
+                    ),
+                    url=(None if message.open_as_web_app else message.button_url),
+                )
+            ]
+        ]
     )
 
 

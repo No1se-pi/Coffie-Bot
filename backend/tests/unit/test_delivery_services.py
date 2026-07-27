@@ -14,6 +14,7 @@ from app.services.notifications import (
     NotificationService,
     OutboundMessage,
     RetryPolicy,
+    render_notification,
 )
 
 NOW = datetime(2026, 7, 21, 12, tzinfo=UTC)
@@ -189,6 +190,24 @@ async def test_notification_retry_uses_exponential_backoff() -> None:
 
     assert result.retried == 1
     assert repository.failed == [(job.id, "telegram_network_error", NOW + timedelta(seconds=40))]
+
+
+async def test_purchase_notification_opens_post_purchase_web_app() -> None:
+    operation_id = uuid4()
+    job = NotificationJob(
+        id=uuid4(),
+        telegram_id=101,
+        event_type="points.accrued",
+        payload={"points": 12, "operation_id": str(operation_id)},
+        attempts=1,
+        lease_until=LEASE,
+    )
+
+    message = render_notification(job, webapp_url="https://coffee.example/")
+
+    assert message.button_label == "Оценить бариста"
+    assert message.button_url == f"https://coffee.example/after-purchase/{operation_id}"
+    assert message.open_as_web_app is True
 
 
 async def test_broadcast_isolates_failures_and_skips_inactive_users(tmp_path: Path) -> None:

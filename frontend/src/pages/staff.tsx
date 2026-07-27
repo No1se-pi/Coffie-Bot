@@ -14,6 +14,7 @@ import type {
   PurchasePreview,
   RedemptionPreview,
   StaffClient,
+  StaffRewardLookup,
   TipProfile,
 } from "../api/types";
 import { useResource } from "../hooks/useResource";
@@ -122,6 +123,8 @@ export function ScannerPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
+  const [reward, setReward] = useState<StaffRewardLookup | null>(null);
+  const [rewardRedeemed, setRewardRedeemed] = useState(false);
   const codeInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => closeTelegramScanner(), []);
@@ -148,9 +151,27 @@ export function ScannerPage() {
   const startScanner = () => {
     setCameraMessage(null);
     setError(null);
-    const started = scanQrWithTelegram(
-      (value) => void lookup({ qr_token: value }),
-    );
+    const started = scanQrWithTelegram((value) => {
+      if (value.startsWith("coffee-reward:v1:")) {
+        setLoading(true);
+        void coffeeApi
+          .lookupStaffReward(value)
+          .then((found) => {
+            setReward(found);
+            setRewardRedeemed(false);
+          })
+          .catch((reason: unknown) =>
+            setError(
+              reason instanceof Error
+                ? reason
+                : new Error("Награда не найдена"),
+            ),
+          )
+          .finally(() => setLoading(false));
+        return;
+      }
+      void lookup({ qr_token: value });
+    });
     if (!started) {
       setCameraMessage(
         "Сканер Telegram недоступен в этом окружении. Введите короткий код вручную.",
@@ -171,6 +192,54 @@ export function ScannerPage() {
 
   return (
     <Page title="Сканер карты" eyebrow="Поиск клиента">
+      {reward && (
+        <Panel className="reward-highlight">
+          <div>
+            <Badge tone={rewardRedeemed ? "success" : "accent"}>
+              {rewardRedeemed ? "Награда погашена" : "Награда клиента"}
+            </Badge>
+            <h2>{reward.reward_name}</h2>
+            <p>{reward.description}</p>
+            <p>
+              Клиент: <strong>{reward.customer_name}</strong>
+            </p>
+            {reward.terms && <small>{reward.terms}</small>}
+          </div>
+          <div className="action-row">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setReward(null);
+                setRewardRedeemed(false);
+              }}
+            >
+              {rewardRedeemed ? "Сканировать следующий" : "Отмена"}
+            </Button>
+            {!rewardRedeemed && (
+              <Button
+                disabled={loading}
+                onClick={() => {
+                  setLoading(true);
+                  setError(null);
+                  void coffeeApi
+                    .redeemReward(reward.reward_id)
+                    .then(() => setRewardRedeemed(true))
+                    .catch((reason: unknown) =>
+                      setError(
+                        reason instanceof Error
+                          ? reason
+                          : new Error("Не удалось погасить награду"),
+                      ),
+                    )
+                    .finally(() => setLoading(false));
+                }}
+              >
+                {loading ? "Погашаем…" : "Подтвердить выдачу"}
+              </Button>
+            )}
+          </div>
+        </Panel>
+      )}
       <Panel className="scanner-panel">
         <div className="scanner-frame" aria-hidden="true">
           <span />
@@ -180,9 +249,7 @@ export function ScannerPage() {
           <b>▦</b>
         </div>
         <h2>Наведите камеру на QR-код</h2>
-        <p>
-          После сканирования вы увидите карточку клиента и выберете действие.
-        </p>
+        <p>Сканер распознает карту клиента или QR купленной награды.</p>
         <Button onClick={startScanner} disabled={loading}>
           Открыть сканер Telegram
         </Button>
@@ -232,6 +299,7 @@ export function ScannerPage() {
 }
 
 export function ClientPreviewPage() {
+  const navigate = useNavigate();
   const { client, setClient } = useStaffWorkspace();
   if (!client)
     return (
@@ -291,6 +359,10 @@ export function ClientPreviewPage() {
         <AccrualPanel
           client={client}
           onCompleted={() => void refreshClient()}
+          onNewPurchase={() => {
+            setClient(null);
+            navigate("/staff/scan");
+          }}
         />
       )}
       <div className="metrics-grid">
@@ -581,9 +653,11 @@ export function QuickOperationsPanel({
 export function AccrualPanel({
   client,
   onCompleted,
+  onNewPurchase,
 }: {
   client: StaffClient;
   onCompleted?: (operation: OperationResult) => void;
+  onNewPurchase?: () => void;
 }) {
   const [amount, setAmount] = useState("");
   const [stamps, setStamps] = useState("1");
@@ -689,8 +763,11 @@ export function AccrualPanel({
               </p>
             </>
           )}
-          <Button variant="secondary" onClick={reset}>
-            Следующая покупка
+          <Button
+            variant="secondary"
+            onClick={() => (onNewPurchase ? onNewPurchase() : reset())}
+          >
+            Новая покупка
           </Button>
         </div>
       ) : preview ? (
@@ -912,6 +989,7 @@ export function StaffProfilePage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   useEffect(() => {
     if (resource.data) setForm(resource.data);
   }, [resource.data]);
@@ -936,6 +1014,35 @@ export function StaffProfilePage() {
       setSaving(false);
     }
   };
+  const upload = async (file: File, kind: "staff_profile" | "tip_qr") => {
+    setUploading(true);
+    setError(null);
+    try {
+      const media = await coffeeApi.uploadStaffMedia(file, kind);
+      setForm((current) =>
+        current
+          ? {
+              ...current,
+              ...(kind === "staff_profile"
+                ? { photo_media_id: media.id, photo_url: media.url }
+                : { tip_qr_media_id: media.id, tip_qr_url: media.url }),
+            }
+          : current,
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось загрузить фото",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+  const moderationLabel: Record<TipProfile["moderation_status"], string> = {
+    draft: "Черновик",
+    pending_review: "На модерации",
+    approved: "Опубликован",
+    hidden: "Скрыт администратором",
+  };
   return (
     <Page title="Мой профиль" eyebrow="Публичная карточка и чаевые">
       {resource.loading && <Loader />}
@@ -945,7 +1052,11 @@ export function StaffProfilePage() {
       {form && (
         <Panel>
           <div className="profile-heading">
-            <Avatar name={form.display_name} size="large" />
+            <Avatar
+              name={form.display_name}
+              src={form.photo_url}
+              size="large"
+            />
             <div>
               <h2>{form.display_name}</h2>
               <Badge
@@ -953,9 +1064,7 @@ export function StaffProfilePage() {
                   form.moderation_status === "approved" ? "success" : "warning"
                 }
               >
-                {form.moderation_status === "approved"
-                  ? "Опубликован"
-                  : "На модерации"}
+                {moderationLabel[form.moderation_status]}
               </Badge>
             </div>
           </div>
@@ -966,6 +1075,17 @@ export function StaffProfilePage() {
             </div>
           )}
           <form className="form" onSubmit={(event) => void save(event)}>
+            <Field label="Аватар" hint="JPG, PNG или WebP, до 5 МБ">
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={uploading}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void upload(file, "staff_profile");
+                }}
+              />
+            </Field>
             <Field label="Имя">
               <input
                 value={form.display_name}
@@ -999,14 +1119,54 @@ export function StaffProfilePage() {
                 placeholder="https://"
               />
             </Field>
+            <Field
+              label="QR для чаевых"
+              hint="Необязательно, если есть обычная ссылка"
+            >
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={uploading}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void upload(file, "tip_qr");
+                }}
+              />
+            </Field>
             {error && (
               <div className="inline-error" role="alert">
                 {error}
               </div>
             )}
-            <Button type="submit" disabled={saving}>
-              {saving ? "Сохраняем…" : "Сохранить изменения"}
-            </Button>
+            <div className="action-row">
+              <Button type="submit" disabled={saving || uploading}>
+                {saving ? "Сохраняем…" : "Сохранить изменения"}
+              </Button>
+              {form.moderation_status === "pending_review" && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={saving}
+                  onClick={() => {
+                    setSaving(true);
+                    setError(null);
+                    void coffeeApi
+                      .cancelTipProfileReview()
+                      .then(setForm)
+                      .catch((reason: unknown) =>
+                        setError(
+                          reason instanceof Error
+                            ? reason.message
+                            : "Не удалось отменить модерацию",
+                        ),
+                      )
+                      .finally(() => setSaving(false));
+                  }}
+                >
+                  Отменить модерацию
+                </Button>
+              )}
+            </div>
           </form>
         </Panel>
       )}

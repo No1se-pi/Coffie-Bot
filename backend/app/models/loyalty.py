@@ -345,6 +345,7 @@ class Reward(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index("ix_rewards_user_status_expires", "user_id", "status", "expires_at"),
         Index("ix_rewards_status_expires", "status", "expires_at"),
+        UniqueConstraint("qr_payload", name="uq_rewards_qr_payload"),
     )
 
     user_id: Mapped[UUID] = mapped_column(
@@ -390,6 +391,7 @@ class Reward(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         unique=True,
     )
     internal_comment: Mapped[str | None] = mapped_column(Text)
+    qr_payload: Mapped[str | None] = mapped_column(String(160))
 
 
 class StampTransaction(UUIDPrimaryKeyMixin, Base):

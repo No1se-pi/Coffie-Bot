@@ -19,18 +19,23 @@ import type {
   MenuCategoryDraft,
   MenuItem,
   MenuItemDraft,
+  MediaUpload,
   OperationResult,
   Promotion,
   PromotionDraft,
+  PointsMenuPurchase,
+  PostPurchase,
   PublicMoreData,
   PurchasePreview,
   RedemptionPreview,
   Reward,
   Role,
   StaffClient,
+  StaffRewardLookup,
   StaffMemberDraft,
   StaffProfile,
   TipProfile,
+  PendingTipProfile,
 } from "./types";
 import { demoApi } from "./demo";
 
@@ -360,6 +365,7 @@ interface BackendRedemptionPreview {
 const operationDescriptions: Record<HistoryItem["type"], string> = {
   purchase_accrual: "Начисление за покупку",
   points_redemption: "Списание баллов",
+  points_product_purchase: "Покупка за баллы",
   welcome_bonus: "Приветственный бонус",
   points_expiration: "Сгорание баллов",
   visit_mark: "Отмечено посещение",
@@ -477,6 +483,37 @@ export const coffeeApi = {
       ? demoApi.getRewards(status)
       : request(`/me/rewards${queryString({ status })}`),
   getMenu,
+  getPostPurchase: (operationId: string): Promise<PostPurchase> =>
+    isDemoMode
+      ? Promise.resolve({
+          operation_id: operationId,
+          barista_name: "Анна",
+          position: "Бариста",
+          tip_url: "https://example.com",
+        })
+      : request(`/me/post-purchase/${encodeURIComponent(operationId)}`),
+  purchaseMenuItemWithPoints: (
+    itemId: string,
+    idempotencyKey = uuid(),
+  ): Promise<PointsMenuPurchase> =>
+    isDemoMode
+      ? Promise.resolve({
+          operation_id: uuid(),
+          reward_id: uuid(),
+          item_id: itemId,
+          item_name: "Награда из меню",
+          points_spent: 80,
+          balance_after: 204,
+          qr_payload: `coffee-reward:v1:${uuid()}`,
+          idempotent_replay: false,
+        })
+      : request(
+          `/me/menu-items/${encodeURIComponent(itemId)}/purchase-with-points`,
+          {
+            method: "POST",
+            idempotencyKey,
+          },
+        ),
   getMore,
   submitFeedback: (payload: {
     rating: number;
@@ -621,6 +658,18 @@ export const coffeeApi = {
           `/staff/rewards/${encodeURIComponent(rewardId)}/redeem`,
           { method: "POST", idempotencyKey: uuid() },
         ).then(normalizeOperationResult),
+  lookupStaffReward: (qrPayload: string): Promise<StaffRewardLookup> =>
+    isDemoMode
+      ? Promise.resolve({
+          reward_id: uuid(),
+          customer_name: "Анна",
+          reward_name: "Капучино",
+          description: "Награда за баллы",
+        })
+      : request("/staff/rewards/lookup", {
+          method: "POST",
+          body: jsonBody({ qr_payload: qrPayload }),
+        }),
   reverseOperation: async (
     operationId: string,
     reason: string,
@@ -651,8 +700,26 @@ export const coffeeApi = {
       ? demoApi.saveTipProfile(profile)
       : request("/staff/me/tip-profile", {
           method: "PUT",
-          body: jsonBody(profile),
+          body: jsonBody({
+            display_name: profile.display_name,
+            position: profile.position,
+            bio: profile.bio,
+            tip_url: profile.tip_url,
+            photo_media_id: profile.photo_media_id ?? null,
+            tip_qr_media_id: profile.tip_qr_media_id ?? null,
+          }),
         }),
+  cancelTipProfileReview: (): Promise<TipProfile> =>
+    isDemoMode
+      ? demoApi.getTipProfile()
+      : request("/staff/me/tip-profile/cancel-review", { method: "POST" }),
+  uploadStaffMedia: (file: File, kind: "staff_profile" | "tip_qr") => {
+    if (isDemoMode) return Promise.resolve({ id: uuid(), url: "" });
+    const body = new FormData();
+    body.append("upload", file);
+    body.append("kind", kind);
+    return request<MediaUpload>("/staff/me/media", { method: "POST", body });
+  },
   getAdminOverview,
   getAdminUsers: (
     query?: string,
@@ -717,6 +784,20 @@ export const coffeeApi = {
       : request(
           `/admin/staff${queryString({ query, active, page: 1, page_size: 100 })}`,
         ),
+  getPendingTipProfiles: (): Promise<ListResponse<PendingTipProfile>> =>
+    isDemoMode
+      ? Promise.resolve({ items: [], page: 1, page_size: 100, total: 0 })
+      : request("/admin/tip-profiles/pending?page=1&page_size=100"),
+  approveTipProfile: (id: string): Promise<PendingTipProfile> =>
+    request(`/admin/tip-profiles/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: jsonBody({ moderation_note: null }),
+    }),
+  hideTipProfile: (id: string, note?: string): Promise<PendingTipProfile> =>
+    request(`/admin/tip-profiles/${encodeURIComponent(id)}/hide`, {
+      method: "POST",
+      body: jsonBody({ moderation_note: note || null }),
+    }),
   createAdminStaff: (
     payload: StaffMemberDraft & {
       user_id: string;
@@ -784,6 +865,16 @@ export const coffeeApi = {
       request<ListResponse<MenuItem>>("/admin/menu/items?page=1&page_size=100"),
     ]);
     return { categories: categories.items, items: items.items };
+  },
+  uploadAdminMedia: (
+    file: File,
+    kind: "menu_category" | "menu_item" | "promotion",
+  ) => {
+    if (isDemoMode) return Promise.resolve({ id: uuid(), url: "" });
+    const body = new FormData();
+    body.append("upload", file);
+    body.append("kind", kind);
+    return request<MediaUpload>("/admin/media", { method: "POST", body });
   },
   toggleMenuItem: (item: MenuItem): Promise<MenuItem> =>
     isDemoMode

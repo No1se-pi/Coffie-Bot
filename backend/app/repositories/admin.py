@@ -23,7 +23,7 @@ from app.models.enums import (
     Role,
     TipProfileStatus,
 )
-from app.models.loyalty import LoyaltySettings
+from app.models.loyalty import LoyaltySettings, RewardTemplate
 from app.models.media import MediaFile
 from app.models.staff import FeedbackItem, StaffTipProfile
 
@@ -197,6 +197,9 @@ class AdminRepository:
             statement = statement.with_for_update()
         value: MenuItem | None = await self._session.scalar(statement)
         return value
+
+    async def get_reward_template(self, template_id: UUID) -> RewardTemplate | None:
+        return await self._session.get(RewardTemplate, template_id)
 
     async def list_promotions(
         self,

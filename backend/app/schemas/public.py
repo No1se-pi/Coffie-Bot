@@ -23,6 +23,7 @@ class MenuCategoryResponse(ApiSchema):
     id: UUID
     name: str
     description: str | None
+    icon_url: str | None = None
     sort_order: int
     visible: bool
 
@@ -42,6 +43,7 @@ class MenuItemResponse(ApiSchema):
     image_url: str | None = None
     price_minor: int
     old_price_minor: int | None
+    points_price: int | None
     composition: str | None
     volume: str | None
     labels: list[str]
@@ -144,6 +146,7 @@ def menu_categories_response(
             id=item.id,
             name=item.name,
             description=item.description,
+            icon_url=_media_url(item.icon_media_id),
             sort_order=item.sort_order,
             visible=item.is_visible,
         )
@@ -166,6 +169,7 @@ def menu_items_response(items: list[MenuItem]) -> MenuItemListResponse:
             image_url=_media_url(item.image_media_id),
             price_minor=item.price_minor,
             old_price_minor=item.old_price_minor,
+            points_price=item.points_price,
             composition=item.composition,
             volume=item.volume,
             labels=item.labels,

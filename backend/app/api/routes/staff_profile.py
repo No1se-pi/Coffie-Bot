@@ -75,6 +75,19 @@ async def update_own_tip_profile(
     return tip_profile_response(view)
 
 
+@router.post("/staff/me/tip-profile/cancel-review", response_model=TipProfileResponse)
+async def cancel_own_tip_profile_review(
+    request: Request,
+    actor: TipActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> TipProfileResponse:
+    view = await _service(session).cancel_own_tip_profile_review(
+        actor=actor,
+        metadata=_metadata(request),
+    )
+    return tip_profile_response(view)
+
+
 @router.get("/admin/tip-profiles/pending", response_model=PendingTipProfileListResponse)
 async def list_pending_tip_profiles(
     _actor: AdminActor,

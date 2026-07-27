@@ -23,6 +23,8 @@ from app.schemas.loyalty import (
     ReasonRequest,
     RedemptionPreviewResponse,
     RedemptionRequest,
+    RewardQrLookupRequest,
+    RewardQrLookupResponse,
     StampRequest,
     VisitRequest,
     accrual_preview_response,
@@ -31,6 +33,7 @@ from app.schemas.loyalty import (
     operation_response,
     purchase_preview_response,
     redemption_preview_response,
+    reward_qr_lookup_response,
 )
 from app.security.rbac import Actor, require_permissions, require_roles
 from app.services.loyalty import LoyaltyService, RequestMetadata
@@ -220,6 +223,19 @@ async def add_stamps(
         metadata=_request_metadata(request),
     )
     return operation_response(value)
+
+
+@router.post("/rewards/lookup", response_model=RewardQrLookupResponse)
+async def lookup_reward(
+    payload: RewardQrLookupRequest,
+    session: DatabaseSession,
+    actor: Annotated[
+        Actor,
+        Depends(require_permissions(PermissionCode.REWARDS_REDEEM)),
+    ],
+) -> RewardQrLookupResponse:
+    value = await _service(session).lookup_reward_qr(actor, qr_payload=payload.qr_payload)
+    return reward_qr_lookup_response(value)
 
 
 @router.post("/rewards/{reward_id}/redeem", response_model=OperationResponse)

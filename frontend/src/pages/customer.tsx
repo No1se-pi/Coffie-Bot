@@ -1,8 +1,13 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { coffeeApi } from "../api/client";
-import type { HistoryType, Reward } from "../api/types";
+import type {
+  HistoryType,
+  MenuItem,
+  PointsMenuPurchase,
+  Reward,
+} from "../api/types";
 import { useResource } from "../hooks/useResource";
 import { formatDate, formatDateTime, formatMoney } from "../utils/format";
 import {
@@ -76,9 +81,22 @@ export function HomePage() {
               <div className="horizontal-cards">
                 {resource.data.promotions.map((promotion) => (
                   <article className="promo-card" key={promotion.id}>
+                    {promotion.image_url && (
+                      <img src={promotion.image_url} alt="" />
+                    )}
                     <Badge tone="accent">Акция</Badge>
                     <h3>{promotion.title}</h3>
                     <p>{promotion.text}</p>
+                    {promotion.button_url && (
+                      <a
+                        className="button button--secondary"
+                        href={promotion.button_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {promotion.button_label || "Подробнее"}
+                      </a>
+                    )}
                   </article>
                 ))}
               </div>
@@ -308,10 +326,23 @@ export function RewardsPage() {
                   <h2>{reward.title}</h2>
                   <p>{reward.description}</p>
                   {reward.status === "active" && (
-                    <small>
-                      Покажите награду сотруднику. Погашение выполняет только
-                      бариста.
-                    </small>
+                    <>
+                      {reward.qr_payload && (
+                        <div className="qr-frame">
+                          <QRCodeSVG
+                            value={reward.qr_payload}
+                            size={180}
+                            level="M"
+                            marginSize={2}
+                            title={`QR-код награды ${reward.title}`}
+                          />
+                        </div>
+                      )}
+                      <small>
+                        Покажите QR бариста. Награда погашается только после
+                        вашего подтверждения.
+                      </small>
+                    </>
                   )}
                 </div>
               </Panel>
@@ -330,6 +361,11 @@ export function RewardsPage() {
 export function MenuPage() {
   const resource = useResource(coffeeApi.getMenu);
   const [category, setCategory] = useState<string>("");
+  const [buying, setBuying] = useState<MenuItem | null>(null);
+  const [purchase, setPurchase] = useState<PointsMenuPurchase | null>(null);
+  const [purchaseKey, setPurchaseKey] = useState("");
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [purchasing, setPurchasing] = useState(false);
   const visibleItems = useMemo(
     () =>
       resource.data?.items.filter(
@@ -340,6 +376,23 @@ export function MenuPage() {
       ) ?? [],
     [resource.data, category],
   );
+  const confirmPointsPurchase = async () => {
+    if (!buying) return;
+    setPurchasing(true);
+    setPurchaseError(null);
+    try {
+      setPurchase(
+        await coffeeApi.purchaseMenuItemWithPoints(buying.id, purchaseKey),
+      );
+      setBuying(null);
+    } catch (reason) {
+      setPurchaseError(
+        reason instanceof Error ? reason.message : "Не удалось купить награду",
+      );
+    } finally {
+      setPurchasing(false);
+    }
+  };
   return (
     <Page title="Меню" eyebrow="Что приготовим сегодня">
       {resource.loading && <Loader />}
@@ -348,6 +401,60 @@ export function MenuPage() {
       )}
       {resource.data && (
         <>
+          {purchase && (
+            <Panel className="reward-highlight">
+              <div>
+                <Badge tone="success">Награда готова</Badge>
+                <h2>{purchase.item_name}</h2>
+                <p>
+                  Списано {purchase.points_spent} баллов. Осталось:{" "}
+                  {purchase.balance_after}.
+                </p>
+                <div className="qr-frame">
+                  <QRCodeSVG
+                    value={purchase.qr_payload}
+                    size={190}
+                    level="M"
+                    marginSize={2}
+                    title="QR-код награды"
+                  />
+                </div>
+                <small>Покажите этот QR-код бариста.</small>
+              </div>
+              <Button variant="ghost" onClick={() => setPurchase(null)}>
+                Закрыть
+              </Button>
+            </Panel>
+          )}
+          {buying && (
+            <Panel>
+              <h2>Подтвердите покупку</h2>
+              <p>
+                {buying.name} за <strong>{buying.points_price} баллов</strong>.
+                Баллы спишутся сразу, а вы получите QR-код награды.
+              </p>
+              {purchaseError && (
+                <div className="inline-error">{purchaseError}</div>
+              )}
+              <div className="action-row">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setBuying(null);
+                    setPurchaseKey("");
+                  }}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void confirmPointsPurchase()}
+                  disabled={purchasing}
+                >
+                  {purchasing ? "Покупаем…" : "Списать баллы"}
+                </Button>
+              </div>
+            </Panel>
+          )}
           <div className="chip-row" role="group" aria-label="Категории меню">
             <button
               className={`chip ${!category ? "is-active" : ""}`}
@@ -363,6 +470,13 @@ export function MenuPage() {
                   className={`chip ${category === item.id ? "is-active" : ""}`}
                   onClick={() => setCategory(item.id)}
                 >
+                  {item.icon_url && (
+                    <img
+                      className="avatar avatar--small"
+                      src={item.icon_url}
+                      alt=""
+                    />
+                  )}
                   {item.name}
                 </button>
               ))}
@@ -392,6 +506,21 @@ export function MenuPage() {
                         </Badge>
                       ))}
                     </div>
+                    {item.points_price && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setPurchaseError(null);
+                          setBuying(item);
+                          setPurchaseKey(
+                            globalThis.crypto?.randomUUID?.() ??
+                              `${Date.now()}-${Math.random()}`,
+                          );
+                        }}
+                      >
+                        Купить за {item.points_price} баллов
+                      </Button>
+                    )}
                   </div>
                 </article>
               ))}
@@ -403,8 +532,124 @@ export function MenuPage() {
             />
           )}
           <p className="muted centered">
-            Меню информационное. Заказ и оплата выполняются в кофейне.
+            Обычный заказ и оплата выполняются в кофейне. Позиции с ценой в
+            баллах можно купить в приложении.
           </p>
+        </>
+      )}
+    </Page>
+  );
+}
+
+export function PostPurchasePage() {
+  const { operationId = "" } = useParams();
+  const resource = useResource(
+    () => coffeeApi.getPostPurchase(operationId),
+    [operationId],
+  );
+  const [rating, setRating] = useState(5);
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (message.trim().length < 3) {
+      setError("Напишите хотя бы несколько слов");
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      await coffeeApi.submitFeedback({
+        rating,
+        category: "service",
+        message: message.trim(),
+        may_contact: true,
+      });
+      setSent(true);
+      setMessage("");
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось отправить отзыв",
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <Page title="Спасибо за визит" eyebrow="Как всё прошло">
+      {resource.loading && <Loader />}
+      {resource.error && (
+        <ErrorState error={resource.error} onRetry={resource.reload} />
+      )}
+      {resource.data && (
+        <>
+          <Panel>
+            <div className="profile-heading">
+              <Avatar
+                name={resource.data.barista_name}
+                src={resource.data.photo_url}
+                size="large"
+              />
+              <div>
+                <Badge tone="accent">Ваш бариста</Badge>
+                <h2>{resource.data.barista_name}</h2>
+                <p>{resource.data.position}</p>
+              </div>
+            </div>
+            {resource.data.tip_url && (
+              <a
+                className="button button--primary"
+                href={resource.data.tip_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Оставить чаевые
+              </a>
+            )}
+            {resource.data.tip_qr_url && (
+              <img
+                className="qr-frame"
+                src={resource.data.tip_qr_url}
+                alt="QR для чаевых"
+              />
+            )}
+          </Panel>
+          <Panel>
+            <h2>Оцените обслуживание</h2>
+            {sent ? (
+              <div className="inline-success">
+                Спасибо! Отзыв передан команде.
+              </div>
+            ) : (
+              <form className="form" onSubmit={(event) => void submit(event)}>
+                <Field label="Оценка">
+                  <select
+                    value={rating}
+                    onChange={(event) => setRating(Number(event.target.value))}
+                  >
+                    <option value={5}>5 — Отлично</option>
+                    <option value={4}>4 — Хорошо</option>
+                    <option value={3}>3 — Нормально</option>
+                    <option value={2}>2 — Плохо</option>
+                    <option value={1}>1 — Очень плохо</option>
+                  </select>
+                </Field>
+                <Field label="Отзыв">
+                  <textarea
+                    rows={3}
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                  />
+                </Field>
+                {error && <div className="inline-error">{error}</div>}
+                <Button type="submit" disabled={sending}>
+                  {sending ? "Отправляем…" : "Отправить отзыв"}
+                </Button>
+              </form>
+            )}
+          </Panel>
         </>
       )}
     </Page>

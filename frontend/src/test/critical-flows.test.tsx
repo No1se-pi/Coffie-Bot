@@ -14,7 +14,7 @@ import type {
   PurchasePreview,
   StaffClient,
 } from "../api/types";
-import { CardPage, HomePage } from "../pages/customer";
+import { CardPage, HomePage, MenuPage } from "../pages/customer";
 import {
   AccrualPanel,
   QuickOperationsPanel,
@@ -141,7 +141,8 @@ describe("critical Mini App flows", () => {
     const confirmCall = vi
       .spyOn(coffeeApi, "confirmPurchase")
       .mockResolvedValue(operation);
-    render(<AccrualPanel client={client} />);
+    const newPurchase = vi.fn();
+    render(<AccrualPanel client={client} onNewPurchase={newPurchase} />);
 
     await user.type(screen.getByLabelText(/сумма покупки/i), "460");
     await user.clear(screen.getByLabelText(/штампы за покупку/i));
@@ -168,6 +169,60 @@ describe("critical Mini App flows", () => {
       purchase_amount_minor: 46000,
       stamps_to_add: 2,
     });
+    await user.click(screen.getByRole("button", { name: "Новая покупка" }));
+    expect(newPurchase).toHaveBeenCalledOnce();
+  });
+
+  it("buys a configured menu reward with points after confirmation", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getMenu").mockResolvedValue({
+      categories: [
+        {
+          id: "category-1",
+          name: "Кофе",
+          sort_order: 0,
+          visible: true,
+        },
+      ],
+      items: [
+        {
+          id: "item-1",
+          category_id: "category-1",
+          name: "Капучино",
+          price_minor: 29000,
+          points_price: 80,
+          available: true,
+          visible: true,
+        },
+      ],
+    });
+    const purchase = vi
+      .spyOn(coffeeApi, "purchaseMenuItemWithPoints")
+      .mockResolvedValue({
+        operation_id: "operation-2",
+        reward_id: "reward-1",
+        item_id: "item-1",
+        item_name: "Капучино",
+        points_spent: 80,
+        balance_after: 204,
+        qr_payload: "coffee-reward:v1:opaque-token",
+        idempotent_replay: false,
+      });
+    render(
+      <MemoryRouter>
+        <MenuPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Купить за 80 баллов" }),
+    );
+    expect(screen.getByText("Подтвердите покупку")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Списать баллы" }));
+
+    expect(await screen.findByText("Награда готова")).toBeInTheDocument();
+    expect(screen.getByText(/204/)).toBeInTheDocument();
+    expect(purchase).toHaveBeenCalledWith("item-1", expect.any(String));
   });
 
   it("keeps manual visits and stamps out of secondary actions", () => {
@@ -564,8 +619,10 @@ describe("critical Mini App flows", () => {
       category_id: "category-1",
       name: "Капучино",
       description: null,
+      image_media_id: null,
       price_minor: 29000,
       old_price_minor: null,
+      points_price: null,
       composition: null,
       volume: null,
       labels: [],

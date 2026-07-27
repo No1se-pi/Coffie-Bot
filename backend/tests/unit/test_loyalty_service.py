@@ -12,6 +12,7 @@ from app.core.errors import AppError
 from app.models.access import User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.content import MenuItem
 from app.models.delivery import NotificationOutbox
 from app.models.enums import (
     CardStatus,
@@ -43,6 +44,8 @@ from app.repositories.loyalty import (
 from app.security.rbac import Actor
 from app.services.loyalty import LoyaltyRepositoryPort, LoyaltyService
 
+NOW = datetime(2026, 7, 27, 12, tzinfo=UTC)
+
 
 class FakeTransaction:
     def __init__(self, repository: FakeRepository) -> None:
@@ -70,6 +73,7 @@ class FakeRepository:
         self.stamp_transactions: list[StampTransaction] = []
         self.rewards: list[Reward] = []
         self.reward_templates: dict[UUID, RewardTemplate] = {}
+        self.menu_items: dict[UUID, MenuItem] = {}
         self.outboxes: dict[str, NotificationOutbox] = {}
         self.cards: dict[UUID, UserCard] = {context.card.id: context.card}
         self.revoked_session_calls = 0
@@ -148,6 +152,16 @@ class FakeRepository:
 
     async def get_reward_template(self, template_id: UUID) -> RewardTemplate | None:
         return self.reward_templates.get(template_id)
+
+    async def get_menu_item(self, item_id: UUID, *, for_update: bool) -> MenuItem | None:
+        assert for_update is True
+        return self.menu_items.get(item_id)
+
+    async def get_reward_by_source_operation(self, operation_id: UUID) -> Reward | None:
+        return next(
+            (reward for reward in self.rewards if reward.source_operation_id == operation_id),
+            None,
+        )
 
     def add_all(self, objects: list[object]) -> None:
         for item in objects:
@@ -286,6 +300,17 @@ def staff_actor(*permissions: PermissionCode) -> Actor:
     )
 
 
+def customer_actor(user_id: UUID) -> Actor:
+    return Actor(
+        user_id=user_id,
+        telegram_id=1001,
+        session_id=uuid4(),
+        role=Role.CUSTOMER,
+        staff_member_id=None,
+        permissions=frozenset(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_lookup_card_returns_operational_customer_summary() -> None:
     context = loyalty_context(points_balance=37)
@@ -303,6 +328,53 @@ async def test_lookup_card_returns_operational_customer_summary() -> None:
     assert result.currency_name == context.settings.currency_name
     assert result.active_rewards == ()
     assert result.recent_operations == ()
+
+
+@pytest.mark.asyncio
+async def test_menu_item_purchase_deducts_points_and_issues_opaque_qr_idempotently() -> None:
+    context = loyalty_context(points_balance=120)
+    repository = FakeRepository(context)
+    template = RewardTemplate(
+        id=uuid4(),
+        name="Капучино",
+        description="Бесплатный капучино",
+        reward_type=RewardType.FREE_PRODUCT,
+        source_program=LoyaltyProgram.POINTS,
+        value_int=80,
+        validity_days=30,
+        is_active=True,
+    )
+    item = MenuItem(
+        id=uuid4(),
+        category_id=uuid4(),
+        name="Капучино",
+        price_minor=29_000,
+        points_price=80,
+        points_reward_template_id=template.id,
+        labels=[],
+        is_available=True,
+        is_visible=True,
+        sort_order=0,
+    )
+    repository.reward_templates[template.id] = template
+    repository.menu_items[item.id] = item
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+    actor = customer_actor(context.user.id)
+    key = str(uuid4())
+
+    first = await service.purchase_menu_item_with_points(
+        actor, item_id=item.id, idempotency_key=key, now=NOW
+    )
+    replay = await service.purchase_menu_item_with_points(
+        actor, item_id=item.id, idempotency_key=key, now=NOW
+    )
+
+    assert context.state.points_balance == 40
+    assert first.reward_id == replay.reward_id
+    assert replay.idempotent_replay is True
+    assert first.qr_payload.startswith("coffee-reward:v1:")
+    assert str(context.user.telegram_id) not in first.qr_payload
+    assert len(repository.point_transactions) == 1
 
 
 @pytest.mark.asyncio

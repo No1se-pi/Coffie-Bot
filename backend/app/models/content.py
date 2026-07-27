@@ -123,6 +123,9 @@ class MenuCategory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    icon_media_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("media_files.id", ondelete="SET NULL")
+    )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_visible: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
@@ -136,6 +139,10 @@ class MenuItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("price_minor >= 0", name="non_negative_price"),
         CheckConstraint(
             "old_price_minor IS NULL OR old_price_minor >= 0", name="non_negative_old_price"
+        ),
+        CheckConstraint(
+            "points_price IS NULL OR points_price > 0",
+            name="positive_points_price",
         ),
         Index("ix_menu_items_category_visible_sort", "category_id", "is_visible", "sort_order"),
         Index("ix_menu_items_available", "is_available"),
@@ -152,6 +159,10 @@ class MenuItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     old_price_minor: Mapped[int | None] = mapped_column(BigInteger)
+    points_price: Mapped[int | None] = mapped_column(BigInteger)
+    points_reward_template_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("reward_templates.id", ondelete="SET NULL")
+    )
     composition: Mapped[str | None] = mapped_column(Text)
     volume: Mapped[str | None] = mapped_column(String(80))
     labels: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)

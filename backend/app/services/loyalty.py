@@ -19,6 +19,7 @@ from app.core.errors import AppError, ErrorCode
 from app.models.access import User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.content import MenuItem
 from app.models.delivery import NotificationOutbox
 from app.models.enums import (
     AuditSeverity,
@@ -44,7 +45,9 @@ from app.repositories.loyalty import (
     LoyaltyContext,
     OperationArtifacts,
     OperationPage,
+    PostPurchaseRecord,
     RewardPage,
+    RewardQrRecord,
     UserPage,
 )
 from app.security.rbac import Actor
@@ -120,6 +123,16 @@ class LoyaltyRepositoryPort(Protocol):
     async def get_reward_template(self, template_id: UUID) -> RewardTemplate | None: ...
 
     async def get_reward(self, reward_id: UUID, *, for_update: bool) -> Reward | None: ...
+
+    async def get_reward_by_source_operation(self, operation_id: UUID) -> Reward | None: ...
+
+    async def get_reward_by_qr(self, qr_payload: str) -> RewardQrRecord | None: ...
+
+    async def get_menu_item(self, item_id: UUID, *, for_update: bool) -> MenuItem | None: ...
+
+    async def get_post_purchase(
+        self, *, operation_id: UUID, user_id: UUID
+    ) -> PostPurchaseRecord | None: ...
 
     async def get_outbox_by_key(self, idempotency_key: str) -> NotificationOutbox | None: ...
 
@@ -289,6 +302,39 @@ class CardReissueOutcome:
     audit_message: str
 
 
+@dataclass(frozen=True, slots=True)
+class PointsMenuPurchaseOutcome:
+    operation_id: UUID
+    reward_id: UUID
+    item_id: UUID
+    item_name: str
+    points_spent: int
+    balance_after: int
+    qr_payload: str
+    expires_at: datetime | None
+    idempotent_replay: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RewardQrLookupView:
+    reward_id: UUID
+    customer_name: str
+    reward_name: str
+    description: str
+    terms: str | None
+    expires_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class PostPurchaseView:
+    operation_id: UUID
+    barista_name: str
+    position: str
+    photo_media_id: UUID | None
+    tip_url: str | None
+    tip_qr_media_id: UUID | None
+
+
 class LoyaltyService:
     def __init__(self, repository: LoyaltyRepositoryPort) -> None:
         self._repository = repository
@@ -338,6 +384,167 @@ class LoyaltyService:
             currency_name=context.settings.currency_name,
             active_rewards=tuple(rewards.items),
             recent_operations=tuple(operations.items),
+        )
+
+    async def purchase_menu_item_with_points(
+        self,
+        actor: Actor,
+        *,
+        item_id: UUID,
+        idempotency_key: str,
+        metadata: RequestMetadata = EMPTY_REQUEST_METADATA,
+        now: datetime | None = None,
+    ) -> PointsMenuPurchaseOutcome:
+        current_time = _aware_now(now)
+        operation_type = LoyaltyOperationType.POINTS_PRODUCT_PURCHASE
+        request_hash = _request_hash(operation_type, actor, {"item_id": item_id})
+        async with self._repository.transaction():
+            existing = await self._idempotent_operation(
+                operation_type, idempotency_key, request_hash
+            )
+            if existing is not None:
+                reward = await self._repository.get_reward_by_source_operation(existing.id)
+                if reward is None or reward.qr_payload is None:
+                    _raise_conflict("reward_missing", "Награда операции не найдена")
+                return PointsMenuPurchaseOutcome(
+                    operation_id=existing.id,
+                    reward_id=reward.id,
+                    item_id=item_id,
+                    item_name=reward.name,
+                    points_spent=-existing.points_delta,
+                    balance_after=existing.balance_after or 0,
+                    qr_payload=reward.qr_payload,
+                    expires_at=reward.expires_at,
+                    idempotent_replay=True,
+                )
+
+            context = await self._require_context(actor.user_id, for_update=True)
+            item = await self._repository.get_menu_item(item_id, for_update=True)
+            if (
+                item is None
+                or item.archived_at is not None
+                or not item.is_visible
+                or not item.is_available
+                or item.points_price is None
+                or item.points_reward_template_id is None
+            ):
+                _raise_not_found("Товар за баллы недоступен")
+            if not context.settings.points_enabled:
+                _raise_conflict("points_program_disabled", "Программа баллов отключена")
+            template = await self._repository.get_reward_template(item.points_reward_template_id)
+            if template is None or not template.is_active:
+                _raise_conflict("reward_template_inactive", "Награда для товара не настроена")
+
+            points_price = item.points_price
+            balance_before = context.state.points_balance
+            if balance_before < points_price:
+                _raise_conflict("insufficient_points", "Недостаточно баллов")
+            balance_after = balance_before - points_price
+            context.state.points_balance = balance_after
+            context.state.version += 1
+            operation = LoyaltyOperation(
+                id=uuid4(),
+                user_id=actor.user_id,
+                actor_user_id=actor.user_id,
+                actor_staff_id=None,
+                operation_type=operation_type,
+                status=OperationStatus.COMMITTED,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                points_delta=-points_price,
+                balance_before=balance_before,
+                balance_after=balance_after,
+                reason=f"Покупка за баллы: {item.name}",
+                occurred_at=current_time,
+            )
+            transaction = PointTransaction(
+                id=uuid4(),
+                operation_id=operation.id,
+                user_id=actor.user_id,
+                delta=-points_price,
+                balance_before=balance_before,
+                balance_after=balance_after,
+                created_at=current_time,
+            )
+            reward = _new_reward(
+                template,
+                user_id=actor.user_id,
+                source_operation_id=operation.id,
+                validity_days=None,
+                now=current_time,
+            )
+            reward.qr_payload = f"coffee-reward:v1:{secrets.token_urlsafe(32)}"
+            objects: list[object] = [operation, transaction, reward]
+            objects.extend(
+                _operation_side_effects(
+                    operation,
+                    actor=actor,
+                    event_type="points.product_purchased",
+                    event_metadata={
+                        "customer_name": _display_name(context.user),
+                        "item_id": str(item.id),
+                        "item_name": item.name,
+                        "points_spent": points_price,
+                        "reward_id": str(reward.id),
+                    },
+                    metadata=metadata,
+                )
+            )
+            self._repository.add_all(objects)
+            await self._repository.flush()
+            return PointsMenuPurchaseOutcome(
+                operation_id=operation.id,
+                reward_id=reward.id,
+                item_id=item.id,
+                item_name=item.name,
+                points_spent=points_price,
+                balance_after=balance_after,
+                qr_payload=reward.qr_payload,
+                expires_at=reward.expires_at,
+                idempotent_replay=False,
+            )
+
+    async def lookup_reward_qr(self, actor: Actor, *, qr_payload: str) -> RewardQrLookupView:
+        _require_permission(actor, PermissionCode.REWARDS_REDEEM)
+        if not qr_payload.startswith("coffee-reward:v1:"):
+            _raise_not_found("Активная награда не найдена")
+        record = await self._repository.get_reward_by_qr(qr_payload)
+        current_time = datetime.now(UTC)
+        if (
+            record is None
+            or record.reward.status is not RewardStatus.ACTIVE
+            or (record.reward.expires_at is not None and record.reward.expires_at <= current_time)
+            or record.user.status is not UserStatus.ACTIVE
+        ):
+            _raise_not_found("Активная награда не найдена")
+        return RewardQrLookupView(
+            reward_id=record.reward.id,
+            customer_name=_display_name(record.user),
+            reward_name=record.reward.name,
+            description=record.reward.description,
+            terms=record.reward.terms,
+            expires_at=record.reward.expires_at,
+        )
+
+    async def get_post_purchase(self, actor: Actor, *, operation_id: UUID) -> PostPurchaseView:
+        record = await self._repository.get_post_purchase(
+            operation_id=operation_id,
+            user_id=actor.user_id,
+        )
+        if record is None:
+            _raise_not_found("Операция не найдена")
+        profile = record.tip_profile
+        return PostPurchaseView(
+            operation_id=record.operation.id,
+            barista_name=(
+                profile.published_name
+                if profile is not None and profile.published_name
+                else record.staff.display_name or record.staff_user.first_name
+            ),
+            position=record.staff.position or "Бариста",
+            photo_media_id=(profile.published_photo_media_id if profile else None),
+            tip_url=(profile.published_tip_url if profile else None),
+            tip_qr_media_id=(profile.published_tip_qr_media_id if profile else None),
         )
 
     async def preview_accrual(

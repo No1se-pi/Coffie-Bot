@@ -50,6 +50,7 @@ class RecordingAdminRepository:
         self.feedback_record: FeedbackRecord | None = None
         self.deleted_feedback: list[FeedbackItem] = []
         self.staff_user: User | None = None
+        self.existing_staff: StaffMember | None = None
         self.permission_overrides: dict[PermissionCode, bool] | None = None
         self.staff_permissions_were_initialized = False
         self.locked_staff: LockedStaffManagement | None = None
@@ -87,7 +88,7 @@ class RecordingAdminRepository:
         for_update: bool,
     ) -> StaffMember | None:
         assert for_update is True
-        return None
+        return self.existing_staff
 
     def replace_staff_permissions(
         self,
@@ -143,7 +144,9 @@ def test_admin_routes_import_and_publish_expected_paths() -> None:
     assert "delete" in paths["/api/v1/admin/staff/{staff_id}"]
     assert "/api/v1/admin/staff/invites" in paths
     assert "/api/v1/staff/me/tip-profile" in paths
+    assert "/api/v1/staff/me/tip-profile/cancel-review" in paths
     assert "/api/v1/admin/media" in paths
+    assert "/api/v1/staff/me/media" in paths
     assert "/api/v1/media/{media_id}" in paths
 
 
@@ -306,6 +309,45 @@ async def test_created_staff_keeps_loaded_user_for_response_and_permissions() ->
     assert staff.user is repository.staff_user
     assert repository.staff_permissions_were_initialized is True
     assert repository.permission_overrides == {PermissionCode.POINTS_REDEEM: False}
+
+
+@pytest.mark.asyncio
+async def test_archived_staff_profile_is_restored_instead_of_conflicting() -> None:
+    repository = RecordingAdminRepository()
+    user = User(id=uuid4(), telegram_id=102, first_name="Ivan")
+    repository.staff_user = user
+    repository.existing_staff = StaffMember(
+        id=uuid4(),
+        user_id=user.id,
+        role=Role.STAFF,
+        display_name="Старое имя",
+        is_active=False,
+        disabled_at=NOW,
+        archived_at=NOW,
+        user=user,
+        permissions=[],
+    )
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    restored = await service.create_staff(
+        actor=_actor(),
+        user_id=user.id,
+        role=Role.STAFF,
+        display_name="Новое имя",
+        position="Бариста",
+        bio=None,
+        can_edit_tip_profile=True,
+        permissions={PermissionCode.CARD_LOOKUP: True},
+        now=NOW,
+    )
+
+    assert restored is repository.existing_staff
+    assert restored.is_active is True
+    assert restored.archived_at is None
+    assert restored.disabled_at is None
+    assert restored.display_name == "Новое имя"
+    audit = next(item for item in repository.added if isinstance(item, AuditEvent))
+    assert audit.event_type == "staff.restored"
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,7 @@ export interface CardData {
 export type HistoryType =
   | "purchase_accrual"
   | "points_redemption"
+  | "points_product_purchase"
   | "welcome_bonus"
   | "points_expiration"
   | "visit_mark"
@@ -77,6 +78,8 @@ export interface Reward {
   expires_at?: string | null;
   created_at: string;
   redeemed_at?: string | null;
+  terms?: string | null;
+  qr_payload?: string | null;
 }
 
 export interface Promotion {
@@ -84,6 +87,7 @@ export interface Promotion {
   title: string;
   text: string;
   image_url?: string | null;
+  image_media_id?: string | null;
   button_label?: string | null;
   button_url?: string | null;
   starts_at?: string | null;
@@ -97,6 +101,7 @@ export interface Promotion {
 export interface PromotionDraft {
   title: string;
   text: string;
+  image_media_id?: string | null;
   button_label?: string | null;
   button_url?: string | null;
   starts_at?: string | null;
@@ -107,6 +112,8 @@ export interface MenuCategory {
   id: string;
   name: string;
   description?: string | null;
+  icon_media_id?: string | null;
+  icon_url?: string | null;
   sort_order: number;
   visible: boolean;
   archived_at?: string | null;
@@ -115,6 +122,7 @@ export interface MenuCategory {
 export interface MenuCategoryDraft {
   name: string;
   description?: string | null;
+  icon_media_id?: string | null;
   sort_order: number;
   visible: boolean;
 }
@@ -125,8 +133,10 @@ export interface MenuItem {
   name: string;
   description?: string | null;
   image_url?: string | null;
+  image_media_id?: string | null;
   price_minor: number;
   old_price_minor?: number | null;
+  points_price?: number | null;
   composition?: string | null;
   volume?: string | null;
   labels?: string[];
@@ -140,8 +150,10 @@ export interface MenuItemDraft {
   category_id: string;
   name: string;
   description?: string | null;
+  image_media_id?: string | null;
   price_minor: number;
   old_price_minor?: number | null;
+  points_price?: number | null;
   composition?: string | null;
   volume?: string | null;
   labels: string[];
@@ -252,12 +264,64 @@ export interface OperationResult {
 }
 
 export interface TipProfile {
+  id?: string | null;
   display_name: string;
   position: string;
   bio: string;
   tip_url: string;
   tip_qr_url?: string | null;
+  photo_url?: string | null;
+  photo_media_id?: string | null;
+  tip_qr_media_id?: string | null;
   moderation_status: "draft" | "pending_review" | "approved" | "hidden";
+  published_visible?: boolean;
+}
+
+export interface MediaUpload {
+  id: string;
+  url: string;
+}
+
+export interface PointsMenuPurchase {
+  operation_id: string;
+  reward_id: string;
+  item_id: string;
+  item_name: string;
+  points_spent: number;
+  balance_after: number;
+  qr_payload: string;
+  expires_at?: string | null;
+  idempotent_replay: boolean;
+}
+
+export interface StaffRewardLookup {
+  reward_id: string;
+  customer_name: string;
+  reward_name: string;
+  description: string;
+  terms?: string | null;
+  expires_at?: string | null;
+}
+
+export interface PendingTipProfile {
+  id: string;
+  staff_id: string;
+  staff_display_name: string;
+  position?: string | null;
+  pending_name?: string | null;
+  pending_bio?: string | null;
+  pending_tip_url?: string | null;
+  status: TipProfile["moderation_status"];
+  submitted_at?: string | null;
+}
+
+export interface PostPurchase {
+  operation_id: string;
+  barista_name: string;
+  position: string;
+  photo_url?: string | null;
+  tip_url?: string | null;
+  tip_qr_url?: string | null;
 }
 
 export interface AdminUserListItem {

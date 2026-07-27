@@ -23,6 +23,7 @@ from app.repositories.identity import (
     RewardPageRecord,
 )
 from app.services.identity import AuthenticationResult, IdentityView
+from app.services.loyalty import PointsMenuPurchaseOutcome, PostPurchaseView
 
 
 class ApiSchema(BaseModel):
@@ -111,6 +112,28 @@ class RewardResponse(ApiSchema):
     created_at: datetime
     redeemed_at: datetime | None
     terms: str | None
+    qr_payload: str | None
+
+
+class PointsMenuPurchaseResponse(ApiSchema):
+    operation_id: UUID
+    reward_id: UUID
+    item_id: UUID
+    item_name: str
+    points_spent: int
+    balance_after: int
+    qr_payload: str
+    expires_at: datetime | None
+    idempotent_replay: bool
+
+
+class PostPurchaseResponse(ApiSchema):
+    operation_id: UUID
+    barista_name: str
+    position: str
+    photo_url: str | None
+    tip_url: str | None
+    tip_qr_url: str | None
 
 
 class RewardListResponse(ApiSchema):
@@ -223,12 +246,40 @@ def rewards_response(
                 created_at=item.created_at,
                 redeemed_at=item.redeemed_at,
                 terms=item.terms,
+                qr_payload=item.qr_payload,
             )
             for item in record.items
         ],
         page=page,
         page_size=page_size,
         total=record.total,
+    )
+
+
+def points_menu_purchase_response(
+    value: PointsMenuPurchaseOutcome,
+) -> PointsMenuPurchaseResponse:
+    return PointsMenuPurchaseResponse(
+        operation_id=value.operation_id,
+        reward_id=value.reward_id,
+        item_id=value.item_id,
+        item_name=value.item_name,
+        points_spent=value.points_spent,
+        balance_after=value.balance_after,
+        qr_payload=value.qr_payload,
+        expires_at=value.expires_at,
+        idempotent_replay=value.idempotent_replay,
+    )
+
+
+def post_purchase_response(value: PostPurchaseView) -> PostPurchaseResponse:
+    return PostPurchaseResponse(
+        operation_id=value.operation_id,
+        barista_name=value.barista_name,
+        position=value.position,
+        photo_url=(f"/api/v1/media/{value.photo_media_id}" if value.photo_media_id else None),
+        tip_url=value.tip_url,
+        tip_qr_url=(f"/api/v1/media/{value.tip_qr_media_id}" if value.tip_qr_media_id else None),
     )
 
 

@@ -122,6 +122,8 @@ class MenuCategoryResponse(ApiSchema):
     id: UUID
     name: str
     description: str | None
+    icon_media_id: UUID | None
+    icon_url: str | None
     sort_order: int
     visible: bool
     archived_at: datetime | None
@@ -137,6 +139,7 @@ class MenuCategoryListResponse(ApiSchema):
 class MenuCategoryCreate(ApiSchema):
     name: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4_000)
+    icon_media_id: UUID | None = None
     sort_order: int = Field(default=0, ge=-100_000, le=100_000)
     visible: bool = True
 
@@ -144,6 +147,7 @@ class MenuCategoryCreate(ApiSchema):
 class MenuCategoryUpdate(ApiSchema):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4_000)
+    icon_media_id: UUID | None = None
     sort_order: int | None = Field(default=None, ge=-100_000, le=100_000)
     visible: bool | None = None
 
@@ -157,6 +161,7 @@ class MenuItemResponse(ApiSchema):
     image_url: str | None
     price_minor: int
     old_price_minor: int | None
+    points_price: int | None
     composition: str | None
     volume: str | None
     labels: list[str]
@@ -180,6 +185,7 @@ class MenuItemCreate(ApiSchema):
     image_media_id: UUID | None = None
     price_minor: int = Field(ge=0, le=1_000_000_000)
     old_price_minor: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    points_price: int | None = Field(default=None, gt=0, le=1_000_000_000)
     composition: str | None = Field(default=None, max_length=8_000)
     volume: str | None = Field(default=None, max_length=80)
     labels: list[str] = Field(default_factory=list, max_length=20)
@@ -209,6 +215,7 @@ class MenuItemUpdate(ApiSchema):
     image_media_id: UUID | None = None
     price_minor: int | None = Field(default=None, ge=0, le=1_000_000_000)
     old_price_minor: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    points_price: int | None = Field(default=None, gt=0, le=1_000_000_000)
     composition: str | None = Field(default=None, max_length=8_000)
     volume: str | None = Field(default=None, max_length=80)
     labels: list[str] | None = Field(default=None, max_length=20)
@@ -490,6 +497,8 @@ def menu_category_response(item: MenuCategory) -> MenuCategoryResponse:
         id=item.id,
         name=item.name,
         description=item.description,
+        icon_media_id=item.icon_media_id,
+        icon_url=media_url(item.icon_media_id),
         sort_order=item.sort_order,
         visible=item.is_visible,
         archived_at=item.archived_at,
@@ -517,6 +526,7 @@ def menu_item_response(item: MenuItem) -> MenuItemResponse:
         image_url=media_url(item.image_media_id),
         price_minor=item.price_minor,
         old_price_minor=item.old_price_minor,
+        points_price=item.points_price,
         composition=item.composition,
         volume=item.volume,
         labels=item.labels,

@@ -31,6 +31,7 @@ from app.services.loyalty import (
     OperationOutcome,
     PurchasePreviewView,
     RedemptionPreviewView,
+    RewardQrLookupView,
     UserStatusOutcome,
 )
 
@@ -58,6 +59,19 @@ class CardLookupRequest(ApiSchema):
         if (self.qr_token is None) == (self.short_code is None):
             raise ValueError("exactly one of qr_token or short_code is required")
         return self
+
+
+class RewardQrLookupRequest(ApiSchema):
+    qr_payload: str = Field(min_length=32, max_length=160)
+
+
+class RewardQrLookupResponse(ApiSchema):
+    reward_id: UUID
+    customer_name: str
+    reward_name: str
+    description: str
+    terms: str | None
+    expires_at: datetime | None
 
 
 class CardRewardResponse(ApiSchema):
@@ -367,6 +381,17 @@ def card_lookup_response(value: CardLookupView) -> CardLookupResponse:
             )
             for operation in value.recent_operations
         ],
+    )
+
+
+def reward_qr_lookup_response(value: RewardQrLookupView) -> RewardQrLookupResponse:
+    return RewardQrLookupResponse(
+        reward_id=value.reward_id,
+        customer_name=value.customer_name,
+        reward_name=value.reward_name,
+        description=value.description,
+        terms=value.terms,
+        expires_at=value.expires_at,
     )
 
 

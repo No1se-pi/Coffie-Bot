@@ -1075,7 +1075,10 @@ export function StaffProfilePage() {
             </div>
           )}
           <form className="form" onSubmit={(event) => void save(event)}>
-            <Field label="Аватар" hint="JPG, PNG или WebP, до 5 МБ">
+            <Field
+              label="Аватар"
+              hint="Лучше всего 800×800 px (1:1). JPG, PNG или WebP, до 5 МБ"
+            >
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -1121,7 +1124,7 @@ export function StaffProfilePage() {
             </Field>
             <Field
               label="QR для чаевых"
-              hint="Необязательно, если есть обычная ссылка"
+              hint="Лучше всего 1000×1000 px (1:1), с белым полем и без обрезки. JPG, PNG или WebP, до 5 МБ"
             >
               <input
                 type="file"

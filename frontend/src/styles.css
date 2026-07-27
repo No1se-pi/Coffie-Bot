@@ -767,6 +767,7 @@ a:focus-visible {
   display: none;
 }
 .promo-card {
+  overflow: hidden;
   min-height: 155px;
   padding: 1rem;
   scroll-snap-align: start;
@@ -777,6 +778,13 @@ a:focus-visible {
     var(--color-surface)
   );
   border: 1px solid var(--color-border);
+}
+.promo-card > img {
+  width: calc(100% + 2rem);
+  aspect-ratio: 16 / 9;
+  margin: -1rem -1rem 0.85rem;
+  display: block;
+  object-fit: cover;
 }
 .promo-card h3 {
   margin-top: 1rem;
@@ -1827,12 +1835,32 @@ details p {
   border-top: 1px solid var(--color-border);
 }
 .admin-menu__image {
+  overflow: hidden;
   width: 52px;
   height: 52px;
   display: grid;
   place-items: center;
   border-radius: 12px;
   background: var(--color-accent-soft);
+}
+.admin-menu__image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.admin-menu__category-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.admin-menu__category-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 11px;
+  object-fit: cover;
 }
 .admin-menu h3,
 .admin-menu p {
@@ -1858,6 +1886,18 @@ details p {
   align-items: flex-end;
   justify-content: space-between;
   gap: 0.8rem;
+}
+.promotion-admin-card__cover {
+  width: 104px;
+  aspect-ratio: 16 / 9;
+  flex: 0 0 auto;
+  align-self: center;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.promotion-admin-card__body {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .promotion-admin-card h2 {
   margin-top: 0.65rem;

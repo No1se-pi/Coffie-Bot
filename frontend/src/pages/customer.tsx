@@ -87,16 +87,6 @@ export function HomePage() {
                     <Badge tone="accent">Акция</Badge>
                     <h3>{promotion.title}</h3>
                     <p>{promotion.text}</p>
-                    {promotion.button_url && (
-                      <a
-                        className="button button--secondary"
-                        href={promotion.button_url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {promotion.button_label || "Подробнее"}
-                      </a>
-                    )}
                   </article>
                 ))}
               </div>

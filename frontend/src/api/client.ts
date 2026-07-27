@@ -936,7 +936,12 @@ export const coffeeApi = {
             : "/admin/promotions",
           {
             method: promotion ? "PATCH" : "POST",
-            body: jsonBody(payload),
+            body: jsonBody({
+              ...payload,
+              // Promotions are static cards. Saving also clears legacy links.
+              button_label: null,
+              button_url: null,
+            }),
           },
         ),
   archivePromotion: (promotion: Promotion): Promise<Promotion> =>

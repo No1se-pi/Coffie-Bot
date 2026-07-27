@@ -25,6 +25,7 @@ import {
   AdminAdjustmentPage,
   AdminFeedbackPage,
   AdminMenuPage,
+  AdminPromotionsPage,
   AdminStaffPage,
   AdminUsersPage,
 } from "../pages/admin";
@@ -590,7 +591,19 @@ describe("critical Mini App flows", () => {
     };
     vi.spyOn(coffeeApi, "getAdminMenu").mockResolvedValue({
       categories: [category],
-      items: [],
+      items: [
+        {
+          id: "item-with-photo",
+          category_id: category.id,
+          name: "Латте",
+          image_url: "/api/v1/media/photo-1",
+          price_minor: 31000,
+          labels: [],
+          available: true,
+          visible: true,
+          sort_order: 0,
+        },
+      ],
     });
     const save = vi.spyOn(coffeeApi, "saveMenuItem").mockResolvedValue({
       id: "item-1",
@@ -610,6 +623,10 @@ describe("critical Mini App flows", () => {
     );
 
     expect(await screen.findByText("Кофе")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Фото Латте" })).toHaveAttribute(
+      "src",
+      "/api/v1/media/photo-1",
+    );
     await user.click(screen.getByRole("button", { name: "Добавить позицию" }));
     await user.type(screen.getByLabelText("Название позиции"), "Капучино");
     await user.type(screen.getByLabelText("Цена, ₽"), "290");
@@ -629,6 +646,51 @@ describe("critical Mini App flows", () => {
       available: true,
       visible: true,
       sort_order: 0,
+    });
+  });
+
+  it("edits promotions as static cards without a manual link", async () => {
+    const user = userEvent.setup();
+    const promotion = {
+      id: "promotion-1",
+      title: "Летний напиток",
+      text: "Попробуйте новинку",
+      button_label: "Старая кнопка",
+      button_url: "https://example.com/old",
+      status: "draft" as const,
+    };
+    vi.spyOn(coffeeApi, "getAdminPromotions").mockResolvedValue({
+      items: [promotion],
+      page: 1,
+      page_size: 50,
+      total: 1,
+    });
+    const save = vi
+      .spyOn(coffeeApi, "savePromotion")
+      .mockResolvedValue(promotion);
+
+    render(
+      <MemoryRouter>
+        <AdminPromotionsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Летний напиток")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Изменить" }));
+    expect(screen.queryByLabelText("Ссылка акции")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Надпись на кнопке"),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Сохранить черновик" }),
+    );
+
+    expect(save).toHaveBeenCalledWith(promotion, {
+      title: "Летний напиток",
+      text: "Попробуйте новинку",
+      image_media_id: null,
+      starts_at: null,
+      ends_at: null,
     });
   });
 

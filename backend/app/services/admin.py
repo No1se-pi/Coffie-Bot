@@ -368,12 +368,15 @@ class AdminService:
         async with self._repository.transaction():
             await self._require_category(category_id)
             await self._require_media(image_media_id)
-            objects: list[object] = [item]
             if points_price is not None:
                 template = self._points_menu_template(item=item, actor=actor)
+                # MenuItem points at RewardTemplate without an ORM relationship.
+                # Flush the referenced row first so PostgreSQL never sees the
+                # menu_items foreign key before its reward template exists.
+                self._repository.add(template)
+                await self._repository.flush()
                 item.points_reward_template_id = template.id
-                objects.append(template)
-            self._repository.add_all(objects)
+            self._repository.add(item)
             self._audit(
                 actor=actor,
                 event_type="menu.item_created",
@@ -461,8 +464,9 @@ class AdminService:
             return
         if template is None:
             template = self._points_menu_template(item=item, actor=actor)
-            item.points_reward_template_id = template.id
             self._repository.add(template)
+            await self._repository.flush()
+            item.points_reward_template_id = template.id
             return
         template.name = item.name
         template.description = item.description or f"Награда: {item.name}"

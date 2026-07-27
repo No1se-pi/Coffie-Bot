@@ -1873,7 +1873,10 @@ function MenuCategoryEditor({
             onChange={(event) => setDescription(event.target.value)}
           />
         </Field>
-        <Field label="Иконка категории" hint="JPG, PNG или WebP, до 5 МБ">
+        <Field
+          label="Иконка категории"
+          hint="Лучше всего 512×512 px (1:1). JPG, PNG или WebP, до 5 МБ"
+        >
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -2100,7 +2103,10 @@ function MenuItemEditor({
             />
           </Field>
         </div>
-        <Field label="Фото позиции" hint="JPG, PNG или WebP, до 5 МБ">
+        <Field
+          label="Фото позиции"
+          hint="Лучше всего 900×1200 px (3:4). JPG, PNG или WebP, до 5 МБ"
+        >
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -2291,9 +2297,18 @@ export function AdminMenuPage() {
           {data.categories.map((category) => (
             <section key={category.id}>
               <div className="section-heading">
-                <div>
-                  <h2>{category.name}</h2>
-                  <p>{category.description}</p>
+                <div className="admin-menu__category-heading">
+                  {category.icon_url && (
+                    <img
+                      className="admin-menu__category-icon"
+                      src={category.icon_url}
+                      alt=""
+                    />
+                  )}
+                  <div>
+                    <h2>{category.name}</h2>
+                    <p>{category.description}</p>
+                  </div>
                 </div>
                 <Badge>
                   {
@@ -2316,7 +2331,13 @@ export function AdminMenuPage() {
                 .filter((item) => item.category_id === category.id)
                 .map((item) => (
                   <article key={item.id}>
-                    <div className="admin-menu__image">☕</div>
+                    <div className="admin-menu__image">
+                      {item.image_url ? (
+                        <img src={item.image_url} alt={`Фото ${item.name}`} />
+                      ) : (
+                        <span aria-hidden="true">☕</span>
+                      )}
+                    </div>
                     <div>
                       <h3>{item.name}</h3>
                       <p>{item.description}</p>
@@ -2368,8 +2389,6 @@ function PromotionEditor({
 }) {
   const [title, setTitle] = useState(promotion?.title ?? "");
   const [text, setText] = useState(promotion?.text ?? "");
-  const [buttonLabel, setButtonLabel] = useState(promotion?.button_label ?? "");
-  const [buttonUrl, setButtonUrl] = useState(promotion?.button_url ?? "");
   const [imageMediaId, setImageMediaId] = useState<string | null>(
     promotion?.image_media_id ?? null,
   );
@@ -2387,10 +2406,6 @@ function PromotionEditor({
       setError("Укажите заголовок и текст акции");
       return;
     }
-    if (buttonUrl && !/^https?:\/\//i.test(buttonUrl)) {
-      setError("Ссылка кнопки должна начинаться с http:// или https://");
-      return;
-    }
     const startIso = startsAt ? new Date(startsAt).toISOString() : null;
     const endIso = endsAt ? new Date(endsAt).toISOString() : null;
     if (startIso && endIso && endIso <= startIso) {
@@ -2404,10 +2419,6 @@ function PromotionEditor({
         title: title.trim(),
         text: text.trim(),
         image_media_id: imageMediaId,
-        button_label: buttonUrl.trim()
-          ? buttonLabel.trim() || "Подробнее"
-          : null,
-        button_url: buttonUrl.trim() || null,
         starts_at: startIso,
         ends_at: endIso,
       });
@@ -2437,7 +2448,10 @@ function PromotionEditor({
             onChange={(event) => setText(event.target.value)}
           />
         </Field>
-        <Field label="Обложка акции" hint="JPG, PNG или WebP, до 5 МБ">
+        <Field
+          label="Обложка акции"
+          hint="Лучше всего 1200×675 px (16:9). JPG, PNG или WebP, до 5 МБ"
+        >
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -2472,23 +2486,6 @@ function PromotionEditor({
           />
         )}
         <div className="form-grid">
-          <Field
-            label="Надпись на кнопке"
-            hint="Если оставить пустой, будет «Подробнее»"
-          >
-            <input
-              value={buttonLabel}
-              onChange={(event) => setButtonLabel(event.target.value)}
-            />
-          </Field>
-          <Field label="Ссылка акции" hint="Куда попадёт клиент по кнопке">
-            <input
-              type="url"
-              value={buttonUrl}
-              onChange={(event) => setButtonUrl(event.target.value)}
-              placeholder="https://…"
-            />
-          </Field>
           <Field label="Начало">
             <input
               type="datetime-local"
@@ -2604,7 +2601,14 @@ export function AdminPromotionsPage() {
           <div className="card-list">
             {sorted.map((promotion) => (
               <Panel className="promotion-admin-card" key={promotion.id}>
-                <div>
+                {promotion.image_url && (
+                  <img
+                    className="promotion-admin-card__cover"
+                    src={promotion.image_url}
+                    alt={`Обложка ${promotion.title}`}
+                  />
+                )}
+                <div className="promotion-admin-card__body">
                   <Badge
                     tone={
                       promotion.status === "published"

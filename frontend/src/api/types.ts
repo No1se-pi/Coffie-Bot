@@ -102,8 +102,6 @@ export interface PromotionDraft {
   title: string;
   text: string;
   image_media_id?: string | null;
-  button_label?: string | null;
-  button_url?: string | null;
   starts_at?: string | null;
   ends_at?: string | null;
 }

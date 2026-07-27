@@ -17,6 +17,7 @@ from app.api.routes import admin_content, admin_staff, media, staff_profile
 from app.core.errors import AppError
 from app.models.access import StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
+from app.models.content import MenuItem
 from app.models.enums import (
     FeedbackCategory,
     FeedbackStatus,
@@ -24,7 +25,7 @@ from app.models.enums import (
     Role,
     RoundingMode,
 )
-from app.models.loyalty import LoyaltySettings
+from app.models.loyalty import LoyaltySettings, RewardTemplate
 from app.models.staff import FeedbackItem
 from app.repositories.admin import AdminRepository, FeedbackRecord, LockedStaffManagement
 from app.schemas.admin import (
@@ -55,6 +56,9 @@ class RecordingAdminRepository:
         self.staff_permissions_were_initialized = False
         self.locked_staff: LockedStaffManagement | None = None
         self.revoked_staff_user_id: object | None = None
+        self.menu_item: MenuItem | None = None
+        self.reward_template: RewardTemplate | None = None
+        self.flush_item_template_ids: list[object | None] = []
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
@@ -64,7 +68,22 @@ class RecordingAdminRepository:
         self.added.append(value)
 
     async def flush(self) -> None:
+        self.flush_item_template_ids.append(
+            self.menu_item.points_reward_template_id if self.menu_item is not None else None
+        )
         return None
+
+    async def get_menu_item(
+        self,
+        _item_id: object,
+        *,
+        for_update: bool,
+    ) -> MenuItem | None:
+        assert for_update is True
+        return self.menu_item
+
+    async def get_reward_template(self, _template_id: object) -> RewardTemplate | None:
+        return self.reward_template
 
     async def get_feedback(
         self,
@@ -185,6 +204,36 @@ def test_admin_patch_forbids_excess_fields_and_promotion_requires_aware_window()
             text="Условия",
             starts_at=NOW.replace(tzinfo=None),
         )
+
+
+@pytest.mark.asyncio
+async def test_points_price_flushes_reward_template_before_menu_item_foreign_key() -> None:
+    repository = RecordingAdminRepository()
+    item = MenuItem(
+        id=uuid4(),
+        category_id=uuid4(),
+        name="Капучино",
+        price_minor=29_000,
+        points_price=None,
+        labels=[],
+        is_available=True,
+        is_visible=True,
+        sort_order=0,
+        archived_at=None,
+    )
+    repository.menu_item = item
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    updated = await service.update_menu_item(
+        actor=_actor(),
+        item_id=item.id,
+        updates={"points_price": 120},
+    )
+
+    template = next(value for value in repository.added if isinstance(value, RewardTemplate))
+    assert repository.flush_item_template_ids == [None, template.id]
+    assert updated.points_price == 120
+    assert updated.points_reward_template_id == template.id
 
 
 def test_image_sniffing_and_filename_sanitization_reject_spoofing() -> None:

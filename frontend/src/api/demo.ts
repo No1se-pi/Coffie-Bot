@@ -104,8 +104,6 @@ let promotions: Promotion[] = [
     id: "promo-1",
     title: "Утро начинается здесь",
     text: "До 11:00 второй напиток для друга со скидкой 30%.",
-    button_label: "Условия акции",
-    button_url: "https://example.com/promo",
     status: "published",
     starts_at: new Date(Date.now() - 86_400_000).toISOString(),
     ends_at: new Date(Date.now() + 10 * 86_400_000).toISOString(),

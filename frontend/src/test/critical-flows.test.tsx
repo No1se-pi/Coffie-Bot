@@ -329,6 +329,36 @@ describe("critical Mini App flows", () => {
     expect(getTimeGreeting(new Date(2026, 0, 1, 23))).toBe("Доброй ночи");
   });
 
+  it("shows an earned visit or stamp reward as a scannable QR on home", async () => {
+    vi.spyOn(coffeeApi, "getHome").mockResolvedValue({
+      card,
+      active_rewards: [
+        {
+          id: "reward-stamps-1",
+          title: "Капучино за 9 штампов",
+          description: "Бесплатный капучино",
+          type: "free_product",
+          status: "active",
+          created_at: "2026-08-02T10:00:00Z",
+          qr_payload: "coffee-reward:v1:earned-opaque-token",
+        },
+      ],
+      promotions: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("home-reward-qr")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("QR-код награды Капучино за 9 штампов"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Покажите этот QR-код бариста.")).toBeVisible();
+  });
+
   it("shows the Telegram avatar in the Mini App header", () => {
     const { container } = render(
       <AuthContext.Provider

@@ -861,18 +861,32 @@ a:focus-visible {
   color: var(--color-muted);
 }
 .reward-highlight {
-  display: flex;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
+}
+.reward-highlight__copy {
+  min-width: 0;
 }
 .reward-highlight h2 {
   margin-top: 0.75rem;
 }
 .reward-highlight p {
-  margin-bottom: 0;
+  margin-bottom: 0.6rem;
   color: var(--color-muted);
+}
+.reward-highlight small {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: var(--color-muted);
+}
+.reward-highlight__qr .qr-frame {
+  margin: 0;
+  padding: 0.55rem;
+  border-radius: 15px;
 }
 
 .loyalty-card {
@@ -2191,6 +2205,12 @@ details p {
   .qr-shortcut svg {
     width: 64px;
     height: 64px;
+  }
+  .reward-highlight--with-qr {
+    grid-template-columns: 1fr;
+  }
+  .reward-highlight__qr {
+    justify-self: center;
   }
   .client-summary {
     grid-template-columns: auto minmax(0, 1fr);

@@ -35,6 +35,7 @@ export function HomePage() {
   const resource = useResource(coffeeApi.getHome);
   const greeting = getTimeGreeting();
   const customerName = resource.data?.card.display_name.trim().split(/\s+/)[0];
+  const highlightedReward = resource.data?.active_rewards[0];
   return (
     <Page
       title={customerName ? `${greeting}, ${customerName}` : greeting}
@@ -120,16 +121,39 @@ export function HomePage() {
             )}
           </section>
 
-          {resource.data.active_rewards[0] && (
-            <Panel className="reward-highlight">
-              <div>
+          {highlightedReward && (
+            <Panel
+              className={`reward-highlight ${
+                highlightedReward.qr_payload ? "reward-highlight--with-qr" : ""
+              }`}
+            >
+              <div className="reward-highlight__copy">
                 <Badge tone="success">Можно использовать</Badge>
-                <h2>{resource.data.active_rewards[0].title}</h2>
-                <p>{resource.data.active_rewards[0].description}</p>
+                <h2>{highlightedReward.title}</h2>
+                <p>{highlightedReward.description}</p>
+                {highlightedReward.qr_payload && (
+                  <small>Покажите этот QR-код бариста.</small>
+                )}
+                <Link className="text-link" to="/rewards">
+                  Все награды
+                </Link>
               </div>
-              <Link className="text-link" to="/rewards">
-                Открыть
-              </Link>
+              {highlightedReward.qr_payload && (
+                <div
+                  className="reward-highlight__qr"
+                  data-testid="home-reward-qr"
+                >
+                  <div className="qr-frame">
+                    <QRCodeSVG
+                      value={highlightedReward.qr_payload}
+                      size={132}
+                      level="M"
+                      marginSize={2}
+                      title={`QR-код награды ${highlightedReward.title}`}
+                    />
+                  </div>
+                </div>
+              )}
             </Panel>
           )}
         </>

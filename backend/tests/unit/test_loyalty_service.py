@@ -519,6 +519,11 @@ async def test_purchase_issues_visit_and_stamp_rewards_at_both_goals() -> None:
         visit_template.id,
         stamp_template.id,
     }
+    assert all(
+        reward.qr_payload is not None and reward.qr_payload.startswith("coffee-reward:v1:")
+        for reward in repository.rewards
+    )
+    assert len({reward.qr_payload for reward in repository.rewards}) == 2
 
 
 @pytest.mark.asyncio

@@ -476,7 +476,9 @@ class LoyaltyService:
                 validity_days=None,
                 now=current_time,
             )
-            reward.qr_payload = f"coffee-reward:v1:{secrets.token_urlsafe(32)}"
+            reward_qr_payload = reward.qr_payload
+            if reward_qr_payload is None:  # Defensive: redeemable rewards always have a QR.
+                raise RuntimeError("Issued reward is missing its QR payload")
             objects: list[object] = [operation, transaction, reward]
             objects.extend(
                 _operation_side_effects(
@@ -502,7 +504,7 @@ class LoyaltyService:
                 item_name=item.name,
                 points_spent=points_price,
                 balance_after=balance_after,
-                qr_payload=reward.qr_payload,
+                qr_payload=reward_qr_payload,
                 expires_at=reward.expires_at,
                 idempotent_replay=False,
             )
@@ -2481,6 +2483,7 @@ def _new_reward(
         value_int=template.value_int,
         terms=template.terms,
         status=RewardStatus.ACTIVE,
+        qr_payload=f"coffee-reward:v1:{secrets.token_urlsafe(32)}",
         expires_at=(
             now + timedelta(days=effective_validity) if effective_validity is not None else None
         ),

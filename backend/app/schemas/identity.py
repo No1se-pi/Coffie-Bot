@@ -73,8 +73,10 @@ class CardResponse(ApiSchema):
     short_code: str
     balance_points: int
     currency_name: str
+    visits_enabled: bool
     visit_streak: int
     visit_goal: int
+    stamps_enabled: bool
     stamps: int
     stamp_goal: int
     blocked: bool
@@ -194,8 +196,10 @@ def card_response(record: CardViewRecord) -> CardResponse:
         short_code=record.card.short_code,
         balance_points=record.loyalty_state.points_balance,
         currency_name=settings.currency_name if settings is not None else "баллы",
+        visits_enabled=settings.visits_enabled if settings is not None else False,
         visit_streak=record.loyalty_state.visit_streak,
         visit_goal=settings.visit_required_count if settings is not None else 5,
+        stamps_enabled=settings.stamps_enabled if settings is not None else False,
         stamps=record.loyalty_state.stamp_count,
         stamp_goal=settings.stamp_required_count if settings is not None else 9,
         blocked=record.user.status is UserStatus.BLOCKED,

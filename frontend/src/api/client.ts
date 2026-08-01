@@ -44,6 +44,9 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api/v1").replace(
   "",
 );
 const TOKEN_KEY = "coffie.session";
+const MAX_MEDIA_BYTES = 5 * 1024 * 1024;
+export const MEDIA_FILE_ACCEPT =
+  ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -133,7 +136,10 @@ async function request<T>(
       // Use a safe generic message for non-JSON upstream errors.
     }
     throw new ApiError(
-      envelope.error?.message ?? "Не удалось выполнить запрос",
+      envelope.error?.message ??
+        (response.status === 413
+          ? "Фото больше 5 МБ. Выберите файл меньшего размера."
+          : "Не удалось выполнить запрос"),
       {
         status: response.status,
         code: envelope.error?.code,
@@ -167,6 +173,15 @@ function uuid(): string {
     globalThis.crypto?.randomUUID?.() ??
     `fallback-${Date.now()}-${Math.random()}`
   );
+}
+
+function validateMediaFile(file: File): void {
+  if (file.size > MAX_MEDIA_BYTES) {
+    throw new ApiError("Фото больше 5 МБ. Выберите файл меньшего размера.", {
+      status: 413,
+      code: "media_too_large",
+    });
+  }
 }
 
 const demoConfigured = import.meta.env.VITE_USE_DEMO_DATA;
@@ -347,6 +362,7 @@ interface BackendPurchasePreview extends BackendAccrualPreview {
   stamps_before: number;
   projected_stamps_after: number;
   stamp_rewards_earned: number;
+  reward_bonus_points: number;
   visit_will_be_recorded: boolean;
   visit_already_counted: boolean;
   projected_visit_streak: number;
@@ -586,6 +602,7 @@ export const coffeeApi = {
           stamps_before: preview.stamps_before,
           stamps_after: preview.projected_stamps_after,
           stamp_rewards_earned: preview.stamp_rewards_earned,
+          reward_bonus_points: preview.reward_bonus_points,
           visit_will_be_recorded: preview.visit_will_be_recorded,
           visit_already_counted: preview.visit_already_counted,
           visit_streak_after: preview.projected_visit_streak,
@@ -713,7 +730,8 @@ export const coffeeApi = {
     isDemoMode
       ? demoApi.getTipProfile()
       : request("/staff/me/tip-profile/cancel-review", { method: "POST" }),
-  uploadStaffMedia: (file: File, kind: "staff_profile" | "tip_qr") => {
+  uploadStaffMedia: async (file: File, kind: "staff_profile" | "tip_qr") => {
+    validateMediaFile(file);
     if (isDemoMode) return Promise.resolve({ id: uuid(), url: "" });
     const body = new FormData();
     body.append("upload", file);
@@ -853,23 +871,28 @@ export const coffeeApi = {
           method: "PUT",
           body: jsonBody(settings),
         }),
-  getAdminMenu: async (): Promise<{
+  getAdminMenu: async (
+    includeArchived = false,
+  ): Promise<{
     categories: MenuCategory[];
     items: MenuItem[];
   }> => {
-    if (isDemoMode) return demoApi.getMenu();
+    if (isDemoMode) return demoApi.getAdminMenu(includeArchived);
     const [categories, items] = await Promise.all([
       request<ListResponse<MenuCategory>>(
-        "/admin/menu/categories?page=1&page_size=100",
+        `/admin/menu/categories${queryString({ page: 1, page_size: 100, include_archived: includeArchived || undefined })}`,
       ),
-      request<ListResponse<MenuItem>>("/admin/menu/items?page=1&page_size=100"),
+      request<ListResponse<MenuItem>>(
+        `/admin/menu/items${queryString({ page: 1, page_size: 100, include_archived: includeArchived || undefined })}`,
+      ),
     ]);
     return { categories: categories.items, items: items.items };
   },
-  uploadAdminMedia: (
+  uploadAdminMedia: async (
     file: File,
     kind: "menu_category" | "menu_item" | "promotion",
   ) => {
+    validateMediaFile(file);
     if (isDemoMode) return Promise.resolve({ id: uuid(), url: "" });
     const body = new FormData();
     body.append("upload", file);
@@ -882,6 +905,25 @@ export const coffeeApi = {
       : request(`/admin/menu/items/${encodeURIComponent(item.id)}`, {
           method: "PATCH",
           body: jsonBody({ visible: !item.visible }),
+        }),
+  archiveMenuItem: (item: MenuItem): Promise<MenuItem> =>
+    isDemoMode
+      ? demoApi.archiveMenuItem(item)
+      : request(`/admin/menu/items/${encodeURIComponent(item.id)}/archive`, {
+          method: "POST",
+        }),
+  restoreMenuItem: (item: MenuItem): Promise<MenuItem> =>
+    isDemoMode
+      ? demoApi.restoreMenuItem(item)
+      : request(`/admin/menu/items/${encodeURIComponent(item.id)}/restore`, {
+          method: "POST",
+        }),
+  deleteMenuItem: (item: MenuItem): Promise<void> =>
+    isDemoMode
+      ? demoApi.deleteMenuItem(item)
+      : request(`/admin/menu/items/${encodeURIComponent(item.id)}`, {
+          method: "DELETE",
+          headers: { "Idempotency-Key": uuid() },
         }),
   saveMenuCategory: (
     category: MenuCategory | null,

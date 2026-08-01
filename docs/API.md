@@ -77,9 +77,11 @@ Preview не принимает и не возвращает секреты; con
 ## Admin audit/content
 
 - `GET /admin/events` — period/actor/user/type/severity/suspicious/adjustments/reversed filters.
-- `GET|PUT /admin/loyalty-settings`.
+- `GET|PUT /admin/loyalty-settings` — `visit_reward` и `stamp_reward` принимают один из компактных вариантов: позиция меню (`menu_item`), собственная текстовая награда (`custom`) или автоматическое начисление (`points`).
 - `GET|POST|PATCH /admin/promotions`; explicit `/publish` and `/archive` actions.
-- `GET|POST|PATCH /admin/menu/categories`, `/admin/menu/items`; hide вместо destructive delete.
+- `GET|POST|PATCH /admin/menu/categories`, `/admin/menu/items`; архивные позиции доступны владельцу через `include_archived=true`.
+- `POST /admin/menu/items/{id}/archive` (и legacy `/hide`) скрывает позицию, запрещает продажу и деактивирует связанную награду за баллы; `POST /restore` возвращает её как скрытый/недоступный черновик.
+- `DELETE /admin/menu/items/{id}` с обязательным `Idempotency-Key` разрешён только для уже архивной позиции и оставляет audit event уровня `warning`; повтор с тем же ключом безопасно возвращает успех. Позицию, выбранную текущей наградой за посещения или штампы, нельзя архивировать/удалить: сначала владелец должен выбрать другую награду (`409 menu_item_is_current_loyalty_reward`).
 - `GET /admin/feedback`, `PATCH /admin/feedback/{id}`.
 - `DELETE /admin/feedback/{id}` — только после переноса в архив; audit event сохраняется.
 - `POST /admin/media` multipart upload; metadata response, no client-controlled storage path.

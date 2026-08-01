@@ -1,4 +1,5 @@
-export type AppTheme = "light" | "dark" | "coffee" | "comic" | "matcha";
+export type AppTheme =
+  "light" | "dark" | "coffee" | "comic" | "matcha" | "anime";
 
 export const appThemes: Array<{
   id: AppTheme;
@@ -10,6 +11,7 @@ export const appThemes: Array<{
   { id: "coffee", label: "Кофейная", icon: "☕" },
   { id: "comic", label: "Комикс", icon: "★" },
   { id: "matcha", label: "Матча", icon: "●" },
+  { id: "anime", label: "Аниме", icon: "✦" },
 ];
 
 const STORAGE_KEY = "coffie.theme";

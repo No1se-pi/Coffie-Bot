@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
@@ -41,7 +41,11 @@ from app.schemas.admin import (
     promotion_response,
 )
 from app.security.rbac import Actor, require_permissions
-from app.services.admin import AdminService, RequestMetadata
+from app.services.admin import (
+    AdminService,
+    LoyaltyRewardConfiguration,
+    RequestMetadata,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin-content"])
 
@@ -69,6 +73,7 @@ FeedbackActor = Annotated[
     Actor,
     Depends(require_permissions(PermissionCode.ADMIN_FEEDBACK_MANAGE)),
 ]
+IdempotencyKey = Annotated[UUID, Header(alias="Idempotency-Key")]
 
 
 @router.get("/loyalty-settings", response_model=LoyaltySettingsResponse)
@@ -76,7 +81,12 @@ async def get_loyalty_settings(
     _actor: SettingsActor,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> LoyaltySettingsResponse:
-    return loyalty_settings_response(await _service(session).get_loyalty_settings())
+    view = await _service(session).get_loyalty_settings()
+    return loyalty_settings_response(
+        view.settings,
+        visit_reward_template=view.visit_reward_template,
+        stamp_reward_template=view.stamp_reward_template,
+    )
 
 
 @router.put("/loyalty-settings", response_model=LoyaltySettingsResponse)
@@ -119,9 +129,21 @@ async def put_loyalty_settings(
         stamp_operation_limit=payload.stamp_operation_limit,
         stamp_reward_validity_days=payload.stamp_reward_validity_days,
         reset_stamps_after_reward=payload.reset_stamps_after_reward,
+        visit_reward=_reward_configuration(payload.visit_reward),
+        stamp_reward=_reward_configuration(payload.stamp_reward),
         metadata=_metadata(request),
     )
-    return loyalty_settings_response(settings)
+    return loyalty_settings_response(
+        settings.settings,
+        visit_reward_template=settings.visit_reward_template,
+        stamp_reward_template=settings.stamp_reward_template,
+    )
+
+
+def _reward_configuration(value: Any) -> LoyaltyRewardConfiguration | None:
+    if value is None:
+        return None
+    return LoyaltyRewardConfiguration(**value.model_dump())
 
 
 @router.get("/menu/categories", response_model=MenuCategoryListResponse)
@@ -244,6 +266,49 @@ async def hide_menu_item(
         actor=actor, item_id=item_id, metadata=_metadata(request)
     )
     return menu_item_response(item)
+
+
+@router.post("/menu/items/{item_id}/archive", response_model=MenuItemResponse)
+async def archive_menu_item(
+    item_id: UUID,
+    request: Request,
+    actor: ContentActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MenuItemResponse:
+    item = await _service(session).hide_menu_item(
+        actor=actor, item_id=item_id, metadata=_metadata(request)
+    )
+    return menu_item_response(item)
+
+
+@router.post("/menu/items/{item_id}/restore", response_model=MenuItemResponse)
+async def restore_menu_item(
+    item_id: UUID,
+    request: Request,
+    actor: ContentActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MenuItemResponse:
+    item = await _service(session).restore_menu_item(
+        actor=actor, item_id=item_id, metadata=_metadata(request)
+    )
+    return menu_item_response(item)
+
+
+@router.delete("/menu/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_menu_item(
+    item_id: UUID,
+    request: Request,
+    actor: ContentActor,
+    idempotency_key: IdempotencyKey,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> Response:
+    await _service(session).delete_menu_item(
+        actor=actor,
+        item_id=item_id,
+        idempotency_key=str(idempotency_key),
+        metadata=_metadata(request),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/promotions", response_model=PromotionListResponse)

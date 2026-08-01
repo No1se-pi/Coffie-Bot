@@ -79,6 +79,7 @@ class RewardType(StrEnum):
     FIXED_DISCOUNT = "fixed_discount"
     FREE_OPTION = "free_option"
     TEXT = "text"
+    POINTS = "points"
 
 
 class RewardStatus(StrEnum):

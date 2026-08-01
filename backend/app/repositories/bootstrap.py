@@ -437,6 +437,10 @@ def _reward_export(item: RewardTemplate) -> dict[str, Any]:
         "id": str(item.id),
         "name": item.name,
         "description": item.description,
+        "image_media_id": str(item.image_media_id) if item.image_media_id is not None else None,
+        "source_menu_item_id": (
+            str(item.source_menu_item_id) if item.source_menu_item_id is not None else None
+        ),
         "reward_type": item.reward_type.value,
         "source_program": item.source_program.value,
         "value_int": item.value_int,

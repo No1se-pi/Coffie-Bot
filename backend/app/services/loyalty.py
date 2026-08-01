@@ -25,10 +25,12 @@ from app.models.enums import (
     AuditSeverity,
     CardStatus,
     LoyaltyOperationType,
+    LoyaltyProgram,
     OperationStatus,
     OutboxStatus,
     PermissionCode,
     RewardStatus,
+    RewardType,
     UserStatus,
 )
 from app.models.loyalty import (
@@ -247,6 +249,7 @@ class PurchasePreviewView:
     stamps_before: int
     projected_stamps_after: int
     stamp_rewards_earned: int
+    reward_bonus_points: int
     visit_will_be_recorded: bool
     visit_already_counted: bool
     projected_visit_streak: int
@@ -695,13 +698,37 @@ class LoyaltyService:
             business_date=business_date,
             visit_count=visit_count,
         )
+        visit_template = None
+        if visit_progress is not None and visit_progress.reward_earned:
+            visit_template = await self._required_template(
+                context.settings.visit_reward_template_id,
+                "visit_reward_template_missing",
+                expected_program=LoyaltyProgram.VISITS,
+            )
+        stamp_template = None
+        if stamp_progress is not None and stamp_progress.rewards_earned:
+            stamp_template = await self._required_template(
+                context.settings.stamp_reward_template_id,
+                "stamp_reward_template_missing",
+                expected_program=LoyaltyProgram.STAMPS,
+            )
+        reward_bonus_points = _template_point_bonus(
+            visit_template,
+            points_enabled=context.settings.points_enabled,
+        ) + _template_point_bonus(
+            stamp_template,
+            points_enabled=context.settings.points_enabled,
+            occurrences=stamp_progress.rewards_earned if stamp_progress is not None else 0,
+        )
         return PurchasePreviewView(
             user_id=user_id,
             purchase_amount_minor=purchase_amount_minor,
             raw_points=accrual.raw_points,
             awarded_points=accrual.awarded_points,
             balance_before=context.state.points_balance,
-            projected_balance_after=context.state.points_balance + accrual.awarded_points,
+            projected_balance_after=(
+                context.state.points_balance + accrual.awarded_points + reward_bonus_points
+            ),
             limited_by_operation=accrual.limited_by_operation,
             limited_by_daily_total=accrual.limited_by_daily_total,
             stamps_to_add=stamps_to_add,
@@ -710,6 +737,7 @@ class LoyaltyService:
                 stamp_progress.stamps_after if stamp_progress else context.state.stamp_count
             ),
             stamp_rewards_earned=(stamp_progress.rewards_earned if stamp_progress else 0),
+            reward_bonus_points=reward_bonus_points,
             visit_will_be_recorded=visit_progress is not None,
             visit_already_counted=(
                 context.settings.visits_enabled
@@ -780,8 +808,35 @@ class LoyaltyService:
             )
 
             committed = not accrual.requires_approval
+            visit_template = None
+            stamp_template = None
+            reward_bonus_points = 0
+            if committed:
+                if visit_progress is not None and visit_progress.reward_earned:
+                    visit_template = await self._required_template(
+                        context.settings.visit_reward_template_id,
+                        "visit_reward_template_missing",
+                        expected_program=LoyaltyProgram.VISITS,
+                    )
+                if stamp_progress is not None and stamp_progress.rewards_earned:
+                    stamp_template = await self._required_template(
+                        context.settings.stamp_reward_template_id,
+                        "stamp_reward_template_missing",
+                        expected_program=LoyaltyProgram.STAMPS,
+                    )
+                reward_bonus_points = _template_point_bonus(
+                    visit_template,
+                    points_enabled=context.settings.points_enabled,
+                ) + _template_point_bonus(
+                    stamp_template,
+                    points_enabled=context.settings.points_enabled,
+                    occurrences=(
+                        stamp_progress.rewards_earned if stamp_progress is not None else 0
+                    ),
+                )
+            total_points = accrual.awarded_points + reward_bonus_points
             balance_before = context.state.points_balance
-            balance_after = balance_before + accrual.awarded_points if committed else None
+            balance_after = balance_before + total_points if committed else None
             operation = LoyaltyOperation(
                 id=uuid4(),
                 user_id=user_id,
@@ -793,7 +848,8 @@ class LoyaltyService:
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
                 purchase_amount_minor=purchase_amount_minor,
-                points_delta=accrual.awarded_points,
+                points_delta=total_points,
+                reward_bonus_points=reward_bonus_points,
                 balance_before=balance_before,
                 balance_after=balance_after,
                 occurred_at=current_time,
@@ -804,26 +860,13 @@ class LoyaltyService:
             stamp_transaction: StampTransaction | None = None
 
             if committed:
-                visit_template = None
-                if visit_progress is not None and visit_progress.reward_earned:
-                    visit_template = await self._required_template(
-                        context.settings.visit_reward_template_id,
-                        "visit_reward_template_missing",
-                    )
-                stamp_template = None
-                if stamp_progress is not None and stamp_progress.rewards_earned:
-                    stamp_template = await self._required_template(
-                        context.settings.stamp_reward_template_id,
-                        "stamp_reward_template_missing",
-                    )
-
                 context.state.points_balance = balance_after or 0
                 objects.append(
                     PointTransaction(
                         id=uuid4(),
                         operation_id=operation.id,
                         user_id=user_id,
-                        delta=accrual.awarded_points,
+                        delta=total_points,
                         balance_before=balance_before,
                         balance_after=context.state.points_balance,
                         purchase_amount_minor=purchase_amount_minor,
@@ -851,7 +894,10 @@ class LoyaltyService:
                     if visit_progress.reward_earned and context.settings.visit_restart_cycle:
                         context.state.visit_cycle_started_on = None
                     objects.append(visit)
-                    if visit_template is not None:
+                    if (
+                        visit_template is not None
+                        and visit_template.reward_type is not RewardType.POINTS
+                    ):
                         rewards.append(
                             _new_reward(
                                 visit_template,
@@ -873,6 +919,7 @@ class LoyaltyService:
                         )
                         for _ in range(stamp_progress.rewards_earned)
                         if stamp_template is not None
+                        and stamp_template.reward_type is not RewardType.POINTS
                     ]
                     rewards.extend(stamp_rewards)
                     stamp_transaction = StampTransaction(
@@ -894,7 +941,9 @@ class LoyaltyService:
             event_type = "points.accrued" if committed else "points.accrual_pending"
             event_metadata = {
                 "customer_name": _display_name(context.user),
-                "points": accrual.awarded_points,
+                "points": total_points,
+                "purchase_points": accrual.awarded_points,
+                "reward_bonus_points": reward_bonus_points,
                 "purchase_amount_minor": purchase_amount_minor,
                 "stamps_added": stamps_to_add if committed else 0,
                 "stamps_after": (
@@ -1240,6 +1289,7 @@ class LoyaltyService:
                 template = await self._required_template(
                     context.settings.visit_reward_template_id,
                     "visit_reward_template_missing",
+                    expected_program=LoyaltyProgram.VISITS,
                 )
             operation = _new_operation(
                 actor=actor,
@@ -1251,6 +1301,26 @@ class LoyaltyService:
                 location_id=location_id,
                 balance=context.state.points_balance,
             )
+            reward_bonus_points = _template_point_bonus(
+                template,
+                points_enabled=context.settings.points_enabled,
+            )
+            point_transaction: PointTransaction | None = None
+            if reward_bonus_points:
+                balance_before = context.state.points_balance
+                context.state.points_balance += reward_bonus_points
+                operation.points_delta = reward_bonus_points
+                operation.reward_bonus_points = reward_bonus_points
+                operation.balance_after = context.state.points_balance
+                point_transaction = PointTransaction(
+                    id=uuid4(),
+                    operation_id=operation.id,
+                    user_id=user_id,
+                    delta=reward_bonus_points,
+                    balance_before=balance_before,
+                    balance_after=context.state.points_balance,
+                    created_at=current_time,
+                )
             visit = Visit(
                 id=uuid4(),
                 operation_id=operation.id,
@@ -1272,7 +1342,7 @@ class LoyaltyService:
             context.state.version += 1
 
             rewards: list[Reward] = []
-            if template is not None:
+            if template is not None and template.reward_type is not RewardType.POINTS:
                 rewards.append(
                     _new_reward(
                         template,
@@ -1288,8 +1358,11 @@ class LoyaltyService:
                 "business_date": business_date.isoformat(),
                 "ordinal": visit.ordinal,
                 "reward_ids": [str(reward.id) for reward in rewards],
+                "reward_bonus_points": reward_bonus_points,
             }
             objects: list[object] = [operation, visit, *rewards]
+            if point_transaction is not None:
+                objects.append(point_transaction)
             objects.extend(
                 _operation_side_effects(
                     operation,
@@ -1353,6 +1426,7 @@ class LoyaltyService:
                 template = await self._required_template(
                     context.settings.stamp_reward_template_id,
                     "stamp_reward_template_missing",
+                    expected_program=LoyaltyProgram.STAMPS,
                 )
             operation = _new_operation(
                 actor=actor,
@@ -1364,6 +1438,27 @@ class LoyaltyService:
                 location_id=location_id,
                 balance=context.state.points_balance,
             )
+            reward_bonus_points = _template_point_bonus(
+                template,
+                points_enabled=context.settings.points_enabled,
+                occurrences=progress.rewards_earned,
+            )
+            point_transaction: PointTransaction | None = None
+            if reward_bonus_points:
+                balance_before = context.state.points_balance
+                context.state.points_balance += reward_bonus_points
+                operation.points_delta = reward_bonus_points
+                operation.reward_bonus_points = reward_bonus_points
+                operation.balance_after = context.state.points_balance
+                point_transaction = PointTransaction(
+                    id=uuid4(),
+                    operation_id=operation.id,
+                    user_id=user_id,
+                    delta=reward_bonus_points,
+                    balance_before=balance_before,
+                    balance_after=context.state.points_balance,
+                    created_at=current_time,
+                )
             rewards = [
                 _new_reward(
                     template,
@@ -1373,7 +1468,7 @@ class LoyaltyService:
                     now=current_time,
                 )
                 for _ in range(progress.rewards_earned)
-                if template is not None
+                if template is not None and template.reward_type is not RewardType.POINTS
             ]
             transaction = StampTransaction(
                 id=uuid4(),
@@ -1392,8 +1487,11 @@ class LoyaltyService:
                 "stamps": progress.stamps_after,
                 "stamps_added": stamps_to_add,
                 "reward_ids": [str(reward.id) for reward in rewards],
+                "reward_bonus_points": reward_bonus_points,
             }
             objects: list[object] = [operation, transaction, *rewards]
+            if point_transaction is not None:
+                objects.append(point_transaction)
             objects.extend(
                 _operation_side_effects(
                     operation,
@@ -2190,12 +2288,19 @@ class LoyaltyService:
         self,
         template_id: UUID | None,
         error_code: str,
+        *,
+        expected_program: LoyaltyProgram | None = None,
     ) -> RewardTemplate:
         if template_id is None:
             _raise_conflict(error_code, "Шаблон награды не настроен")
         template = await self._repository.get_reward_template(template_id)
         if template is None or not template.is_active:
             _raise_conflict(error_code, "Шаблон награды недоступен")
+        if expected_program is not None and template.source_program not in {
+            expected_program,
+            LoyaltyProgram.MANUAL,
+        }:
+            _raise_conflict(error_code, "Шаблон награды относится к другой программе")
         return template
 
     async def _idempotent_action(
@@ -2323,6 +2428,29 @@ def _new_operation(
     )
 
 
+def _template_point_bonus(
+    template: RewardTemplate | None,
+    *,
+    points_enabled: bool,
+    occurrences: int = 1,
+) -> int:
+    if template is None or template.reward_type is not RewardType.POINTS:
+        return 0
+    if not points_enabled:
+        _raise_conflict(
+            "points_program_disabled",
+            "Балльная программа отключена; награда баллами недоступна",
+        )
+    if template.value_int is None or template.value_int <= 0:
+        _raise_conflict(
+            "invalid_points_reward",
+            "Количество баллов в награде настроено некорректно",
+        )
+    if occurrences < 0:
+        raise ValueError("reward occurrences cannot be negative")
+    return template.value_int * occurrences
+
+
 def _new_reward(
     template: RewardTemplate,
     *,
@@ -2331,6 +2459,11 @@ def _new_reward(
     validity_days: int | None,
     now: datetime,
 ) -> Reward:
+    if template.reward_type is RewardType.POINTS:
+        _raise_conflict(
+            "points_reward_is_automatic",
+            "Балльная награда начисляется автоматически и не создаёт QR-код",
+        )
     effective_validity = validity_days if validity_days is not None else template.validity_days
     if effective_validity is not None and effective_validity <= 0:
         _raise_conflict(

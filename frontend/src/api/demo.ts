@@ -39,8 +39,10 @@ let card: CardData = {
   short_code: "C0FFEE42",
   balance_points: 284,
   currency_name: "бобов",
+  visits_enabled: true,
   visit_streak: 3,
   visit_goal: 5,
+  stamps_enabled: true,
   stamps: 6,
   stamp_goal: 9,
   blocked: false,
@@ -210,12 +212,14 @@ let settings: LoyaltySettings = {
   visit_reset_on_miss: true,
   visit_reward_validity_days: 30,
   visit_restart_cycle: true,
+  visit_reward: { kind: "menu_item", menu_item_id: "menu-1" },
   stamps_enabled: true,
   stamp_goal: 9,
   stamps_per_purchase: 1,
   stamp_operation_limit: 1,
   stamp_reward_validity_days: 30,
   reset_stamps_after_reward: true,
+  stamp_reward: { kind: "custom", name: "Десятый напиток бесплатно" },
 };
 
 let adminUsers: AdminUser[] = [
@@ -510,12 +514,23 @@ export const demoApi = {
     const stampRewards = Math.floor(stampTotal / card.stamp_goal);
     const today = new Date().toISOString().slice(0, 10);
     const visitWillBeRecorded = lastAutomaticVisitDate !== today;
+    const visitRewardEarned =
+      visitWillBeRecorded && card.visit_streak + 1 >= card.visit_goal;
+    const rewardBonusPoints =
+      (settings.stamp_reward?.kind === "points"
+        ? settings.stamp_reward.points * stampRewards
+        : 0) +
+      (settings.visit_reward?.kind === "points" && visitRewardEarned
+        ? settings.visit_reward.points
+        : 0);
     return {
       ...accrual,
+      balance_after: accrual.balance_after + rewardBonusPoints,
       stamps_to_add: payload.stamps_to_add,
       stamps_before: card.stamps,
       stamps_after: stampTotal % card.stamp_goal,
       stamp_rewards_earned: stampRewards,
+      reward_bonus_points: rewardBonusPoints,
       visit_will_be_recorded: visitWillBeRecorded,
       visit_already_counted: !visitWillBeRecorded,
       visit_streak_after: visitWillBeRecorded
@@ -545,7 +560,7 @@ export const demoApi = {
       id: `purchase-${Date.now()}`,
       type: "purchase_accrual",
       description: `Покупка на ${Math.round(payload.purchase_amount_minor / 100)} ₽`,
-      delta_points: preview.points_to_accrue,
+      delta_points: preview.points_to_accrue + preview.reward_bonus_points,
       balance_after: preview.requires_approval ? null : preview.balance_after,
       created_at: now(),
       status: preview.requires_approval ? "pending" : "completed",
@@ -555,7 +570,7 @@ export const demoApi = {
       operation_id: operation.id,
       operation_type: operation.type,
       status: operation.status,
-      delta_points: preview.points_to_accrue,
+      delta_points: preview.points_to_accrue + preview.reward_bonus_points,
       balance_after: preview.balance_after,
       created_at: operation.created_at,
       streak_after: preview.requires_approval
@@ -987,6 +1002,15 @@ export const demoApi = {
     settings = { ...value };
     return { ...settings };
   },
+  async getAdminMenu(includeArchived = false) {
+    await wait();
+    return {
+      categories: categories.filter(
+        (category) => includeArchived || !category.archived_at,
+      ),
+      items: menuItems.filter((item) => includeArchived || !item.archived_at),
+    };
+  },
   async toggleMenuItem(item: MenuItem) {
     await wait();
     const updated = { ...item, visible: !item.visible };
@@ -994,6 +1018,42 @@ export const demoApi = {
       candidate.id === item.id ? updated : candidate,
     );
     return updated;
+  },
+  async archiveMenuItem(item: MenuItem) {
+    await wait();
+    const updated = {
+      ...item,
+      visible: false,
+      available: false,
+      archived_at: now(),
+    };
+    menuItems = menuItems.map((candidate) =>
+      candidate.id === item.id ? updated : candidate,
+    );
+    return updated;
+  },
+  async restoreMenuItem(item: MenuItem) {
+    await wait();
+    const updated = {
+      ...item,
+      visible: false,
+      available: false,
+      archived_at: null,
+    };
+    menuItems = menuItems.map((candidate) =>
+      candidate.id === item.id ? updated : candidate,
+    );
+    return updated;
+  },
+  async deleteMenuItem(item: MenuItem) {
+    await wait();
+    if (!item.archived_at) {
+      throw new ApiError("Сначала перенесите позицию в архив", {
+        status: 409,
+        code: "menu_item_not_archived",
+      });
+    }
+    menuItems = menuItems.filter((candidate) => candidate.id !== item.id);
   },
   async saveMenuCategory(
     category: MenuCategory | null,

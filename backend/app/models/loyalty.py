@@ -43,7 +43,10 @@ class RewardTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "validity_days IS NULL OR validity_days > 0", name="positive_validity_days"
         ),
-        CheckConstraint("value_int IS NULL OR value_int >= 0", name="non_negative_value"),
+        CheckConstraint(
+            "(value_int IS NULL OR value_int >= 0) AND (reward_type <> 'points' OR value_int > 0)",
+            name="valid_value",
+        ),
         Index("ix_reward_templates_program_active", "source_program", "is_active"),
     )
 
@@ -51,6 +54,9 @@ class RewardTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     image_media_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("media_files.id", ondelete="SET NULL")
+    )
+    source_menu_item_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("menu_items.id", ondelete="SET NULL"), index=True
     )
     reward_type: Mapped[RewardType] = mapped_column(
         enum_type(RewardType, name="reward_type", length=24),
@@ -236,6 +242,7 @@ class LoyaltyOperation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "purchase_amount_minor IS NULL OR purchase_amount_minor > 0", name="positive_purchase"
         ),
+        CheckConstraint("reward_bonus_points >= 0", name="non_negative_reward_bonus_points"),
         Index("ix_loyalty_operations_user_created", "user_id", "created_at"),
         Index("ix_loyalty_operations_actor_created", "actor_staff_id", "created_at"),
         Index("ix_loyalty_operations_status_created", "status", "created_at"),
@@ -266,6 +273,9 @@ class LoyaltyOperation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     purchase_amount_minor: Mapped[int | None] = mapped_column(BigInteger)
     points_delta: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    reward_bonus_points: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
     balance_before: Mapped[int | None] = mapped_column(BigInteger)

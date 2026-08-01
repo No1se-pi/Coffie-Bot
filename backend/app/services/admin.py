@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
+import json
 import os
 import secrets
 from collections.abc import Mapping
@@ -52,6 +54,11 @@ MEDIA_EXTENSIONS = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
+}
+CLAIMED_MEDIA_TYPE_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/x-png": "image/png",
 }
 STAFF_OVERRIDE_PERMISSIONS = frozenset(
     {
@@ -111,15 +118,31 @@ class MediaDownload:
     filename: str
 
 
+@dataclass(frozen=True, slots=True)
+class LoyaltyRewardConfiguration:
+    kind: str
+    menu_item_id: UUID | None = None
+    name: str | None = None
+    description: str | None = None
+    points: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LoyaltySettingsView:
+    settings: LoyaltySettings
+    visit_reward_template: RewardTemplate | None
+    stamp_reward_template: RewardTemplate | None
+
+
 class AdminService:
     def __init__(self, *, repository: AdminRepository) -> None:
         self._repository = repository
 
-    async def get_loyalty_settings(self) -> LoyaltySettings:
+    async def get_loyalty_settings(self) -> LoyaltySettingsView:
         settings = await self._repository.get_loyalty_settings(for_update=False)
         if settings is None:
             _not_found("Loyalty settings are not configured")
-        return settings
+        return await self._loyalty_settings_view(settings)
 
     async def update_loyalty_settings(
         self,
@@ -156,8 +179,10 @@ class AdminService:
         stamp_operation_limit: int,
         stamp_reward_validity_days: int | None,
         reset_stamps_after_reward: bool,
+        visit_reward: LoyaltyRewardConfiguration | None = None,
+        stamp_reward: LoyaltyRewardConfiguration | None = None,
         metadata: RequestMetadata = EMPTY_METADATA,
-    ) -> LoyaltySettings:
+    ) -> LoyaltySettingsView:
         from app.models.enums import RoundingMode
 
         async with self._repository.transaction():
@@ -196,6 +221,69 @@ class AdminService:
             settings.stamp_operation_limit = stamp_operation_limit
             settings.stamp_reward_validity_days = stamp_reward_validity_days
             settings.reset_stamps_after_reward = reset_stamps_after_reward
+            previous_reward_template_ids = {
+                template_id
+                for template_id in (
+                    settings.visit_reward_template_id,
+                    settings.stamp_reward_template_id,
+                )
+                if template_id is not None
+            }
+            visit_template = await self._configure_loyalty_reward(
+                actor=actor,
+                current_template_id=settings.visit_reward_template_id,
+                program=LoyaltyProgram.VISITS,
+                configuration=visit_reward,
+            )
+            stamp_template = await self._configure_loyalty_reward(
+                actor=actor,
+                current_template_id=settings.stamp_reward_template_id,
+                program=LoyaltyProgram.STAMPS,
+                configuration=stamp_reward,
+            )
+            if visit_reward is not None:
+                settings.visit_reward_template_id = (
+                    visit_template.id if visit_template is not None else None
+                )
+            if stamp_reward is not None:
+                settings.stamp_reward_template_id = (
+                    stamp_template.id if stamp_template is not None else None
+                )
+            configured_reward_template_ids = {
+                template_id
+                for template_id in (
+                    settings.visit_reward_template_id,
+                    settings.stamp_reward_template_id,
+                )
+                if template_id is not None
+            }
+            for obsolete_template_id in (
+                previous_reward_template_ids - configured_reward_template_ids
+            ):
+                obsolete = await self._repository.get_reward_template(
+                    obsolete_template_id,
+                    for_update=True,
+                )
+                if obsolete is not None:
+                    obsolete.is_active = False
+            points_reward_is_enabled = (
+                visit_enabled
+                and visit_template is not None
+                and visit_template.reward_type is RewardType.POINTS
+            ) or (
+                stamps_enabled
+                and stamp_template is not None
+                and stamp_template.reward_type is RewardType.POINTS
+            )
+            if points_reward_is_enabled and not points_enabled:
+                _validation(
+                    "points_reward_requires_points_program",
+                    "Балльная программа должна быть включена для награды баллами",
+                )
+            if visit_template is not None and visit_template.reward_type is RewardType.POINTS:
+                settings.visit_reward_validity_days = None
+            if stamp_template is not None and stamp_template.reward_type is RewardType.POINTS:
+                settings.stamp_reward_validity_days = None
             settings.updated_by_staff_id = actor.staff_member_id
             self._audit(
                 actor=actor,
@@ -206,11 +294,118 @@ class AdminService:
                     "points_enabled": points_enabled,
                     "visits_enabled": visit_enabled,
                     "stamps_enabled": stamps_enabled,
+                    "visit_reward_kind": _reward_kind(visit_template),
+                    "stamp_reward_kind": _reward_kind(stamp_template),
                 },
                 metadata=metadata,
             )
             await self._repository.flush()
-            return settings
+            return LoyaltySettingsView(
+                settings=settings,
+                visit_reward_template=visit_template,
+                stamp_reward_template=stamp_template,
+            )
+
+    async def _loyalty_settings_view(self, settings: LoyaltySettings) -> LoyaltySettingsView:
+        visit_template = (
+            await self._repository.get_reward_template(settings.visit_reward_template_id)
+            if settings.visit_reward_template_id is not None
+            else None
+        )
+        stamp_template = (
+            await self._repository.get_reward_template(settings.stamp_reward_template_id)
+            if settings.stamp_reward_template_id is not None
+            else None
+        )
+        return LoyaltySettingsView(
+            settings=settings,
+            visit_reward_template=visit_template,
+            stamp_reward_template=stamp_template,
+        )
+
+    async def _configure_loyalty_reward(
+        self,
+        *,
+        actor: Actor,
+        current_template_id: UUID | None,
+        program: LoyaltyProgram,
+        configuration: LoyaltyRewardConfiguration | None,
+    ) -> RewardTemplate | None:
+        current = (
+            await self._repository.get_reward_template(current_template_id, for_update=True)
+            if current_template_id is not None
+            else None
+        )
+        if configuration is None:
+            return current
+
+        source_menu_item_id: UUID | None = None
+        image_media_id: UUID | None = None
+        value_int: int | None = None
+        if configuration.kind == "menu_item":
+            if configuration.menu_item_id is None:
+                _validation("reward_menu_item_required", "Выберите позицию меню")
+            item = await self._repository.get_menu_item(
+                configuration.menu_item_id,
+                for_update=False,
+            )
+            if item is None or item.archived_at is not None:
+                _conflict("reward_menu_item_unavailable", "Позиция меню недоступна")
+            reward_type = RewardType.FREE_PRODUCT
+            source_menu_item_id = item.id
+            name = item.name
+            description = item.description or f"Награда: {item.name}"
+            image_media_id = item.image_media_id
+        elif configuration.kind == "custom":
+            name = (configuration.name or "").strip()
+            if not name:
+                _validation("reward_name_required", "Укажите название награды")
+            reward_type = RewardType.TEXT
+            description = (configuration.description or name).strip()
+        elif configuration.kind == "points":
+            if configuration.points is None or configuration.points <= 0:
+                _validation("reward_points_invalid", "Количество баллов должно быть положительным")
+            reward_type = RewardType.POINTS
+            value_int = configuration.points
+            name = f"{configuration.points} {_points_word(configuration.points)}"
+            description = "Баллы начисляются автоматически после достижения цели."
+        else:
+            _validation("reward_kind_invalid", "Неизвестный вид награды")
+
+        if current is not None and _reward_template_matches(
+            current,
+            program=program,
+            reward_type=reward_type,
+            source_menu_item_id=source_menu_item_id,
+            name=name,
+            description=description,
+            image_media_id=image_media_id,
+            value_int=value_int,
+        ):
+            return current
+
+        template = RewardTemplate(
+            id=uuid4(),
+            name=name,
+            description=description,
+            image_media_id=image_media_id,
+            source_menu_item_id=source_menu_item_id,
+            reward_type=reward_type,
+            source_program=program,
+            value_int=value_int,
+            terms=(
+                None
+                if reward_type is RewardType.POINTS
+                else "Покажите QR-код бариста до получения награды."
+            ),
+            validity_days=None,
+            is_active=True,
+            created_by_staff_id=actor.staff_member_id,
+        )
+        self._repository.add(template)
+        # Flush the referenced template before assigning its id to settings.
+        await self._repository.flush()
+        return template
 
     async def list_menu_categories(
         self,
@@ -484,15 +679,25 @@ class AdminService:
     ) -> MenuItem:
         current_time = _aware_now(now)
         async with self._repository.transaction():
+            # Keep the lock order aligned with loyalty-settings updates:
+            # settings/templates first, then the sourced menu item.
+            await self._require_menu_item_not_current_loyalty_reward(item_id)
             item = await self._repository.get_menu_item(item_id, for_update=True)
             if item is None:
                 _not_found("Menu item was not found")
             item.is_visible = False
             item.is_available = False
             item.archived_at = item.archived_at or current_time
+            template = (
+                await self._repository.get_reward_template(item.points_reward_template_id)
+                if item.points_reward_template_id is not None
+                else None
+            )
+            if template is not None:
+                template.is_active = False
             self._audit(
                 actor=actor,
-                event_type="menu.item_hidden",
+                event_type="menu.item_archived",
                 object_type="menu_item",
                 object_id=item.id,
                 event_metadata={},
@@ -500,6 +705,118 @@ class AdminService:
             )
             await self._repository.flush()
             return item
+
+    async def restore_menu_item(
+        self,
+        *,
+        actor: Actor,
+        item_id: UUID,
+        metadata: RequestMetadata = EMPTY_METADATA,
+    ) -> MenuItem:
+        async with self._repository.transaction():
+            item = await self._repository.get_menu_item(item_id, for_update=True)
+            if item is None:
+                _not_found("Menu item was not found")
+            if item.archived_at is None:
+                _conflict("menu_item_not_archived", "Menu item is not archived")
+            item.archived_at = None
+            # Restore as a safe draft. An owner must explicitly make it available
+            # and visible again instead of unexpectedly returning it to customers.
+            item.is_visible = False
+            item.is_available = False
+            self._audit(
+                actor=actor,
+                event_type="menu.item_restored",
+                object_type="menu_item",
+                object_id=item.id,
+                event_metadata={},
+                metadata=metadata,
+            )
+            await self._repository.flush()
+            return item
+
+    async def delete_menu_item(
+        self,
+        *,
+        actor: Actor,
+        item_id: UUID,
+        idempotency_key: str,
+        metadata: RequestMetadata = EMPTY_METADATA,
+    ) -> None:
+        request_hash = _admin_request_hash(
+            "menu.item_deleted",
+            actor,
+            {"item_id": item_id},
+        )
+        async with self._repository.transaction():
+            await self._repository.acquire_idempotency_lock(
+                "admin-content-command",
+                idempotency_key,
+            )
+            receipt = await self._repository.get_audit_event_by_idempotency_key(idempotency_key)
+            if receipt is not None:
+                stored_hash = receipt.event_metadata.get("request_hash")
+                if (
+                    receipt.event_type != "menu.item_deleted"
+                    or not isinstance(stored_hash, str)
+                    or not hmac.compare_digest(stored_hash, request_hash)
+                ):
+                    _conflict(
+                        "idempotency_conflict",
+                        "Idempotency-Key уже использован для другой команды",
+                    )
+                return
+            # See hide_menu_item: a consistent lock order prevents a deadlock
+            # with a concurrent loyalty reward reconfiguration.
+            await self._require_menu_item_not_current_loyalty_reward(item_id)
+            item = await self._repository.get_menu_item(item_id, for_update=True)
+            if item is None:
+                _not_found("Menu item was not found")
+            if item.archived_at is None:
+                _conflict(
+                    "menu_item_not_archived",
+                    "Menu item must be archived before permanent deletion",
+                )
+            template = (
+                await self._repository.get_reward_template(item.points_reward_template_id)
+                if item.points_reward_template_id is not None
+                else None
+            )
+            if template is not None:
+                template.is_active = False
+            self._audit(
+                actor=actor,
+                event_type="menu.item_deleted",
+                object_type="menu_item",
+                object_id=item.id,
+                event_metadata={"name": item.name, "request_hash": request_hash},
+                severity=AuditSeverity.WARNING,
+                metadata=metadata,
+                idempotency_key=idempotency_key,
+            )
+            await self._repository.delete_menu_item(item)
+            await self._repository.flush()
+
+    async def _require_menu_item_not_current_loyalty_reward(self, item_id: UUID) -> None:
+        programs = await self._repository.get_menu_item_loyalty_reward_programs(
+            item_id,
+            for_update=True,
+        )
+        if not programs:
+            return
+        labels = {
+            LoyaltyProgram.VISITS: "посещений подряд",
+            LoyaltyProgram.STAMPS: "штампов",
+        }
+        linked_programs = " и ".join(
+            labels[program]
+            for program in (LoyaltyProgram.VISITS, LoyaltyProgram.STAMPS)
+            if program in programs
+        )
+        _conflict(
+            "menu_item_is_current_loyalty_reward",
+            f"Сначала выберите другую награду для программы {linked_programs}",
+        )
 
     async def list_promotions(
         self,
@@ -1345,6 +1662,7 @@ class AdminService:
             )
         detected_mime = detect_image_mime(content)
         normalized_claim = (claimed_content_type or "").split(";", 1)[0].strip().lower()
+        normalized_claim = CLAIMED_MEDIA_TYPE_ALIASES.get(normalized_claim, normalized_claim)
         if normalized_claim not in {"", "application/octet-stream", detected_mime}:
             raise AppError(
                 code="media_type_mismatch",
@@ -1486,6 +1804,7 @@ class AdminService:
         metadata: RequestMetadata,
         subject_user_id: UUID | None = None,
         severity: AuditSeverity = AuditSeverity.INFO,
+        idempotency_key: str | None = None,
     ) -> None:
         self._repository.add(
             AuditEvent(
@@ -1496,6 +1815,7 @@ class AdminService:
                 subject_user_id=subject_user_id,
                 object_type=object_type,
                 object_id=object_id,
+                idempotency_key=idempotency_key,
                 event_metadata=event_metadata,
                 severity=severity,
                 is_suspicious=False,
@@ -1503,6 +1823,70 @@ class AdminService:
                 user_agent=_truncate(metadata.user_agent, 512),
             )
         )
+
+
+def _admin_request_hash(
+    action: str,
+    actor: Actor,
+    payload: Mapping[str, Any],
+) -> str:
+    canonical = json.dumps(
+        {
+            "action": action,
+            "actor_user_id": str(actor.user_id),
+            "actor_staff_id": (
+                str(actor.staff_member_id) if actor.staff_member_id is not None else None
+            ),
+            "payload": payload,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _reward_template_matches(
+    template: RewardTemplate,
+    *,
+    program: LoyaltyProgram,
+    reward_type: RewardType,
+    source_menu_item_id: UUID | None,
+    name: str,
+    description: str,
+    image_media_id: UUID | None,
+    value_int: int | None,
+) -> bool:
+    return (
+        template.source_program is program
+        and template.reward_type is reward_type
+        and template.source_menu_item_id == source_menu_item_id
+        and template.name == name
+        and template.description == description
+        and template.image_media_id == image_media_id
+        and template.value_int == value_int
+        and template.validity_days is None
+        and template.is_active
+    )
+
+
+def _reward_kind(template: RewardTemplate | None) -> str | None:
+    if template is None:
+        return None
+    if template.source_menu_item_id is not None:
+        return "menu_item"
+    if template.reward_type is RewardType.POINTS:
+        return "points"
+    return "custom"
+
+
+def _points_word(value: int) -> str:
+    if value % 10 == 1 and value % 100 != 11:
+        return "балл"
+    if value % 10 in {2, 3, 4} and value % 100 not in {12, 13, 14}:
+        return "балла"
+    return "баллов"
 
 
 def detect_image_mime(content: bytes) -> str:

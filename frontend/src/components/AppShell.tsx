@@ -10,7 +10,7 @@ import type { Role } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { brand } from "../config";
 import { appThemes, applyTheme, readTheme, type AppTheme } from "../theme";
-import { Button, ErrorState, Loader } from "./ui";
+import { Avatar, Button, ErrorState, Loader } from "./ui";
 
 const roleLabels: Record<Role, string> = {
   customer: "Гость",
@@ -116,7 +116,15 @@ function AppShell() {
           onClick={() => navigate(roleHome[activeRole])}
           aria-label={`${brand.name}: на главную`}
         >
-          <span className="brand__mark">{brand.shortName}</span>
+          {actor?.photo_url ? (
+            <Avatar
+              name={actor.display_name}
+              src={actor.photo_url}
+              size="small"
+            />
+          ) : (
+            <span className="brand__mark">{brand.shortName}</span>
+          )}
           <span>
             <strong>{brand.name}</strong>
             <small>{brand.greeting}</small>

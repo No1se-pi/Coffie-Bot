@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
@@ -14,9 +15,11 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.access import Session, StaffInvite, StaffMember, StaffPermission, User
+from app.models.audit import AuditEvent
 from app.models.content import MenuCategory, MenuItem, Promotion
 from app.models.enums import (
     FeedbackStatus,
+    LoyaltyProgram,
     MediaStatus,
     PermissionCode,
     PromotionStatus,
@@ -115,6 +118,19 @@ class AdminRepository:
     def add_all(self, values: list[object]) -> None:
         self._session.add_all(values)
 
+    async def acquire_idempotency_lock(self, namespace: str, key: str) -> None:
+        """Serialize creation of an idempotency receipt that does not exist yet."""
+
+        digest = hashlib.sha256(f"{namespace}:{key}".encode()).digest()
+        lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
+        await self._session.execute(select(func.pg_advisory_xact_lock(lock_id)))
+
+    async def get_audit_event_by_idempotency_key(self, key: str) -> AuditEvent | None:
+        value: AuditEvent | None = await self._session.scalar(
+            select(AuditEvent).where(AuditEvent.idempotency_key == key)
+        )
+        return value
+
     async def get_loyalty_settings(self, *, for_update: bool) -> LoyaltySettings | None:
         statement = select(LoyaltySettings).where(LoyaltySettings.singleton_key == "default")
         if for_update:
@@ -198,8 +214,64 @@ class AdminRepository:
         value: MenuItem | None = await self._session.scalar(statement)
         return value
 
-    async def get_reward_template(self, template_id: UUID) -> RewardTemplate | None:
-        return await self._session.get(RewardTemplate, template_id)
+    async def delete_menu_item(self, item: MenuItem) -> None:
+        await self._session.delete(item)
+
+    async def get_menu_item_loyalty_reward_programs(
+        self,
+        item_id: UUID,
+        *,
+        for_update: bool,
+    ) -> frozenset[LoyaltyProgram]:
+        """Return programs whose current reward is sourced from ``item_id``.
+
+        Locking the singleton settings row serializes this check with loyalty
+        configuration updates.  The referenced templates are then locked in
+        the same transaction so an archive/delete cannot detach the source
+        menu item from a reward that has just become current.
+        """
+
+        settings_statement = select(LoyaltySettings).where(
+            LoyaltySettings.singleton_key == "default"
+        )
+        if for_update:
+            settings_statement = settings_statement.with_for_update()
+        settings = await self._session.scalar(settings_statement)
+        if settings is None:
+            return frozenset()
+
+        configured_templates = {
+            LoyaltyProgram.VISITS: settings.visit_reward_template_id,
+            LoyaltyProgram.STAMPS: settings.stamp_reward_template_id,
+        }
+        linked_programs: set[LoyaltyProgram] = set()
+        # Match AdminService.update_loyalty_settings lock order exactly:
+        # visits template first, then stamps template.
+        for program in (LoyaltyProgram.VISITS, LoyaltyProgram.STAMPS):
+            template_id = configured_templates[program]
+            if template_id is None:
+                continue
+            template_statement = select(RewardTemplate.source_menu_item_id).where(
+                RewardTemplate.id == template_id
+            )
+            if for_update:
+                template_statement = template_statement.with_for_update()
+            source_menu_item_id = await self._session.scalar(template_statement)
+            if source_menu_item_id == item_id:
+                linked_programs.add(program)
+        return frozenset(linked_programs)
+
+    async def get_reward_template(
+        self,
+        template_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> RewardTemplate | None:
+        statement = select(RewardTemplate).where(RewardTemplate.id == template_id)
+        if for_update:
+            statement = statement.with_for_update()
+        value: RewardTemplate | None = await self._session.scalar(statement)
+        return value
 
     async def list_promotions(
         self,

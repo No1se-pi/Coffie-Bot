@@ -149,6 +149,7 @@ class PurchasePreviewResponse(ApiSchema):
     stamps_before: int
     projected_stamps_after: int
     stamp_rewards_earned: int
+    reward_bonus_points: int
     visit_will_be_recorded: bool
     visit_already_counted: bool
     projected_visit_streak: int
@@ -423,6 +424,7 @@ def purchase_preview_response(value: PurchasePreviewView) -> PurchasePreviewResp
         stamps_before=value.stamps_before,
         projected_stamps_after=value.projected_stamps_after,
         stamp_rewards_earned=value.stamp_rewards_earned,
+        reward_bonus_points=value.reward_bonus_points,
         visit_will_be_recorded=value.visit_will_be_recorded,
         visit_already_counted=value.visit_already_counted,
         projected_visit_streak=value.projected_visit_streak,

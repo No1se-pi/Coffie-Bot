@@ -522,6 +522,184 @@ async def test_purchase_issues_visit_and_stamp_rewards_at_both_goals() -> None:
 
 
 @pytest.mark.asyncio
+async def test_visit_goal_awards_points_atomically_without_qr_reward() -> None:
+    context = loyalty_context(points_balance=10)
+    context.state.visit_streak = 4
+    context.state.last_visit_business_date = datetime(2026, 7, 26, tzinfo=UTC).date()
+    template = RewardTemplate(
+        id=uuid4(),
+        name="25 баллов",
+        description="Автоматический бонус",
+        reward_type=RewardType.POINTS,
+        source_program=LoyaltyProgram.VISITS,
+        value_int=25,
+        is_active=True,
+    )
+    context.settings.visit_reward_template_id = template.id
+    repository = FakeRepository(context)
+    repository.reward_templates[template.id] = template
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+
+    result = await service.mark_visit(
+        staff_actor(PermissionCode.VISITS_MARK),
+        user_id=context.user.id,
+        idempotency_key=str(uuid4()),
+        now=NOW,
+    )
+
+    assert result.points_delta == 25
+    assert result.balance_before == 10
+    assert result.balance_after == 35
+    assert result.reward_ids == ()
+    assert context.state.points_balance == 35
+    assert len(repository.rewards) == 0
+    assert len(repository.point_transactions) == 1
+    assert repository.point_transactions[0].delta == 25
+    operation = next(iter(repository.operations.values()))
+    assert operation.reward_bonus_points == 25
+
+
+@pytest.mark.asyncio
+async def test_stamp_points_reward_multiplies_for_each_completed_cycle() -> None:
+    context = loyalty_context(points_balance=10)
+    context.state.stamp_count = 8
+    template = RewardTemplate(
+        id=uuid4(),
+        name="15 баллов",
+        description="Автоматический бонус",
+        reward_type=RewardType.POINTS,
+        source_program=LoyaltyProgram.STAMPS,
+        value_int=15,
+        is_active=True,
+    )
+    context.settings.stamp_reward_template_id = template.id
+    repository = FakeRepository(context)
+    repository.reward_templates[template.id] = template
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+
+    result = await service.add_stamps(
+        staff_actor(PermissionCode.STAMPS_ADD),
+        user_id=context.user.id,
+        stamps_to_add=10,
+        idempotency_key=str(uuid4()),
+        now=NOW,
+    )
+
+    assert result.points_delta == 30
+    assert result.stamps_after == 0
+    assert context.state.points_balance == 40
+    assert len(repository.point_transactions) == 1
+    assert repository.point_transactions[0].delta == 30
+    assert repository.stamp_transactions[0].issued_reward_id is None
+
+
+@pytest.mark.asyncio
+async def test_purchase_combines_accrual_and_both_point_rewards_once() -> None:
+    context = loyalty_context(points_balance=10)
+    context.state.visit_streak = 4
+    context.state.last_visit_business_date = datetime(2026, 7, 26, tzinfo=UTC).date()
+    context.state.stamp_count = 8
+    visit_template = RewardTemplate(
+        id=uuid4(),
+        name="20 баллов",
+        description="За серию",
+        reward_type=RewardType.POINTS,
+        source_program=LoyaltyProgram.VISITS,
+        value_int=20,
+        is_active=True,
+    )
+    stamp_template = RewardTemplate(
+        id=uuid4(),
+        name="30 баллов",
+        description="За штампы",
+        reward_type=RewardType.POINTS,
+        source_program=LoyaltyProgram.STAMPS,
+        value_int=30,
+        is_active=True,
+    )
+    context.settings.visit_reward_template_id = visit_template.id
+    context.settings.stamp_reward_template_id = stamp_template.id
+    repository = FakeRepository(context)
+    repository.reward_templates = {
+        visit_template.id: visit_template,
+        stamp_template.id: stamp_template,
+    }
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+    actor = staff_actor(PermissionCode.POINTS_ACCRUE, PermissionCode.STAMPS_ADD)
+    key = str(uuid4())
+
+    preview = await service.preview_purchase(
+        actor,
+        user_id=context.user.id,
+        purchase_amount_minor=10_000,
+        stamps_to_add=1,
+        now=NOW,
+    )
+    first = await service.confirm_purchase(
+        actor,
+        user_id=context.user.id,
+        purchase_amount_minor=10_000,
+        stamps_to_add=1,
+        idempotency_key=key,
+        now=NOW,
+    )
+    replay = await service.confirm_purchase(
+        actor,
+        user_id=context.user.id,
+        purchase_amount_minor=10_000,
+        stamps_to_add=1,
+        idempotency_key=key,
+        now=NOW,
+    )
+
+    assert preview.awarded_points == 10
+    assert preview.reward_bonus_points == 50
+    assert preview.projected_balance_after == 70
+    assert first.points_delta == 60
+    assert first.balance_after == 70
+    assert replay.idempotent_replay is True
+    assert context.state.points_balance == 70
+    assert len(repository.point_transactions) == 1
+    assert repository.point_transactions[0].delta == 60
+    operation = repository.operations[(LoyaltyOperationType.PURCHASE_ACCRUAL, key)]
+    assert operation.reward_bonus_points == 50
+    assert repository.rewards == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_points_reward_when_points_program_is_disabled() -> None:
+    context = loyalty_context()
+    context.settings.points_enabled = False
+    context.state.visit_streak = 4
+    context.state.last_visit_business_date = datetime(2026, 7, 26, tzinfo=UTC).date()
+    template = RewardTemplate(
+        id=uuid4(),
+        name="25 баллов",
+        description="Автоматический бонус",
+        reward_type=RewardType.POINTS,
+        source_program=LoyaltyProgram.VISITS,
+        value_int=25,
+        is_active=True,
+    )
+    context.settings.visit_reward_template_id = template.id
+    repository = FakeRepository(context)
+    repository.reward_templates[template.id] = template
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+
+    with pytest.raises(AppError) as error:
+        await service.mark_visit(
+            staff_actor(PermissionCode.VISITS_MARK),
+            user_id=context.user.id,
+            idempotency_key=str(uuid4()),
+            now=NOW,
+        )
+
+    assert error.value.status_code == 409
+    assert context.state.points_balance == 10
+    assert repository.point_transactions == []
+
+
+@pytest.mark.asyncio
 async def test_purchase_requires_stamp_permission_only_when_stamps_are_added() -> None:
     context = loyalty_context()
     repository = FakeRepository(context)

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -19,10 +19,13 @@ from app.models.access import StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
 from app.models.content import MenuItem, Promotion
 from app.models.enums import (
+    AuditSeverity,
     FeedbackCategory,
     FeedbackStatus,
+    LoyaltyProgram,
     PermissionCode,
     PromotionStatus,
+    RewardType,
     Role,
     RoundingMode,
 )
@@ -30,6 +33,7 @@ from app.models.loyalty import LoyaltySettings, RewardTemplate
 from app.models.staff import FeedbackItem
 from app.repositories.admin import AdminRepository, FeedbackRecord, LockedStaffManagement
 from app.schemas.admin import (
+    LoyaltySettingsUpdate,
     MenuItemUpdate,
     PromotionCreate,
     boundary_minutes,
@@ -39,6 +43,8 @@ from app.security.rbac import Actor
 from app.services.admin import (
     MAX_MEDIA_BYTES,
     AdminService,
+    LoyaltyRewardConfiguration,
+    LoyaltySettingsView,
     detect_image_mime,
     safe_original_filename,
 )
@@ -60,7 +66,13 @@ class RecordingAdminRepository:
         self.locked_staff: LockedStaffManagement | None = None
         self.revoked_staff_user_id: object | None = None
         self.menu_item: MenuItem | None = None
+        self.deleted_menu_items: list[MenuItem] = []
+        self.current_loyalty_reward_programs: frozenset[LoyaltyProgram] = frozenset()
+        self.settings: LoyaltySettings | None = None
         self.reward_template: RewardTemplate | None = None
+        self.reward_templates: dict[object, RewardTemplate] = {}
+        self.audit_by_idempotency_key: dict[str, AuditEvent] = {}
+        self.idempotency_locks: list[tuple[str, str]] = []
         self.flush_item_template_ids: list[object | None] = []
 
     @asynccontextmanager
@@ -69,6 +81,19 @@ class RecordingAdminRepository:
 
     def add(self, value: object) -> None:
         self.added.append(value)
+        if isinstance(value, RewardTemplate):
+            self.reward_templates[value.id] = value
+        if isinstance(value, AuditEvent) and value.idempotency_key is not None:
+            self.audit_by_idempotency_key[value.idempotency_key] = value
+
+    async def acquire_idempotency_lock(self, namespace: str, key: str) -> None:
+        self.idempotency_locks.append((namespace, key))
+
+    async def get_audit_event_by_idempotency_key(
+        self,
+        key: str,
+    ) -> AuditEvent | None:
+        return self.audit_by_idempotency_key.get(key)
 
     async def flush(self) -> None:
         self.flush_item_template_ids.append(
@@ -82,11 +107,32 @@ class RecordingAdminRepository:
         *,
         for_update: bool,
     ) -> MenuItem | None:
-        assert for_update is True
         return self.menu_item
 
-    async def get_reward_template(self, _template_id: object) -> RewardTemplate | None:
-        return self.reward_template
+    async def get_reward_template(
+        self,
+        template_id: object,
+        *,
+        for_update: bool = False,
+    ) -> RewardTemplate | None:
+        del for_update
+        return self.reward_templates.get(template_id, self.reward_template)
+
+    async def get_menu_item_loyalty_reward_programs(
+        self,
+        _item_id: object,
+        *,
+        for_update: bool,
+    ) -> frozenset[LoyaltyProgram]:
+        assert for_update is True
+        return self.current_loyalty_reward_programs
+
+    async def delete_menu_item(self, item: MenuItem) -> None:
+        self.deleted_menu_items.append(item)
+
+    async def get_loyalty_settings(self, *, for_update: bool) -> LoyaltySettings | None:
+        del for_update
+        return self.settings
 
     async def get_feedback(
         self,
@@ -162,6 +208,85 @@ def _actor(role: Role = Role.OWNER) -> Actor:
     )
 
 
+def _loyalty_settings() -> LoyaltySettings:
+    return LoyaltySettings(
+        id=uuid4(),
+        singleton_key="default",
+        points_enabled=True,
+        currency_name="баллы",
+        minor_units_per_point=1_000,
+        redemption_minor_units_per_point=100,
+        minimum_purchase_minor=0,
+        maximum_purchase_minor=1_000_000,
+        rounding_mode=RoundingMode.FLOOR,
+        maximum_redemption_percent=50,
+        minimum_redemption_points=1,
+        welcome_bonus_points=0,
+        large_operation_requires_approval=False,
+        visits_enabled=True,
+        visit_required_count=5,
+        visits_must_be_consecutive=True,
+        visit_daily_limit=1,
+        timezone="Europe/Moscow",
+        business_day_boundary_minutes=0,
+        visit_allowed_misses=0,
+        visit_reset_on_miss=True,
+        visit_restart_cycle=True,
+        stamps_enabled=True,
+        stamp_required_count=9,
+        stamps_per_purchase=1,
+        stamp_operation_limit=10,
+        reset_stamps_after_reward=True,
+    )
+
+
+async def _save_loyalty_settings(
+    service: AdminService,
+    *,
+    points_enabled: bool = True,
+    visit_enabled: bool = True,
+    stamps_enabled: bool = True,
+    visit_reward: LoyaltyRewardConfiguration | None = None,
+    stamp_reward: LoyaltyRewardConfiguration | None = None,
+) -> LoyaltySettingsView:
+    return await service.update_loyalty_settings(
+        actor=_actor(),
+        points_enabled=points_enabled,
+        currency_name="баллы",
+        rubles_per_point=10,
+        redemption_rubles_per_point=1,
+        minimum_purchase_minor=0,
+        maximum_purchase_minor=1_000_000,
+        rounding=RoundingMode.FLOOR.value,
+        max_redemption_percent=50,
+        minimum_redemption_points=1,
+        welcome_bonus_points=0,
+        points_validity_days=None,
+        daily_accrual_limit_points=None,
+        operation_accrual_limit_points=None,
+        large_operation_threshold_minor=None,
+        large_operation_requires_approval=False,
+        visit_enabled=visit_enabled,
+        visit_goal=5,
+        visits_must_be_consecutive=True,
+        visit_daily_limit=1,
+        timezone="Europe/Moscow",
+        business_day_boundary_minutes=0,
+        visit_allowed_misses=0,
+        visit_reset_on_miss=True,
+        visit_reward_validity_days=30,
+        visit_restart_cycle=True,
+        stamps_enabled=stamps_enabled,
+        stamp_goal=9,
+        stamps_per_purchase=1,
+        stamp_operation_limit=10,
+        stamp_reward_validity_days=30,
+        reset_stamps_after_reward=True,
+        visit_reward=visit_reward,
+        stamp_reward=stamp_reward,
+    )
+
+
 def test_admin_routes_import_and_publish_expected_paths() -> None:
     app = FastAPI()
     for router in (
@@ -174,6 +299,13 @@ def test_admin_routes_import_and_publish_expected_paths() -> None:
 
     paths = app.openapi()["paths"]
     assert "/api/v1/admin/loyalty-settings" in paths
+    menu_delete = paths["/api/v1/admin/menu/items/{item_id}"]["delete"]
+    assert any(
+        parameter["name"] == "Idempotency-Key"
+        and parameter["in"] == "header"
+        and parameter["required"] is True
+        for parameter in menu_delete["parameters"]
+    )
     assert "delete" in paths["/api/v1/admin/feedback/{feedback_id}"]
     assert "delete" in paths["/api/v1/admin/promotions/{promotion_id}"]
     assert "/api/v1/admin/promotions/{promotion_id}/restore" in paths
@@ -210,6 +342,110 @@ def test_settings_shape_uses_exact_integer_minor_unit_conversion() -> None:
     assert response.minimum_purchase_minor == 10_000
     assert response.business_day_boundary == "04:00"
     assert boundary_minutes(response.business_day_boundary) == 240
+
+
+def test_loyalty_reward_settings_use_strict_discriminated_shapes() -> None:
+    payload = loyalty_settings_response(_loyalty_settings()).model_dump()
+    payload["visit_reward"] = {"kind": "points", "points": 0}
+    with pytest.raises(ValidationError):
+        LoyaltySettingsUpdate.model_validate(payload)
+
+    payload["visit_reward"] = {
+        "kind": "menu_item",
+        "menu_item_id": str(uuid4()),
+        "name": "Client-controlled snapshot",
+    }
+    with pytest.raises(ValidationError):
+        LoyaltySettingsUpdate.model_validate(payload)
+
+
+@pytest.mark.asyncio
+async def test_settings_create_separate_menu_and_custom_reward_templates() -> None:
+    repository = RecordingAdminRepository()
+    repository.settings = _loyalty_settings()
+    repository.menu_item = MenuItem(
+        id=uuid4(),
+        category_id=uuid4(),
+        name="Раф",
+        description="Любой раф из меню",
+        image_media_id=uuid4(),
+        price_minor=35_000,
+        labels=[],
+        is_available=True,
+        is_visible=True,
+        sort_order=0,
+        archived_at=None,
+    )
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    view = await _save_loyalty_settings(
+        service,
+        visit_reward=LoyaltyRewardConfiguration(
+            kind="menu_item",
+            menu_item_id=repository.menu_item.id,
+        ),
+        stamp_reward=LoyaltyRewardConfiguration(
+            kind="custom",
+            name="Секретный десерт",
+            description="Спросите бариста о десерте дня",
+        ),
+    )
+
+    visit = view.visit_reward_template
+    stamp = view.stamp_reward_template
+    assert visit is not None
+    assert visit.source_program is LoyaltyProgram.VISITS
+    assert visit.reward_type is RewardType.FREE_PRODUCT
+    assert visit.source_menu_item_id == repository.menu_item.id
+    assert visit.name == repository.menu_item.name
+    assert visit.image_media_id == repository.menu_item.image_media_id
+    assert stamp is not None
+    assert stamp.source_program is LoyaltyProgram.STAMPS
+    assert stamp.reward_type is RewardType.TEXT
+    assert stamp.name == "Секретный десерт"
+    assert repository.settings.visit_reward_template_id == visit.id
+    assert repository.settings.stamp_reward_template_id == stamp.id
+
+
+@pytest.mark.asyncio
+async def test_points_reward_requires_enabled_points_program_and_replaces_old_template() -> None:
+    repository = RecordingAdminRepository()
+    settings = _loyalty_settings()
+    old = RewardTemplate(
+        id=uuid4(),
+        name="Старая награда",
+        description="Старое описание",
+        reward_type=RewardType.TEXT,
+        source_program=LoyaltyProgram.VISITS,
+        is_active=True,
+    )
+    settings.visit_reward_template_id = old.id
+    repository.settings = settings
+    repository.reward_templates[old.id] = old
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    with pytest.raises(AppError) as disabled:
+        await _save_loyalty_settings(
+            service,
+            points_enabled=False,
+            visit_reward=LoyaltyRewardConfiguration(kind="points", points=75),
+        )
+    assert disabled.value.status_code == 422
+
+    old.is_active = True  # The recording transaction does not emulate rollback.
+    settings.visit_reward_template_id = old.id
+    view = await _save_loyalty_settings(
+        service,
+        visit_reward=LoyaltyRewardConfiguration(kind="points", points=75),
+    )
+
+    template = view.visit_reward_template
+    assert template is not None
+    assert template.reward_type is RewardType.POINTS
+    assert template.value_int == 75
+    assert template.validity_days is None
+    assert view.settings.visit_reward_validity_days is None
+    assert old.is_active is False
 
 
 def test_admin_patch_forbids_excess_fields_and_promotion_requires_aware_window() -> None:
@@ -251,6 +487,163 @@ async def test_points_price_flushes_reward_template_before_menu_item_foreign_key
     assert repository.flush_item_template_ids == [None, template.id]
     assert updated.points_price == 120
     assert updated.points_reward_template_id == template.id
+
+
+def _menu_item(*, template_id: UUID | None = None, archived: bool = False) -> MenuItem:
+    return MenuItem(
+        id=uuid4(),
+        category_id=uuid4(),
+        name="Капучино",
+        description="Кофе с молоком",
+        price_minor=29_000,
+        points_price=120 if template_id is not None else None,
+        points_reward_template_id=template_id,
+        labels=[],
+        is_available=not archived,
+        is_visible=not archived,
+        sort_order=0,
+        archived_at=NOW if archived else None,
+    )
+
+
+def _points_reward_template(template_id: UUID) -> RewardTemplate:
+    return RewardTemplate(
+        id=template_id,
+        name="Капучино",
+        description="Кофе с молоком",
+        reward_type=RewardType.FREE_PRODUCT,
+        source_program=LoyaltyProgram.POINTS,
+        value_int=120,
+        validity_days=30,
+        is_active=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_menu_item_archive_and_restore_keep_safe_flags_and_audit() -> None:
+    repository = RecordingAdminRepository()
+    template_id = uuid4()
+    repository.menu_item = _menu_item(template_id=template_id)
+    repository.reward_template = _points_reward_template(template_id)
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    archived = await service.hide_menu_item(
+        actor=_actor(),
+        item_id=repository.menu_item.id,
+        now=NOW,
+    )
+
+    assert archived.archived_at == NOW
+    assert archived.is_visible is False
+    assert archived.is_available is False
+    assert repository.reward_template.is_active is False
+    archive_audit = next(
+        item
+        for item in repository.added
+        if isinstance(item, AuditEvent) and item.event_type == "menu.item_archived"
+    )
+    assert archive_audit.severity is AuditSeverity.INFO
+
+    restored = await service.restore_menu_item(
+        actor=_actor(),
+        item_id=repository.menu_item.id,
+    )
+
+    assert restored.archived_at is None
+    assert restored.is_visible is False
+    assert restored.is_available is False
+    restore_audit = next(
+        item
+        for item in repository.added
+        if isinstance(item, AuditEvent) and item.event_type == "menu.item_restored"
+    )
+    assert restore_audit.severity is AuditSeverity.INFO
+
+
+@pytest.mark.asyncio
+async def test_menu_item_delete_requires_archive_and_deactivates_points_template() -> None:
+    repository = RecordingAdminRepository()
+    template_id = uuid4()
+    repository.menu_item = _menu_item(template_id=template_id)
+    repository.reward_template = _points_reward_template(template_id)
+    service = AdminService(repository=cast(AdminRepository, repository))
+    actor = _actor()
+    first_key = str(uuid4())
+
+    with pytest.raises(AppError) as conflict:
+        await service.delete_menu_item(
+            actor=actor,
+            item_id=repository.menu_item.id,
+            idempotency_key=first_key,
+        )
+    assert conflict.value.status_code == 409
+    assert conflict.value.code == "menu_item_not_archived"
+    assert repository.deleted_menu_items == []
+
+    repository.menu_item.archived_at = NOW
+    delete_key = str(uuid4())
+    await service.delete_menu_item(
+        actor=actor,
+        item_id=repository.menu_item.id,
+        idempotency_key=delete_key,
+    )
+
+    assert repository.reward_template.is_active is False
+    assert repository.deleted_menu_items == [repository.menu_item]
+    delete_audit = next(
+        item
+        for item in repository.added
+        if isinstance(item, AuditEvent) and item.event_type == "menu.item_deleted"
+    )
+    assert delete_audit.severity is AuditSeverity.WARNING
+    assert delete_audit.idempotency_key == delete_key
+    assert delete_audit.event_metadata["name"] == "Капучино"
+    assert len(delete_audit.event_metadata["request_hash"]) == 64
+
+    await service.delete_menu_item(
+        actor=actor,
+        item_id=repository.menu_item.id,
+        idempotency_key=delete_key,
+    )
+    assert repository.deleted_menu_items == [repository.menu_item]
+
+    with pytest.raises(AppError) as reused_key:
+        await service.delete_menu_item(
+            actor=_actor(),
+            item_id=repository.menu_item.id,
+            idempotency_key=delete_key,
+        )
+    assert reused_key.value.code == "idempotency_conflict"
+
+
+@pytest.mark.asyncio
+async def test_current_loyalty_reward_blocks_menu_item_archive_and_delete() -> None:
+    repository = RecordingAdminRepository()
+    repository.menu_item = _menu_item()
+    repository.current_loyalty_reward_programs = frozenset(
+        {LoyaltyProgram.VISITS, LoyaltyProgram.STAMPS}
+    )
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    with pytest.raises(AppError) as archive_conflict:
+        await service.hide_menu_item(actor=_actor(), item_id=repository.menu_item.id, now=NOW)
+    assert archive_conflict.value.status_code == 409
+    assert archive_conflict.value.code == "menu_item_is_current_loyalty_reward"
+    assert "посещений подряд" in archive_conflict.value.message
+    assert "штампов" in archive_conflict.value.message
+    assert repository.menu_item.archived_at is None
+    assert repository.menu_item.is_visible is True
+    assert repository.menu_item.is_available is True
+
+    repository.menu_item.archived_at = NOW
+    with pytest.raises(AppError) as delete_conflict:
+        await service.delete_menu_item(
+            actor=_actor(),
+            item_id=repository.menu_item.id,
+            idempotency_key=str(uuid4()),
+        )
+    assert delete_conflict.value.code == "menu_item_is_current_loyalty_reward"
+    assert repository.deleted_menu_items == []
 
 
 def test_image_sniffing_and_filename_sanitization_reject_spoofing() -> None:
@@ -296,6 +689,51 @@ async def test_media_upload_uses_random_confined_path_and_audits(tmp_path: Path)
             now=NOW,
         )
     assert error.value.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_media_upload_accepts_browser_mime_aliases_and_rejects_mismatch(
+    tmp_path: Path,
+) -> None:
+    repository = RecordingAdminRepository()
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    jpeg = await service.upload_media(
+        actor=_actor(),
+        content=b"\xff\xd8\xffcontent",
+        original_filename="desktop.jpg",
+        claimed_content_type="image/jpg; charset=binary",
+        kind="menu",
+        media_root=tmp_path,
+        now=NOW,
+    )
+    png = await service.upload_media(
+        actor=_actor(),
+        content=b"\x89PNG\r\n\x1a\ncontent",
+        original_filename="desktop.png",
+        claimed_content_type="image/x-png",
+        kind="menu",
+        media_root=tmp_path,
+        now=NOW,
+    )
+
+    assert jpeg.media.detected_mime == "image/jpeg"
+    assert jpeg.media.attributes["claimed_content_type"] == "image/jpeg"
+    assert png.media.detected_mime == "image/png"
+    assert png.media.attributes["claimed_content_type"] == "image/png"
+
+    with pytest.raises(AppError) as mismatch:
+        await service.upload_media(
+            actor=_actor(),
+            content=b"\xff\xd8\xffcontent",
+            original_filename="spoofed.png",
+            claimed_content_type="image/png",
+            kind="menu",
+            media_root=tmp_path,
+            now=NOW,
+        )
+    assert mismatch.value.status_code == 415
+    assert mismatch.value.code == "media_type_mismatch"
 
 
 def test_admin_cannot_manage_privileged_roles_and_last_owner_is_guarded() -> None:

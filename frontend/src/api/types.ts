@@ -31,8 +31,10 @@ export interface CardData {
   short_code: string;
   balance_points: number;
   currency_name: string;
+  visits_enabled: boolean;
   visit_streak: number;
   visit_goal: number;
+  stamps_enabled: boolean;
   stamps: number;
   stamp_goal: number;
   blocked: boolean;
@@ -73,7 +75,8 @@ export interface Reward {
     | "percent_discount"
     | "fixed_discount"
     | "free_option"
-    | "text";
+    | "text"
+    | "points";
   status: "active" | "redeemed" | "expired" | "cancelled";
   expires_at?: string | null;
   created_at: string;
@@ -232,6 +235,7 @@ export interface PurchasePreview extends AccrualPreview {
   stamps_before: number;
   stamps_after: number;
   stamp_rewards_earned: number;
+  reward_bonus_points: number;
   visit_will_be_recorded: boolean;
   visit_already_counted: boolean;
   visit_streak_after: number;
@@ -437,13 +441,20 @@ export interface LoyaltySettings {
   visit_reset_on_miss: boolean;
   visit_reward_validity_days: number | null;
   visit_restart_cycle: boolean;
+  visit_reward: LoyaltyRewardConfig | null;
   stamps_enabled: boolean;
   stamp_goal: number;
   stamps_per_purchase: number;
   stamp_operation_limit: number;
   stamp_reward_validity_days: number | null;
   reset_stamps_after_reward: boolean;
+  stamp_reward: LoyaltyRewardConfig | null;
 }
+
+export type LoyaltyRewardConfig =
+  | { kind: "menu_item"; menu_item_id: string }
+  | { kind: "custom"; name: string; description?: string | null }
+  | { kind: "points"; points: number };
 
 export interface AdminOverview {
   users_total: number;

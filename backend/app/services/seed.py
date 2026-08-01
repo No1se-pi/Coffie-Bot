@@ -136,6 +136,10 @@ class RewardTemplateSeed(SeedModel):
     def validate_percentage_value(self) -> RewardTemplateSeed:
         if self.reward_type == RewardType.PERCENT_DISCOUNT and self.discount_percent is None:
             raise ValueError("discount_percent is required for a percent discount")
+        if self.reward_type == RewardType.POINTS and (
+            self.value_int is None or self.value_int <= 0
+        ):
+            raise ValueError("value_int must be positive for a points reward")
         return self
 
 

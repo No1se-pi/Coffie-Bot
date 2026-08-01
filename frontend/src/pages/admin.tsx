@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { coffeeApi } from "../api/client";
+import { coffeeApi, MEDIA_FILE_ACCEPT } from "../api/client";
 import type {
   AdminFeedback,
   AdminStaffMember,
   AdjustmentPreview,
   FeedbackStatus,
+  LoyaltyRewardConfig,
   LoyaltySettings,
   MenuCategory,
   MenuItem,
@@ -1360,8 +1361,156 @@ export function AdminEventsPage() {
   );
 }
 
+function LoyaltyRewardEditor({
+  label,
+  value,
+  menuItems,
+  categories,
+  menuError,
+  menuLoading,
+  onChange,
+}: {
+  label: string;
+  value: LoyaltyRewardConfig | null;
+  menuItems: MenuItem[];
+  categories: MenuCategory[];
+  menuError?: Error | null;
+  menuLoading?: boolean;
+  onChange: (value: LoyaltyRewardConfig) => void;
+}) {
+  const categoryNames = new Map(
+    categories.map((category) => [category.id, category.name]),
+  );
+  const selectKind = (kind: LoyaltyRewardConfig["kind"]) => {
+    if (kind === "menu_item") {
+      onChange({
+        kind,
+        menu_item_id:
+          value?.kind === "menu_item"
+            ? value.menu_item_id
+            : (menuItems[0]?.id ?? ""),
+      });
+      return;
+    }
+    if (kind === "points") {
+      onChange({
+        kind,
+        points: value?.kind === "points" ? value.points : 50,
+      });
+      return;
+    }
+    onChange({
+      kind,
+      name: value?.kind === "custom" ? value.name : "Награда от кофейни",
+      description:
+        value?.kind === "custom" ? value.description : "Покажите QR бариста.",
+    });
+  };
+
+  return (
+    <div>
+      <h3>{label}</h3>
+      <div className="form-grid">
+        <Field
+          label="Что получит клиент"
+          hint={
+            menuLoading
+              ? "Загружаем позиции меню…"
+              : menuError
+                ? "Позиции меню сейчас не загрузились — доступны своя награда и баллы."
+                : !menuItems.length
+                  ? "В меню пока нет активных позиций."
+                  : undefined
+          }
+        >
+          <select
+            required
+            value={value?.kind ?? ""}
+            onChange={(event) =>
+              selectKind(event.target.value as LoyaltyRewardConfig["kind"])
+            }
+          >
+            <option value="" disabled>
+              Выберите награду
+            </option>
+            <option value="menu_item" disabled={!menuItems.length}>
+              Позицию из меню
+            </option>
+            <option value="custom">Свою награду</option>
+            <option value="points">Баллы</option>
+          </select>
+        </Field>
+        {value?.kind === "menu_item" && (
+          <Field label="Позиция меню">
+            <select
+              required
+              value={value.menu_item_id}
+              onChange={(event) =>
+                onChange({
+                  kind: "menu_item",
+                  menu_item_id: event.target.value,
+                })
+              }
+            >
+              {menuItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {categoryNames.get(item.category_id)
+                    ? `${categoryNames.get(item.category_id)} · `
+                    : ""}
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {value?.kind === "custom" && (
+          <>
+            <Field label="Название награды">
+              <input
+                required
+                maxLength={200}
+                value={value.name}
+                onChange={(event) =>
+                  onChange({ ...value, name: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Короткое описание" hint="Необязательно">
+              <input
+                maxLength={8000}
+                value={value.description ?? ""}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    description: event.target.value || null,
+                  })
+                }
+              />
+            </Field>
+          </>
+        )}
+        {value?.kind === "points" && (
+          <Field label="Сколько баллов">
+            <input
+              required
+              type="number"
+              min="1"
+              max="1000000000"
+              value={value.points}
+              onChange={(event) =>
+                onChange({ kind: "points", points: Number(event.target.value) })
+              }
+            />
+          </Field>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AdminSettingsPage() {
   const resource = useResource(coffeeApi.getSettings);
+  const menuResource = useResource(() => coffeeApi.getAdminMenu(false));
   const [form, setForm] = useState<LoyaltySettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1689,6 +1838,15 @@ export function AdminSettingsPage() {
                 />
               </Field>
             </div>
+            <LoyaltyRewardEditor
+              label="Награда за серию"
+              value={form.visit_reward}
+              menuItems={menuResource.data?.items ?? []}
+              categories={menuResource.data?.categories ?? []}
+              menuError={menuResource.error}
+              menuLoading={menuResource.loading}
+              onChange={(value) => update("visit_reward", value)}
+            />
             <div className="chip-row">
               <label className="checkbox">
                 <input
@@ -1784,6 +1942,15 @@ export function AdminSettingsPage() {
                 />
               </Field>
             </div>
+            <LoyaltyRewardEditor
+              label="Награда за штампы"
+              value={form.stamp_reward}
+              menuItems={menuResource.data?.items ?? []}
+              categories={menuResource.data?.categories ?? []}
+              menuError={menuResource.error}
+              menuLoading={menuResource.loading}
+              onChange={(value) => update("stamp_reward", value)}
+            />
             <label className="checkbox">
               <input
                 type="checkbox"
@@ -1879,10 +2046,12 @@ function MenuCategoryEditor({
         >
           <input
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept={MEDIA_FILE_ACCEPT}
             disabled={uploading}
             onChange={(event) => {
-              const file = event.target.files?.[0];
+              const input = event.currentTarget;
+              const file = input.files?.[0];
+              input.value = "";
               if (!file) return;
               setUploading(true);
               setError(null);
@@ -2109,10 +2278,12 @@ function MenuItemEditor({
         >
           <input
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept={MEDIA_FILE_ACCEPT}
             disabled={uploading}
             onChange={(event) => {
-              const file = event.target.files?.[0];
+              const input = event.currentTarget;
+              const file = input.files?.[0];
+              input.value = "";
               if (!file) return;
               setUploading(true);
               setError(null);
@@ -2199,8 +2370,20 @@ function MenuItemEditor({
 }
 
 export function AdminMenuPage() {
-  const resource = useResource(coffeeApi.getAdminMenu);
+  const [view, setView] = useState<"active" | "archive">("active");
+  const resource = useResource(
+    () => coffeeApi.getAdminMenu(view === "archive"),
+    [view],
+  );
   const data = resource.data;
+  const shownItems =
+    data?.items.filter((item) =>
+      view === "archive" ? Boolean(item.archived_at) : !item.archived_at,
+    ) ?? [];
+  const shownCategories =
+    data?.categories.filter((category) =>
+      shownItems.some((item) => item.category_id === category.id),
+    ) ?? [];
   const [categoryEditor, setCategoryEditor] = useState<MenuCategory | null>(
     null,
   );
@@ -2228,6 +2411,58 @@ export function AdminMenuPage() {
       setBusyId(null);
     }
   };
+  const archive = async (item: MenuItem) => {
+    setBusyId(item.id);
+    setError(null);
+    try {
+      await coffeeApi.archiveMenuItem(item);
+      await resource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось перенести позицию в архив",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const restore = async (item: MenuItem) => {
+    setBusyId(item.id);
+    setError(null);
+    try {
+      await coffeeApi.restoreMenuItem(item);
+      await resource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить позицию",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const remove = async (item: MenuItem) => {
+    if (
+      !window.confirm(
+        `Удалить «${item.name}» навсегда? История покупок и операций сохранится.`,
+      )
+    )
+      return;
+    setBusyId(item.id);
+    setError(null);
+    try {
+      await coffeeApi.deleteMenuItem(item);
+      await resource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось удалить позицию",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
   return (
     <Page
       title="Меню"
@@ -2244,27 +2479,49 @@ export function AdminMenuPage() {
         </Link>
         <Link to="/admin/promotions">Акции</Link>
       </div>
-      <div className="action-row">
-        <Button
-          variant="secondary"
+      <div className="chip-row" role="group" aria-label="Разделы позиций">
+        <button
+          className={`chip ${view === "active" ? "is-active" : ""}`}
           onClick={() => {
-            setCategoryEditor(null);
-            setEditor("category");
+            setView("active");
+            setEditor(null);
           }}
         >
-          Добавить категорию
-        </Button>
-        <Button
-          disabled={!data?.categories.length}
+          Текущие
+        </button>
+        <button
+          className={`chip ${view === "archive" ? "is-active" : ""}`}
           onClick={() => {
-            setItemEditor(null);
-            setEditor("item");
+            setView("archive");
+            setEditor(null);
           }}
         >
-          Добавить позицию
-        </Button>
+          Архив
+        </button>
       </div>
-      {editor === "category" && (
+      {view === "active" && (
+        <div className="action-row">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setCategoryEditor(null);
+              setEditor("category");
+            }}
+          >
+            Добавить категорию
+          </Button>
+          <Button
+            disabled={!data?.categories.length}
+            onClick={() => {
+              setItemEditor(null);
+              setEditor("item");
+            }}
+          >
+            Добавить позицию
+          </Button>
+        </div>
+      )}
+      {view === "active" && editor === "category" && (
         <MenuCategoryEditor
           key={categoryEditor?.id ?? "new-category"}
           category={categoryEditor}
@@ -2275,7 +2532,7 @@ export function AdminMenuPage() {
           }}
         />
       )}
-      {editor === "item" && data && (
+      {view === "active" && editor === "item" && data && (
         <MenuItemEditor
           key={itemEditor?.id ?? "new-item"}
           item={itemEditor}
@@ -2292,9 +2549,9 @@ export function AdminMenuPage() {
         <ErrorState error={resource.error} onRetry={resource.reload} />
       )}
       {error && <div className="inline-error">{error}</div>}
-      {data && (
+      {data && shownItems.length > 0 && (
         <div className="admin-menu">
-          {data.categories.map((category) => (
+          {shownCategories.map((category) => (
             <section key={category.id}>
               <div className="section-heading">
                 <div className="admin-menu__category-heading">
@@ -2312,22 +2569,24 @@ export function AdminMenuPage() {
                 </div>
                 <Badge>
                   {
-                    data.items.filter(
+                    shownItems.filter(
                       (item) => item.category_id === category.id,
                     ).length
                   }
                 </Badge>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setCategoryEditor(category);
-                    setEditor("category");
-                  }}
-                >
-                  Изменить
-                </Button>
+                {view === "active" && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setCategoryEditor(category);
+                      setEditor("category");
+                    }}
+                  >
+                    Изменить
+                  </Button>
+                )}
               </div>
-              {data.items
+              {shownItems
                 .filter((item) => item.category_id === category.id)
                 .map((item) => (
                   <article key={item.id}>
@@ -2344,35 +2603,74 @@ export function AdminMenuPage() {
                       <strong>{formatMoney(item.price_minor)}</strong>
                     </div>
                     <div>
-                      <Badge tone={item.visible ? "success" : "neutral"}>
-                        {item.visible ? "Виден" : "Скрыт"}
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        onClick={() => void toggle(item.id)}
-                        disabled={busyId === item.id}
-                      >
-                        {busyId === item.id
-                          ? "…"
-                          : item.visible
-                            ? "Скрыть"
-                            : "Показать"}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setItemEditor(item);
-                          setEditor("item");
-                        }}
-                      >
-                        Изменить
-                      </Button>
+                      {view === "archive" ? (
+                        <>
+                          <Badge>В архиве</Badge>
+                          <Button
+                            variant="secondary"
+                            onClick={() => void restore(item)}
+                            disabled={busyId === item.id}
+                          >
+                            Восстановить
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onClick={() => void remove(item)}
+                            disabled={busyId === item.id}
+                          >
+                            Удалить навсегда
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Badge tone={item.visible ? "success" : "neutral"}>
+                            {item.visible ? "Виден" : "Скрыт"}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            onClick={() => void toggle(item.id)}
+                            disabled={busyId === item.id}
+                          >
+                            {busyId === item.id
+                              ? "…"
+                              : item.visible
+                                ? "Скрыть"
+                                : "Показать"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setItemEditor(item);
+                              setEditor("item");
+                            }}
+                          >
+                            Изменить
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => void archive(item)}
+                            disabled={busyId === item.id}
+                          >
+                            В архив
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </article>
                 ))}
             </section>
           ))}
         </div>
+      )}
+      {data && shownItems.length === 0 && (
+        <EmptyState
+          title={view === "archive" ? "Архив пуст" : "Позиций пока нет"}
+          text={
+            view === "archive"
+              ? "Удалённые из меню позиции появятся здесь."
+              : "Добавьте первую позицию и настройте её видимость."
+          }
+        />
       )}
     </Page>
   );
@@ -2454,10 +2752,12 @@ function PromotionEditor({
         >
           <input
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept={MEDIA_FILE_ACCEPT}
             disabled={uploading}
             onChange={(event) => {
-              const file = event.target.files?.[0];
+              const input = event.currentTarget;
+              const file = input.files?.[0];
+              input.value = "";
               if (!file) return;
               setUploading(true);
               setError(null);

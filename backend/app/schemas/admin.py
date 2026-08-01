@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Self
+from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -16,11 +16,12 @@ from app.models.enums import (
     FeedbackStatus,
     PermissionCode,
     PromotionStatus,
+    RewardType,
     Role,
     RoundingMode,
     TipProfileStatus,
 )
-from app.models.loyalty import LoyaltySettings
+from app.models.loyalty import LoyaltySettings, RewardTemplate
 from app.repositories.admin import (
     FeedbackPage,
     MenuCategoryPage,
@@ -35,6 +36,28 @@ from app.services.admin import MediaUploadResult, StaffInviteResult, TipProfileV
 
 class ApiSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class MenuItemLoyaltyRewardConfig(ApiSchema):
+    kind: Literal["menu_item"]
+    menu_item_id: UUID
+
+
+class CustomLoyaltyRewardConfig(ApiSchema):
+    kind: Literal["custom"]
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=8_000)
+
+
+class PointsLoyaltyRewardConfig(ApiSchema):
+    kind: Literal["points"]
+    points: int = Field(gt=0, le=1_000_000_000)
+
+
+LoyaltyRewardConfig = Annotated[
+    MenuItemLoyaltyRewardConfig | CustomLoyaltyRewardConfig | PointsLoyaltyRewardConfig,
+    Field(discriminator="kind"),
+]
 
 
 class LoyaltySettingsResponse(ApiSchema):
@@ -63,12 +86,14 @@ class LoyaltySettingsResponse(ApiSchema):
     visit_reset_on_miss: bool
     visit_reward_validity_days: int | None
     visit_restart_cycle: bool
+    visit_reward: LoyaltyRewardConfig | None = None
     stamps_enabled: bool
     stamp_goal: int
     stamps_per_purchase: int
     stamp_operation_limit: int
     stamp_reward_validity_days: int | None
     reset_stamps_after_reward: bool
+    stamp_reward: LoyaltyRewardConfig | None = None
 
     @field_validator("business_day_boundary")
     @classmethod
@@ -454,7 +479,12 @@ class MediaUploadResponse(ApiSchema):
     created_at: datetime
 
 
-def loyalty_settings_response(settings: LoyaltySettings) -> LoyaltySettingsResponse:
+def loyalty_settings_response(
+    settings: LoyaltySettings,
+    *,
+    visit_reward_template: RewardTemplate | None = None,
+    stamp_reward_template: RewardTemplate | None = None,
+) -> LoyaltySettingsResponse:
     return LoyaltySettingsResponse(
         points_enabled=settings.points_enabled,
         currency_name=settings.currency_name,
@@ -483,12 +513,34 @@ def loyalty_settings_response(settings: LoyaltySettings) -> LoyaltySettingsRespo
         visit_reset_on_miss=settings.visit_reset_on_miss is not False,
         visit_reward_validity_days=settings.visit_reward_validity_days,
         visit_restart_cycle=settings.visit_restart_cycle is not False,
+        visit_reward=_loyalty_reward_config(visit_reward_template),
         stamps_enabled=settings.stamps_enabled,
         stamp_goal=settings.stamp_required_count,
         stamps_per_purchase=settings.stamps_per_purchase or 1,
         stamp_operation_limit=settings.stamp_operation_limit or 1,
         stamp_reward_validity_days=settings.stamp_reward_validity_days,
         reset_stamps_after_reward=settings.reset_stamps_after_reward is not False,
+        stamp_reward=_loyalty_reward_config(stamp_reward_template),
+    )
+
+
+def _loyalty_reward_config(template: RewardTemplate | None) -> LoyaltyRewardConfig | None:
+    if template is None:
+        return None
+    if template.source_menu_item_id is not None:
+        return MenuItemLoyaltyRewardConfig(
+            kind="menu_item",
+            menu_item_id=template.source_menu_item_id,
+        )
+    if template.reward_type is RewardType.POINTS:
+        return PointsLoyaltyRewardConfig(
+            kind="points",
+            points=template.value_int or 0,
+        )
+    return CustomLoyaltyRewardConfig(
+        kind="custom",
+        name=template.name,
+        description=template.description,
     )
 
 

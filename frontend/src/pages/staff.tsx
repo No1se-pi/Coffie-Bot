@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { coffeeApi } from "../api/client";
+import { coffeeApi, MEDIA_FILE_ACCEPT } from "../api/client";
 import type {
   OperationResult,
   PurchasePreview,
@@ -786,6 +786,12 @@ export function AccrualPanel({
               <dt>Баллы</dt>
               <dd className="positive">+{preview.points_to_accrue}</dd>
             </div>
+            {preview.reward_bonus_points > 0 && (
+              <div>
+                <dt>Бонус за награду</dt>
+                <dd className="positive">+{preview.reward_bonus_points}</dd>
+              </div>
+            )}
             <div>
               <dt>Штампы</dt>
               <dd>
@@ -810,7 +816,7 @@ export function AccrualPanel({
           </dl>
           {preview.stamp_rewards_earned > 0 && (
             <div className="inline-warning">
-              Будет выдано наград: {preview.stamp_rewards_earned}.
+              Завершено циклов штампов: {preview.stamp_rewards_earned}.
             </div>
           )}
           {preview.requires_approval && (
@@ -1081,10 +1087,12 @@ export function StaffProfilePage() {
             >
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept={MEDIA_FILE_ACCEPT}
                 disabled={uploading}
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
+                  const input = event.currentTarget;
+                  const file = input.files?.[0];
+                  input.value = "";
                   if (file) void upload(file, "staff_profile");
                 }}
               />
@@ -1128,10 +1136,12 @@ export function StaffProfilePage() {
             >
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept={MEDIA_FILE_ACCEPT}
                 disabled={uploading}
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
+                  const input = event.currentTarget;
+                  const file = input.files?.[0];
+                  input.value = "";
                   if (file) void upload(file, "tip_qr");
                 }}
               />

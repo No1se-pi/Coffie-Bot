@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { coffeeApi } from "../api/client";
@@ -23,10 +23,23 @@ import {
   Progress,
 } from "../components/ui";
 
+export function getTimeGreeting(date = new Date()): string {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 12) return "Доброе утро";
+  if (hour >= 12 && hour < 18) return "Добрый день";
+  if (hour >= 18 && hour < 23) return "Добрый вечер";
+  return "Доброй ночи";
+}
+
 export function HomePage() {
   const resource = useResource(coffeeApi.getHome);
+  const greeting = getTimeGreeting();
+  const customerName = resource.data?.card.display_name.trim().split(/\s+/)[0];
   return (
-    <Page title="Добро пожаловать" eyebrow="Ваша кофейня">
+    <Page
+      title={customerName ? `${greeting}, ${customerName}` : greeting}
+      eyebrow="Ваша кофейня"
+    >
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
@@ -55,22 +68,29 @@ export function HomePage() {
             </Link>
           </Panel>
 
-          <Panel>
-            <div className="section-heading">
-              <h2>До следующей награды</h2>
-              <Link to="/rewards">Все награды</Link>
-            </div>
-            <Progress
-              value={resource.data.card.visit_streak}
-              max={resource.data.card.visit_goal}
-              label="Посещения подряд"
-            />
-            <Progress
-              value={resource.data.card.stamps}
-              max={resource.data.card.stamp_goal}
-              label="Штампы"
-            />
-          </Panel>
+          {(resource.data.card.visits_enabled ||
+            resource.data.card.stamps_enabled) && (
+            <Panel>
+              <div className="section-heading">
+                <h2>До следующей награды</h2>
+                <Link to="/rewards">Все награды</Link>
+              </div>
+              {resource.data.card.visits_enabled && (
+                <Progress
+                  value={resource.data.card.visit_streak}
+                  max={resource.data.card.visit_goal}
+                  label="Посещения подряд"
+                />
+              )}
+              {resource.data.card.stamps_enabled && (
+                <Progress
+                  value={resource.data.card.stamps}
+                  max={resource.data.card.stamp_goal}
+                  label="Штампы"
+                />
+              )}
+            </Panel>
+          )}
 
           <section>
             <div className="section-heading">
@@ -369,6 +389,30 @@ export function MenuPage() {
       ) ?? [],
     [resource.data, category],
   );
+  const closePurchaseFlow = () => {
+    if (purchasing) return;
+    setBuying(null);
+    setPurchase(null);
+    setPurchaseKey("");
+    setPurchaseError(null);
+  };
+  useEffect(() => {
+    if (!buying && !purchase) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || purchasing) return;
+      setBuying(null);
+      setPurchase(null);
+      setPurchaseKey("");
+      setPurchaseError(null);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [buying, purchase, purchasing]);
   const confirmPointsPurchase = async () => {
     if (!buying) return;
     setPurchasing(true);
@@ -394,83 +438,45 @@ export function MenuPage() {
       )}
       {resource.data && (
         <>
-          {purchase && (
-            <Panel className="reward-highlight">
-              <div>
-                <Badge tone="success">Награда готова</Badge>
-                <h2>{purchase.item_name}</h2>
-                <p>
-                  Списано {purchase.points_spent} баллов. Осталось:{" "}
-                  {purchase.balance_after}.
-                </p>
-                <div className="qr-frame">
-                  <QRCodeSVG
-                    value={purchase.qr_payload}
-                    size={190}
-                    level="M"
-                    marginSize={2}
-                    title="QR-код награды"
-                  />
-                </div>
-                <small>Покажите этот QR-код бариста.</small>
-              </div>
-              <Button variant="ghost" onClick={() => setPurchase(null)}>
-                Закрыть
-              </Button>
-            </Panel>
-          )}
-          {buying && (
-            <Panel>
-              <h2>Подтвердите покупку</h2>
-              <p>
-                {buying.name} за <strong>{buying.points_price} баллов</strong>.
-                Баллы спишутся сразу, а вы получите QR-код награды.
-              </p>
-              {purchaseError && (
-                <div className="inline-error">{purchaseError}</div>
-              )}
-              <div className="action-row">
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setBuying(null);
-                    setPurchaseKey("");
-                  }}
-                >
-                  Отмена
-                </Button>
-                <Button
-                  onClick={() => void confirmPointsPurchase()}
-                  disabled={purchasing}
-                >
-                  {purchasing ? "Покупаем…" : "Списать баллы"}
-                </Button>
-              </div>
-            </Panel>
-          )}
-          <div className="chip-row" role="group" aria-label="Категории меню">
+          <div
+            className="menu-category-row"
+            role="group"
+            aria-label="Категории меню"
+          >
             <button
-              className={`chip ${!category ? "is-active" : ""}`}
+              className={`menu-category ${!category ? "is-active" : ""}`}
               onClick={() => setCategory("")}
+              aria-pressed={!category}
             >
-              Всё
+              <span
+                className="menu-category__icon menu-category__icon--all"
+                aria-hidden="true"
+              >
+                ☕
+              </span>
+              <span>Всё</span>
             </button>
             {resource.data.categories
               .filter((item) => item.visible)
               .map((item) => (
                 <button
                   key={item.id}
-                  className={`chip ${category === item.id ? "is-active" : ""}`}
+                  className={`menu-category ${category === item.id ? "is-active" : ""}`}
                   onClick={() => setCategory(item.id)}
+                  aria-pressed={category === item.id}
                 >
-                  {item.icon_url && (
+                  {item.icon_url ? (
                     <img
-                      className="avatar avatar--small"
+                      className="menu-category__icon"
                       src={item.icon_url}
                       alt=""
                     />
+                  ) : (
+                    <span className="menu-category__icon" aria-hidden="true">
+                      {item.name.trim().charAt(0).toLocaleUpperCase()}
+                    </span>
                   )}
-                  {item.name}
+                  <span>{item.name}</span>
                 </button>
               ))}
           </div>
@@ -530,6 +536,81 @@ export function MenuPage() {
             баллах можно купить в приложении.
           </p>
         </>
+      )}
+      {(buying || purchase) && (
+        <div
+          className="purchase-sheet-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closePurchaseFlow();
+          }}
+        >
+          {buying ? (
+            <Panel
+              className="purchase-sheet"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="points-purchase-title"
+            >
+              <h2 id="points-purchase-title">Подтвердите покупку</h2>
+              <p>
+                {buying.name} за <strong>{buying.points_price} баллов</strong>.
+                Баллы спишутся сразу, а вы получите QR-код награды.
+              </p>
+              {purchaseError && (
+                <div className="inline-error">{purchaseError}</div>
+              )}
+              <div className="action-row">
+                <Button
+                  variant="secondary"
+                  onClick={closePurchaseFlow}
+                  disabled={purchasing}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void confirmPointsPurchase()}
+                  disabled={purchasing}
+                  autoFocus
+                >
+                  {purchasing ? "Покупаем…" : "Списать баллы"}
+                </Button>
+              </div>
+            </Panel>
+          ) : (
+            purchase && (
+              <Panel
+                className="purchase-sheet purchase-sheet--success"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="points-purchase-success-title"
+              >
+                <Badge tone="success">Награда готова</Badge>
+                <h2 id="points-purchase-success-title">{purchase.item_name}</h2>
+                <p>
+                  Списано {purchase.points_spent} баллов. Осталось:{" "}
+                  {purchase.balance_after}.
+                </p>
+                <div className="qr-frame">
+                  <QRCodeSVG
+                    value={purchase.qr_payload}
+                    size={190}
+                    level="M"
+                    marginSize={2}
+                    title="QR-код награды"
+                  />
+                </div>
+                <small>Покажите этот QR-код бариста.</small>
+                <Button
+                  variant="secondary"
+                  onClick={closePurchaseFlow}
+                  autoFocus
+                >
+                  Закрыть
+                </Button>
+              </Panel>
+            )
+          )}
+        </div>
       )}
     </Page>
   );

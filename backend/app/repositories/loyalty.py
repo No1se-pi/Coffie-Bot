@@ -187,7 +187,12 @@ class LoyaltyRepository:
         ended_at: datetime,
     ) -> int:
         value = await self._session.scalar(
-            select(func.coalesce(func.sum(LoyaltyOperation.points_delta), 0)).where(
+            select(
+                func.coalesce(
+                    func.sum(LoyaltyOperation.points_delta - LoyaltyOperation.reward_bonus_points),
+                    0,
+                )
+            ).where(
                 LoyaltyOperation.user_id == user_id,
                 LoyaltyOperation.operation_type == LoyaltyOperationType.PURCHASE_ACCRUAL,
                 LoyaltyOperation.status == OperationStatus.COMMITTED,

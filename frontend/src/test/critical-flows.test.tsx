@@ -9,12 +9,19 @@ import type {
   AdminUserListItem,
   AdminUser,
   CardData,
+  LoyaltySettings,
   MenuCategory,
   OperationResult,
   PurchasePreview,
   StaffClient,
 } from "../api/types";
-import { CardPage, HomePage, MenuPage, RewardsPage } from "../pages/customer";
+import {
+  CardPage,
+  getTimeGreeting,
+  HomePage,
+  MenuPage,
+  RewardsPage,
+} from "../pages/customer";
 import {
   AccrualPanel,
   QuickOperationsPanel,
@@ -26,10 +33,12 @@ import {
   AdminFeedbackPage,
   AdminMenuPage,
   AdminPromotionsPage,
+  AdminSettingsPage,
   AdminStaffPage,
   AdminUsersPage,
 } from "../pages/admin";
 import { AuthContext } from "../auth/AuthContext";
+import { AuthGate } from "../components/AppShell";
 import { applyTheme, readTheme } from "../theme";
 
 const card: CardData = {
@@ -39,8 +48,10 @@ const card: CardData = {
   short_code: "BEAN2026",
   balance_points: 284,
   currency_name: "бобов",
+  visits_enabled: true,
   visit_streak: 3,
   visit_goal: 5,
+  stamps_enabled: true,
   stamps: 6,
   stamp_goal: 9,
   blocked: false,
@@ -122,6 +133,7 @@ describe("critical Mini App flows", () => {
       stamps_before: 6,
       stamps_after: 8,
       stamp_rewards_earned: 0,
+      reward_bonus_points: 0,
       visit_will_be_recorded: true,
       visit_already_counted: false,
       visit_streak_after: 4,
@@ -220,12 +232,21 @@ describe("critical Mini App flows", () => {
     });
     expect(pointsButton).toHaveClass("menu-card__points-button");
     await user.click(pointsButton);
-    expect(screen.getByText("Подтвердите покупку")).toBeInTheDocument();
+    const confirmation = screen.getByRole("dialog", {
+      name: "Подтвердите покупку",
+    });
+    expect(confirmation).toHaveClass("purchase-sheet");
+    expect(confirmation).toHaveAttribute("aria-modal", "true");
     await user.click(screen.getByRole("button", { name: "Списать баллы" }));
 
     expect(await screen.findByText("Награда готова")).toBeInTheDocument();
     expect(screen.getByText(/204/)).toBeInTheDocument();
     expect(purchase).toHaveBeenCalledWith("item-1", expect.any(String));
+    expect(
+      screen.getByRole("dialog", { name: "Капучино" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("centers an active reward QR in a full-width redemption row", async () => {
@@ -285,6 +306,66 @@ describe("critical Mini App flows", () => {
     expect(
       screen.getByRole("button", { name: /попробовать снова/i }),
     ).toBeInTheDocument();
+  });
+
+  it("hides disabled loyalty progress and uses time-aware greetings", async () => {
+    vi.spyOn(coffeeApi, "getHome").mockResolvedValue({
+      card: { ...card, visits_enabled: false, stamps_enabled: false },
+      active_rewards: [],
+      promotions: [],
+    });
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("284")).toBeInTheDocument();
+    expect(screen.queryByText("До следующей награды")).not.toBeInTheDocument();
+    expect(getTimeGreeting(new Date(2026, 0, 1, 4))).toBe("Доброй ночи");
+    expect(getTimeGreeting(new Date(2026, 0, 1, 5))).toBe("Доброе утро");
+    expect(getTimeGreeting(new Date(2026, 0, 1, 12))).toBe("Добрый день");
+    expect(getTimeGreeting(new Date(2026, 0, 1, 18))).toBe("Добрый вечер");
+    expect(getTimeGreeting(new Date(2026, 0, 1, 23))).toBe("Доброй ночи");
+  });
+
+  it("shows the Telegram avatar in the Mini App header", () => {
+    const { container } = render(
+      <AuthContext.Provider
+        value={{
+          actor: {
+            id: "customer-1",
+            telegram_id: "10001",
+            display_name: "Анна",
+            photo_url: "https://telegram.example/avatar.jpg",
+            role: "customer",
+            available_roles: ["customer"],
+            permissions: [],
+          },
+          activeRole: "customer",
+          availableRoles: ["customer"],
+          loading: false,
+          error: null,
+          isDemo: false,
+          setActiveRole: vi.fn(),
+          retry: vi.fn(),
+          logout: vi.fn().mockResolvedValue(undefined),
+        }}
+      >
+        <MemoryRouter>
+          <Routes>
+            <Route element={<AuthGate />}>
+              <Route index element={<div>Главная</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>,
+    );
+
+    expect(container.querySelector(".topbar .avatar")).toHaveAttribute(
+      "src",
+      "https://telegram.example/avatar.jpg",
+    );
   });
 
   it("requires a reason, previews, and confirms an admin adjustment", async () => {
@@ -808,11 +889,99 @@ describe("critical Mini App flows", () => {
     expect(restore).toHaveBeenCalledWith(archivedPromotion);
   });
 
-  it("persists an explicit visual theme", () => {
-    applyTheme("matcha");
+  it("configures visit and stamp rewards with compact conditional fields", async () => {
+    const user = userEvent.setup();
+    const settings: LoyaltySettings = {
+      points_enabled: true,
+      currency_name: "баллы",
+      rubles_per_point: 10,
+      redemption_rubles_per_point: 1,
+      minimum_purchase_minor: 0,
+      maximum_purchase_minor: 1_000_000,
+      rounding: "floor",
+      max_redemption_percent: 50,
+      minimum_redemption_points: 1,
+      welcome_bonus_points: 0,
+      points_validity_days: null,
+      daily_accrual_limit_points: null,
+      operation_accrual_limit_points: null,
+      large_operation_threshold_minor: null,
+      large_operation_requires_approval: false,
+      visit_enabled: true,
+      visit_goal: 5,
+      visits_must_be_consecutive: true,
+      visit_daily_limit: 1,
+      timezone: "Europe/Moscow",
+      business_day_boundary: "04:00",
+      visit_allowed_misses: 0,
+      visit_reset_on_miss: true,
+      visit_reward_validity_days: 7,
+      visit_restart_cycle: true,
+      visit_reward: { kind: "custom", name: "Напиток за серию" },
+      stamps_enabled: true,
+      stamp_goal: 9,
+      stamps_per_purchase: 1,
+      stamp_operation_limit: 10,
+      stamp_reward_validity_days: 30,
+      reset_stamps_after_reward: true,
+      stamp_reward: { kind: "menu_item", menu_item_id: "item-1" },
+    };
+    vi.spyOn(coffeeApi, "getSettings").mockResolvedValue(settings);
+    vi.spyOn(coffeeApi, "getAdminMenu").mockResolvedValue({
+      categories: [
+        {
+          id: "category-1",
+          name: "Кофе",
+          sort_order: 0,
+          visible: true,
+        },
+      ],
+      items: [
+        {
+          id: "item-1",
+          category_id: "category-1",
+          name: "Капучино",
+          price_minor: 29000,
+          labels: [],
+          available: true,
+          visible: true,
+          sort_order: 0,
+        },
+      ],
+    });
+    const save = vi
+      .spyOn(coffeeApi, "saveSettings")
+      .mockImplementation(async (value) => value);
 
-    expect(document.documentElement.dataset.appTheme).toBe("matcha");
-    expect(readTheme()).toBe("matcha");
+    render(
+      <MemoryRouter>
+        <AdminSettingsPage />
+      </MemoryRouter>,
+    );
+
+    const rewardSelectors =
+      await screen.findAllByLabelText("Что получит клиент");
+    await user.selectOptions(rewardSelectors[0]!, "points");
+    const points = screen.getByLabelText("Сколько баллов");
+    await user.clear(points);
+    await user.type(points, "75");
+    await user.click(
+      screen.getByRole("button", { name: "Сохранить настройки" }),
+    );
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        visit_reward: { kind: "points", points: 75 },
+        stamp_reward: { kind: "menu_item", menu_item_id: "item-1" },
+      }),
+    );
+  });
+
+  it("persists the anime visual theme", () => {
+    applyTheme("anime");
+
+    expect(document.documentElement.dataset.appTheme).toBe("anime");
+    expect(readTheme()).toBe("anime");
     window.localStorage.removeItem("coffie.theme");
   });
 });

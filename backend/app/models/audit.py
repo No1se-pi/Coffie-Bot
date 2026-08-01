@@ -32,6 +32,7 @@ class AuditEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     object_type: Mapped[str | None] = mapped_column(String(80))
     object_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), unique=True)
     event_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     severity: Mapped[AuditSeverity] = mapped_column(
         enum_type(AuditSeverity, name="audit_severity", length=16),

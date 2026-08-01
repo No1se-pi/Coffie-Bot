@@ -2480,9 +2480,9 @@ function PromotionEditor({
         </Field>
         {imageUrl && (
           <img
-            className="avatar avatar--large"
+            className="promotion-cover-preview"
             src={imageUrl}
-            alt="Предпросмотр"
+            alt="Предпросмотр обложки акции"
           />
         )}
         <div className="form-grid">
@@ -2516,7 +2516,12 @@ function PromotionEditor({
 }
 
 export function AdminPromotionsPage() {
-  const resource = useResource(coffeeApi.getAdminPromotions);
+  const [view, setView] = useState<"active" | "archive">("active");
+  const resource = useResource(
+    () =>
+      coffeeApi.getAdminPromotions(view === "archive" ? "archived" : undefined),
+    [view],
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -2555,6 +2560,42 @@ export function AdminPromotionsPage() {
       setBusyId(null);
     }
   };
+  const restore = async (promotion: Promotion) => {
+    setBusyId(promotion.id);
+    setError(null);
+    try {
+      await coffeeApi.restorePromotion(promotion);
+      await resource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить акцию",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const remove = async (promotion: Promotion) => {
+    if (
+      !window.confirm(
+        "Удалить акцию без возможности восстановления? Запись аудита сохранится.",
+      )
+    )
+      return;
+    setBusyId(promotion.id);
+    setError(null);
+    try {
+      await coffeeApi.deletePromotion(promotion);
+      await resource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Не удалось удалить акцию",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
   const sorted = useMemo(() => resource.data?.items ?? [], [resource.data]);
   return (
     <Page
@@ -2572,15 +2613,41 @@ export function AdminPromotionsPage() {
           Акции
         </Link>
       </div>
-      <Button
-        onClick={() => {
-          setEditing(null);
-          setEditorOpen(true);
-        }}
-      >
-        Создать акцию
-      </Button>
-      {editorOpen && (
+      <Panel>
+        <div className="chip-row">
+          <button
+            className={`chip ${view === "active" ? "is-active" : ""}`}
+            onClick={() => {
+              setView("active");
+              setEditorOpen(false);
+              setEditing(null);
+            }}
+          >
+            Текущие
+          </button>
+          <button
+            className={`chip ${view === "archive" ? "is-active" : ""}`}
+            onClick={() => {
+              setView("archive");
+              setEditorOpen(false);
+              setEditing(null);
+            }}
+          >
+            Архив
+          </button>
+        </div>
+      </Panel>
+      {view === "active" && (
+        <Button
+          onClick={() => {
+            setEditing(null);
+            setEditorOpen(true);
+          }}
+        >
+          Создать акцию
+        </Button>
+      )}
+      {view === "active" && editorOpen && (
         <PromotionEditor
           key={editing?.id ?? "new-promotion"}
           promotion={editing}
@@ -2626,32 +2693,53 @@ export function AdminPromotionsPage() {
                     <small>До {formatDateTime(promotion.ends_at)}</small>
                   )}
                 </div>
-                {promotion.status !== "published" && (
-                  <Button
-                    onClick={() => void publish(promotion.id)}
-                    disabled={busyId === promotion.id}
-                  >
-                    {busyId === promotion.id ? "Публикуем…" : "Опубликовать"}
-                  </Button>
-                )}
-                {promotion.status !== "archived" && (
+                {promotion.status === "archived" ? (
                   <div className="action-row">
                     <Button
                       variant="secondary"
-                      onClick={() => {
-                        setEditing(promotion);
-                        setEditorOpen(true);
-                      }}
+                      onClick={() => void restore(promotion)}
+                      disabled={busyId === promotion.id}
                     >
-                      Изменить
+                      Восстановить
                     </Button>
                     <Button
                       variant="ghost"
-                      onClick={() => void archive(promotion)}
+                      onClick={() => void remove(promotion)}
                       disabled={busyId === promotion.id}
                     >
-                      В архив
+                      Удалить навсегда
                     </Button>
+                  </div>
+                ) : (
+                  <div className="promotion-admin-card__actions">
+                    {promotion.status !== "published" && (
+                      <Button
+                        onClick={() => void publish(promotion.id)}
+                        disabled={busyId === promotion.id}
+                      >
+                        {busyId === promotion.id
+                          ? "Публикуем…"
+                          : "Опубликовать"}
+                      </Button>
+                    )}
+                    <div className="action-row">
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setEditing(promotion);
+                          setEditorOpen(true);
+                        }}
+                      >
+                        Изменить
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => void archive(promotion)}
+                        disabled={busyId === promotion.id}
+                      >
+                        В архив
+                      </Button>
+                    </div>
                   </div>
                 )}
               </Panel>
@@ -2659,8 +2747,12 @@ export function AdminPromotionsPage() {
           </div>
         ) : (
           <EmptyState
-            title="Акций пока нет"
-            text="Создайте первую акцию и опубликуйте её после проверки."
+            title={view === "archive" ? "Архив пуст" : "Акций пока нет"}
+            text={
+              view === "archive"
+                ? "Архивированные акции появятся здесь."
+                : "Создайте первую акцию и опубликуйте её после проверки."
+            }
           />
         ))}
     </Page>

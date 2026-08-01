@@ -769,7 +769,7 @@ a:focus-visible {
 .promo-card {
   overflow: hidden;
   min-height: 155px;
-  padding: 1rem;
+  padding: 0;
   scroll-snap-align: start;
   border-radius: var(--radius-md);
   background: linear-gradient(
@@ -780,11 +780,14 @@ a:focus-visible {
   border: 1px solid var(--color-border);
 }
 .promo-card > img {
-  width: calc(100% + 2rem);
+  width: 100%;
+  max-width: none;
   aspect-ratio: 16 / 9;
-  margin: -1rem -1rem 0.85rem;
   display: block;
   object-fit: cover;
+}
+.promo-card__body {
+  padding: 1rem;
 }
 .promo-card h3 {
   margin-top: 1rem;
@@ -1024,6 +1027,17 @@ a:focus-visible {
   color: var(--color-primary);
   font-size: 1.5rem;
 }
+.reward-card__details {
+  min-width: 0;
+}
+.reward-card__redemption {
+  grid-column: 1 / -1;
+  min-width: 0;
+  text-align: center;
+}
+.reward-card__redemption .qr-frame {
+  margin-inline: auto;
+}
 .reward-card h2 {
   margin-top: 0.65rem;
 }
@@ -1071,6 +1085,17 @@ a:focus-visible {
 .menu-card__body {
   min-width: 0;
   padding: 0.85rem;
+}
+.menu-card__points-button {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  margin-top: 0.65rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  white-space: normal;
 }
 .menu-card__title {
   display: flex;
@@ -1883,7 +1908,8 @@ details p {
 }
 .promotion-admin-card {
   display: flex;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
 }
@@ -1898,6 +1924,22 @@ details p {
 .promotion-admin-card__body {
   min-width: 0;
   flex: 1 1 auto;
+}
+.promotion-admin-card__actions {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.promotion-admin-card > .action-row {
+  flex: 1 1 100%;
+}
+.promotion-cover-preview {
+  display: block;
+  width: min(100%, 420px);
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  object-fit: cover;
 }
 .promotion-admin-card h2 {
   margin-top: 0.65rem;

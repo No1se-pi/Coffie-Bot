@@ -217,7 +217,7 @@ def render_notification(
         if webapp_url
         else None,
         button_url=post_purchase_url or webapp_url,
-        open_as_web_app=bool(post_purchase_url),
+        open_as_web_app=bool(webapp_url),
     )
 
 

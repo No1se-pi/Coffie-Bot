@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.enums import ChatType
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonWebApp,
     Message,
     WebAppInfo,
 )
@@ -52,6 +55,7 @@ class BotCommandService:
             text=(
                 "Доступные команды:\n"
                 "/start — зарегистрироваться или открыть карту\n"
+                "/menu — открыть меню приложения\n"
                 "/contact — посмотреть контакты организации\n"
                 "/help — показать эту справку"
             ),
@@ -64,6 +68,12 @@ class BotCommandService:
             show_mini_app=True,
         )
 
+    def menu(self) -> CommandReply:
+        return CommandReply(
+            text="Выберите нужный раздел приложения.",
+            show_mini_app=True,
+        )
+
 
 def build_dispatcher(
     command_service: BotCommandService,
@@ -71,6 +81,7 @@ def build_dispatcher(
     webapp_url: str | None,
 ) -> Dispatcher:
     router = Router(name="entry_commands")
+    router.message.filter(F.chat.type == ChatType.PRIVATE)
 
     @router.message(CommandStart())
     async def start_handler(message: Message) -> None:
@@ -102,6 +113,10 @@ def build_dispatcher(
     async def contact_handler(message: Message) -> None:
         await _answer(message, command_service.contact(), webapp_url=webapp_url)
 
+    @router.message(Command("menu"))
+    async def menu_handler(message: Message) -> None:
+        await _answer(message, command_service.menu(), webapp_url=webapp_url)
+
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     return dispatcher
@@ -126,10 +141,18 @@ async def run_bot(settings: Settings) -> None:
         await bot.set_my_commands(
             [
                 BotCommand(command="start", description="Открыть карту лояльности"),
+                BotCommand(command="menu", description="Меню приложения"),
                 BotCommand(command="contact", description="Контакты организации"),
                 BotCommand(command="help", description="Справка"),
             ]
         )
+        if settings.telegram_webapp_url:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="Открыть приложение",
+                    web_app=WebAppInfo(url=settings.telegram_webapp_url),
+                )
+            )
         await bot.delete_webhook(drop_pending_updates=False)
         logger.info("bot_started")
         await dispatcher.start_polling(
@@ -163,17 +186,36 @@ async def _answer(
 ) -> None:
     markup = None
     if reply.show_mini_app and webapp_url:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="Открыть приложение",
-                        web_app=WebAppInfo(url=webapp_url),
-                    )
-                ]
-            ]
-        )
+        markup = build_mini_app_keyboard(webapp_url)
     await message.answer(reply.text, reply_markup=markup)
+
+
+def build_mini_app_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
+    """Build navigation where every link opens inside Telegram Mini Apps."""
+
+    items = (
+        (("🏠 Главная", "/"), ("💳 Моя карта", "/card")),
+        (("☕ Меню", "/menu"), ("🎁 Награды", "/rewards")),
+        (("🧾 История", "/history"), ("ℹ️ Контакты", "/more")),
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=label,
+                    web_app=WebAppInfo(url=_mini_app_url(webapp_url, path)),
+                )
+                for label, path in row
+            ]
+            for row in items
+        ]
+    )
+
+
+def _mini_app_url(base_url: str, path: str) -> str:
+    base = urlsplit(base_url)
+    joined_path = f"{base.path.rstrip('/')}{path}" or "/"
+    return urlunsplit((base.scheme, base.netloc, joined_path, "", ""))
 
 
 def main() -> int:

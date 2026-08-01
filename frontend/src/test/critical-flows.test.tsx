@@ -14,7 +14,7 @@ import type {
   PurchasePreview,
   StaffClient,
 } from "../api/types";
-import { CardPage, HomePage, MenuPage } from "../pages/customer";
+import { CardPage, HomePage, MenuPage, RewardsPage } from "../pages/customer";
 import {
   AccrualPanel,
   QuickOperationsPanel,
@@ -215,15 +215,46 @@ describe("critical Mini App flows", () => {
       </MemoryRouter>,
     );
 
-    await user.click(
-      await screen.findByRole("button", { name: "Купить за 80 баллов" }),
-    );
+    const pointsButton = await screen.findByRole("button", {
+      name: "Купить за 80 баллов",
+    });
+    expect(pointsButton).toHaveClass("menu-card__points-button");
+    await user.click(pointsButton);
     expect(screen.getByText("Подтвердите покупку")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Списать баллы" }));
 
     expect(await screen.findByText("Награда готова")).toBeInTheDocument();
     expect(screen.getByText(/204/)).toBeInTheDocument();
     expect(purchase).toHaveBeenCalledWith("item-1", expect.any(String));
+  });
+
+  it("centers an active reward QR in a full-width redemption row", async () => {
+    vi.spyOn(coffeeApi, "getRewards").mockResolvedValue({
+      items: [
+        {
+          id: "reward-1",
+          title: "Латте",
+          description: "Награда: латте",
+          type: "free_product",
+          status: "active",
+          created_at: "2026-07-21T10:00:00Z",
+          qr_payload: "coffee-reward:v1:opaque-token",
+        },
+      ],
+      page: 1,
+      page_size: 20,
+      total: 1,
+    });
+
+    render(
+      <MemoryRouter>
+        <RewardsPage />
+      </MemoryRouter>,
+    );
+
+    const redemption = await screen.findByTestId("reward-card-redemption");
+    expect(redemption).toHaveClass("reward-card__redemption");
+    expect(screen.getByTitle("QR-код награды Латте")).toBeInTheDocument();
   });
 
   it("keeps manual visits and stamps out of secondary actions", () => {
@@ -657,6 +688,7 @@ describe("critical Mini App flows", () => {
       text: "Попробуйте новинку",
       button_label: "Старая кнопка",
       button_url: "https://example.com/old",
+      image_url: "/api/v1/media/promotion-cover",
       status: "draft" as const,
     };
     vi.spyOn(coffeeApi, "getAdminPromotions").mockResolvedValue({
@@ -677,6 +709,9 @@ describe("critical Mini App flows", () => {
 
     expect(await screen.findByText("Летний напиток")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Изменить" }));
+    expect(
+      screen.getByRole("img", { name: "Предпросмотр обложки акции" }),
+    ).toHaveClass("promotion-cover-preview");
     expect(screen.queryByLabelText("Ссылка акции")).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText("Надпись на кнопке"),
@@ -692,6 +727,85 @@ describe("critical Mini App flows", () => {
       starts_at: null,
       ends_at: null,
     });
+  });
+
+  it("shows the promotion archive and permanently deletes with confirmation", async () => {
+    const user = userEvent.setup();
+    const archivedPromotion = {
+      id: "promotion-archived",
+      title: "Прошлая акция",
+      text: "Уже завершилась",
+      status: "archived" as const,
+    };
+    const getPromotions = vi
+      .spyOn(coffeeApi, "getAdminPromotions")
+      .mockImplementation(async (status) => ({
+        items: status === "archived" ? [archivedPromotion] : [],
+        page: 1,
+        page_size: 50,
+        total: status === "archived" ? 1 : 0,
+      }));
+    const remove = vi
+      .spyOn(coffeeApi, "deletePromotion")
+      .mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <MemoryRouter>
+        <AdminPromotionsPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Архив" }));
+    expect(await screen.findByText("Прошлая акция")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Удалить навсегда" }));
+
+    expect(remove).toHaveBeenCalledWith(archivedPromotion);
+    expect(getPromotions).toHaveBeenCalledWith("archived");
+  });
+
+  it("moves promotions into the archive and restores them as drafts", async () => {
+    const user = userEvent.setup();
+    const currentPromotion = {
+      id: "promotion-current",
+      title: "Текущая акция",
+      text: "Ещё действует",
+      status: "published" as const,
+    };
+    const archivedPromotion = {
+      ...currentPromotion,
+      status: "archived" as const,
+    };
+    const archive = vi
+      .spyOn(coffeeApi, "archivePromotion")
+      .mockResolvedValue(archivedPromotion);
+    const restore = vi
+      .spyOn(coffeeApi, "restorePromotion")
+      .mockResolvedValue({ ...currentPromotion, status: "draft" });
+    vi.spyOn(coffeeApi, "getAdminPromotions").mockImplementation(
+      async (status) => ({
+        items: status === "archived" ? [archivedPromotion] : [currentPromotion],
+        page: 1,
+        page_size: 50,
+        total: 1,
+      }),
+    );
+
+    render(
+      <MemoryRouter>
+        <AdminPromotionsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Текущая акция")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "В архив" }));
+    expect(archive).toHaveBeenCalledWith(currentPromotion);
+
+    await user.click(screen.getByRole("button", { name: "Архив" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Восстановить" }),
+    );
+    expect(restore).toHaveBeenCalledWith(archivedPromotion);
   });
 
   it("persists an explicit visual theme", () => {

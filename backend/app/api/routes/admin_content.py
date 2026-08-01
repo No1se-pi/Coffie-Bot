@@ -321,6 +321,34 @@ async def archive_promotion(
     return promotion_response(item)
 
 
+@router.post("/promotions/{promotion_id}/restore", response_model=PromotionResponse)
+async def restore_promotion(
+    promotion_id: UUID,
+    request: Request,
+    actor: ContentActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> PromotionResponse:
+    item = await _service(session).restore_promotion(
+        actor=actor, promotion_id=promotion_id, metadata=_metadata(request)
+    )
+    return promotion_response(item)
+
+
+@router.delete("/promotions/{promotion_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_promotion(
+    promotion_id: UUID,
+    request: Request,
+    actor: ContentActor,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> Response:
+    await _service(session).delete_promotion(
+        actor=actor,
+        promotion_id=promotion_id,
+        metadata=_metadata(request),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/feedback", response_model=FeedbackListResponse)
 async def list_feedback(
     _actor: FeedbackActor,

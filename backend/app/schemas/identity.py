@@ -307,6 +307,7 @@ def _operation_description(operation_type: LoyaltyOperationType) -> str:
     descriptions = {
         LoyaltyOperationType.PURCHASE_ACCRUAL: "Начисление за покупку",
         LoyaltyOperationType.POINTS_REDEMPTION: "Списание баллов",
+        LoyaltyOperationType.POINTS_PRODUCT_PURCHASE: "Покупка за баллы",
         LoyaltyOperationType.WELCOME_BONUS: "Приветственный бонус",
         LoyaltyOperationType.ADMIN_ADJUSTMENT: "Корректировка баланса",
         LoyaltyOperationType.OPERATION_REVERSAL: "Отмена операции",

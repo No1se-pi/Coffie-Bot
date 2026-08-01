@@ -208,7 +208,11 @@ class AdminRepository:
         page: int,
         page_size: int,
     ) -> PromotionPage:
-        filters = [] if promotion_status is None else [Promotion.status == promotion_status]
+        filters = (
+            [Promotion.status != PromotionStatus.ARCHIVED]
+            if promotion_status is None
+            else [Promotion.status == promotion_status]
+        )
         total = int(
             await self._session.scalar(select(func.count()).select_from(Promotion).where(*filters))
             or 0
@@ -237,6 +241,9 @@ class AdminRepository:
             statement = statement.with_for_update()
         value: Promotion | None = await self._session.scalar(statement)
         return value
+
+    async def delete_promotion(self, promotion: Promotion) -> None:
+        await self._session.delete(promotion)
 
     async def list_feedback(
         self,

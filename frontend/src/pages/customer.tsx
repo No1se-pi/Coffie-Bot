@@ -84,9 +84,11 @@ export function HomePage() {
                     {promotion.image_url && (
                       <img src={promotion.image_url} alt="" />
                     )}
-                    <Badge tone="accent">Акция</Badge>
-                    <h3>{promotion.title}</h3>
-                    <p>{promotion.text}</p>
+                    <div className="promo-card__body">
+                      <Badge tone="accent">Акция</Badge>
+                      <h3>{promotion.title}</h3>
+                      <p>{promotion.text}</p>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -303,7 +305,7 @@ export function RewardsPage() {
                 <div className="reward-card__icon" aria-hidden="true">
                   ◇
                 </div>
-                <div>
+                <div className="reward-card__details">
                   <Badge
                     tone={reward.status === "active" ? "success" : "neutral"}
                   >
@@ -315,26 +317,27 @@ export function RewardsPage() {
                   </Badge>
                   <h2>{reward.title}</h2>
                   <p>{reward.description}</p>
-                  {reward.status === "active" && (
-                    <>
-                      {reward.qr_payload && (
-                        <div className="qr-frame">
-                          <QRCodeSVG
-                            value={reward.qr_payload}
-                            size={180}
-                            level="M"
-                            marginSize={2}
-                            title={`QR-код награды ${reward.title}`}
-                          />
-                        </div>
-                      )}
-                      <small>
-                        Покажите QR бариста. Награда погашается только после
-                        вашего подтверждения.
-                      </small>
-                    </>
-                  )}
                 </div>
+                {reward.status === "active" && reward.qr_payload && (
+                  <div
+                    className="reward-card__redemption"
+                    data-testid="reward-card-redemption"
+                  >
+                    <div className="qr-frame">
+                      <QRCodeSVG
+                        value={reward.qr_payload}
+                        size={180}
+                        level="M"
+                        marginSize={2}
+                        title={`QR-код награды ${reward.title}`}
+                      />
+                    </div>
+                    <small>
+                      Покажите QR бариста. Награда погашается только после
+                      вашего подтверждения.
+                    </small>
+                  </div>
+                )}
               </Panel>
             ))}
           </div>
@@ -498,6 +501,7 @@ export function MenuPage() {
                     </div>
                     {item.points_price && (
                       <Button
+                        className="menu-card__points-button"
                         variant="secondary"
                         onClick={() => {
                           setPurchaseError(null);

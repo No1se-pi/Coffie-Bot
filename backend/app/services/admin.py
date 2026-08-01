@@ -563,7 +563,9 @@ class AdminService:
         promotion_id: UUID,
         updates: Mapping[str, Any],
         metadata: RequestMetadata = EMPTY_METADATA,
+        now: datetime | None = None,
     ) -> Promotion:
+        current_time = _aware_now(now)
         allowed = {
             "title",
             "body",
@@ -587,6 +589,8 @@ class AdminService:
                 await self._require_media(updates["image_media_id"])
             for key, value in updates.items():
                 setattr(promotion, key, value)
+            # Keep server-on-update fields loaded for async response serialization.
+            promotion.updated_at = current_time
             self._audit(
                 actor=actor,
                 event_type="promotion.updated",
@@ -618,6 +622,7 @@ class AdminService:
                 _conflict("promotion_window_elapsed", "Promotion end time is in the past")
             promotion.status = PromotionStatus.PUBLISHED
             promotion.published_at = current_time
+            promotion.updated_at = current_time
             self._audit(
                 actor=actor,
                 event_type="promotion.published",
@@ -638,12 +643,15 @@ class AdminService:
         actor: Actor,
         promotion_id: UUID,
         metadata: RequestMetadata = EMPTY_METADATA,
+        now: datetime | None = None,
     ) -> Promotion:
+        current_time = _aware_now(now)
         async with self._repository.transaction():
             promotion = await self._repository.get_promotion(promotion_id, for_update=True)
             if promotion is None:
                 _not_found("Promotion was not found")
             promotion.status = PromotionStatus.ARCHIVED
+            promotion.updated_at = current_time
             self._audit(
                 actor=actor,
                 event_type="promotion.archived",
@@ -654,6 +662,63 @@ class AdminService:
             )
             await self._repository.flush()
             return promotion
+
+    async def restore_promotion(
+        self,
+        *,
+        actor: Actor,
+        promotion_id: UUID,
+        metadata: RequestMetadata = EMPTY_METADATA,
+        now: datetime | None = None,
+    ) -> Promotion:
+        current_time = _aware_now(now)
+        async with self._repository.transaction():
+            promotion = await self._repository.get_promotion(promotion_id, for_update=True)
+            if promotion is None:
+                _not_found("Promotion was not found")
+            if promotion.status is not PromotionStatus.ARCHIVED:
+                _conflict("promotion_not_archived", "Promotion is not archived")
+            promotion.status = PromotionStatus.DRAFT
+            promotion.published_at = None
+            promotion.updated_at = current_time
+            self._audit(
+                actor=actor,
+                event_type="promotion.restored",
+                object_type="promotion",
+                object_id=promotion.id,
+                event_metadata={"title": promotion.title},
+                metadata=metadata,
+            )
+            await self._repository.flush()
+            return promotion
+
+    async def delete_promotion(
+        self,
+        *,
+        actor: Actor,
+        promotion_id: UUID,
+        metadata: RequestMetadata = EMPTY_METADATA,
+    ) -> None:
+        async with self._repository.transaction():
+            promotion = await self._repository.get_promotion(promotion_id, for_update=True)
+            if promotion is None:
+                _not_found("Promotion was not found")
+            if promotion.status is not PromotionStatus.ARCHIVED:
+                _conflict(
+                    "promotion_not_archived",
+                    "Promotion must be archived before permanent deletion",
+                )
+            self._audit(
+                actor=actor,
+                event_type="promotion.deleted",
+                object_type="promotion",
+                object_id=promotion.id,
+                event_metadata={"title": promotion.title},
+                severity=AuditSeverity.WARNING,
+                metadata=metadata,
+            )
+            await self._repository.delete_promotion(promotion)
+            await self._repository.flush()
 
     async def list_feedback(
         self,

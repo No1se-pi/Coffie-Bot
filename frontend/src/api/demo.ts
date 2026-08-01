@@ -87,6 +87,7 @@ let rewards: Reward[] = [
     status: "active",
     expires_at: new Date(Date.now() + 5 * 86_400_000).toISOString(),
     created_at: new Date(Date.now() - 86_400_000).toISOString(),
+    qr_payload: "coffee-reward:v1:demo-reward-token",
   },
   {
     id: "reward-2",
@@ -147,6 +148,7 @@ let menuItems: MenuItem[] = [
     name: "Флэт уайт",
     description: "Двойной эспрессо и шелковистое молоко",
     price_minor: 29000,
+    points_price: 130,
     volume: "250 мл",
     labels: ["хит"],
     available: true,
@@ -1022,9 +1024,13 @@ export const demoApi = {
       : [...menuItems, updated];
     return { ...updated };
   },
-  async getAdminPromotions() {
+  async getAdminPromotions(status?: Promotion["status"]) {
     await wait();
-    return list([...promotions]);
+    return list(
+      promotions.filter((promotion) =>
+        status ? promotion.status === status : promotion.status !== "archived",
+      ),
+    );
   },
   async publishPromotion(promotion: Promotion) {
     await wait();
@@ -1057,6 +1063,30 @@ export const demoApi = {
       candidate.id === promotion.id ? updated : candidate,
     );
     return updated;
+  },
+  async restorePromotion(promotion: Promotion) {
+    await wait();
+    const updated: Promotion = {
+      ...promotion,
+      status: "draft",
+      published_at: null,
+      updated_at: now(),
+    };
+    promotions = promotions.map((candidate) =>
+      candidate.id === promotion.id ? updated : candidate,
+    );
+    return updated;
+  },
+  async deletePromotion(promotion: Promotion) {
+    await wait();
+    if (promotion.status !== "archived")
+      throw new ApiError("Сначала перенесите акцию в архив", {
+        status: 409,
+        code: "promotion_not_archived",
+      });
+    promotions = promotions.filter(
+      (candidate) => candidate.id !== promotion.id,
+    );
   },
   async confirmAdjustment(payload: {
     user_id: string;

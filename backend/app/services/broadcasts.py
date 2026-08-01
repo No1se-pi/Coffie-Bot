@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from app.models.enums import UserStatus
@@ -70,11 +71,13 @@ class BroadcastService:
         sender: MessageSender,
         retry_policy: RetryPolicy,
         media_root: Path,
+        webapp_url: str | None = None,
     ) -> None:
         self._repository = repository
         self._sender = sender
         self._retry_policy = retry_policy
         self._media_root = media_root
+        self._webapp_url = webapp_url
 
     async def process_batch(
         self,
@@ -111,6 +114,10 @@ class BroadcastService:
                         button_label=job.button_label,
                         button_url=job.button_url,
                         image_path=self._safe_media_path(job.image_storage_key),
+                        open_as_web_app=_belongs_to_web_app(
+                            job.button_url,
+                            self._webapp_url,
+                        ),
                     ),
                 )
             except DeliveryError as exc:
@@ -168,3 +175,14 @@ class BroadcastService:
         if not candidate.is_relative_to(root) or not candidate.is_file():
             return None
         return candidate
+
+
+def _belongs_to_web_app(button_url: str | None, webapp_url: str | None) -> bool:
+    if not button_url or not webapp_url:
+        return False
+    button = urlsplit(button_url)
+    base = urlsplit(webapp_url)
+    if (button.scheme, button.netloc) != (base.scheme, base.netloc):
+        return False
+    base_path = base.path.rstrip("/")
+    return not base_path or button.path == base_path or button.path.startswith(f"{base_path}/")

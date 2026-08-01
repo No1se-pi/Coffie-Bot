@@ -17,11 +17,12 @@ from app.api.routes import admin_content, admin_staff, media, staff_profile
 from app.core.errors import AppError
 from app.models.access import StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
-from app.models.content import MenuItem
+from app.models.content import MenuItem, Promotion
 from app.models.enums import (
     FeedbackCategory,
     FeedbackStatus,
     PermissionCode,
+    PromotionStatus,
     Role,
     RoundingMode,
 )
@@ -50,6 +51,8 @@ class RecordingAdminRepository:
         self.added: list[object] = []
         self.feedback_record: FeedbackRecord | None = None
         self.deleted_feedback: list[FeedbackItem] = []
+        self.promotion: Promotion | None = None
+        self.deleted_promotions: list[Promotion] = []
         self.staff_user: User | None = None
         self.existing_staff: StaffMember | None = None
         self.permission_overrides: dict[PermissionCode, bool] | None = None
@@ -96,6 +99,18 @@ class RecordingAdminRepository:
 
     async def delete_feedback(self, feedback: FeedbackItem) -> None:
         self.deleted_feedback.append(feedback)
+
+    async def get_promotion(
+        self,
+        _promotion_id: object,
+        *,
+        for_update: bool,
+    ) -> Promotion | None:
+        assert for_update is True
+        return self.promotion
+
+    async def delete_promotion(self, promotion: Promotion) -> None:
+        self.deleted_promotions.append(promotion)
 
     async def get_user_for_staff_creation(self, _user_id: object) -> User | None:
         return self.staff_user
@@ -160,6 +175,8 @@ def test_admin_routes_import_and_publish_expected_paths() -> None:
     paths = app.openapi()["paths"]
     assert "/api/v1/admin/loyalty-settings" in paths
     assert "delete" in paths["/api/v1/admin/feedback/{feedback_id}"]
+    assert "delete" in paths["/api/v1/admin/promotions/{promotion_id}"]
+    assert "/api/v1/admin/promotions/{promotion_id}/restore" in paths
     assert "delete" in paths["/api/v1/admin/staff/{staff_id}"]
     assert "/api/v1/admin/staff/invites" in paths
     assert "/api/v1/staff/me/tip-profile" in paths
@@ -332,6 +349,91 @@ async def test_feedback_must_be_archived_before_deletion_and_keeps_audit() -> No
     audit = next(item for item in repository.added if isinstance(item, AuditEvent))
     assert audit.event_type == "feedback.deleted"
     assert audit.object_id == feedback.id
+
+
+@pytest.mark.asyncio
+async def test_promotion_publish_keeps_timestamp_loaded_for_response() -> None:
+    repository = RecordingAdminRepository()
+    promotion = Promotion(
+        id=uuid4(),
+        title="Летний напиток",
+        body="Попробуйте новинку",
+        status=PromotionStatus.DRAFT,
+        created_by_staff_id=uuid4(),
+    )
+    repository.promotion = promotion
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    published = await service.publish_promotion(
+        actor=_actor(),
+        promotion_id=promotion.id,
+        now=NOW,
+    )
+
+    assert published.status is PromotionStatus.PUBLISHED
+    assert published.published_at == NOW
+    assert published.updated_at == NOW
+
+
+@pytest.mark.asyncio
+async def test_archived_promotion_can_be_restored_as_a_draft() -> None:
+    repository = RecordingAdminRepository()
+    promotion = Promotion(
+        id=uuid4(),
+        title="Летний напиток",
+        body="Попробуйте новинку",
+        status=PromotionStatus.ARCHIVED,
+        published_at=NOW,
+        created_by_staff_id=uuid4(),
+    )
+    repository.promotion = promotion
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    restored = await service.restore_promotion(
+        actor=_actor(),
+        promotion_id=promotion.id,
+        now=NOW,
+    )
+
+    assert restored.status is PromotionStatus.DRAFT
+    assert restored.published_at is None
+    assert restored.updated_at == NOW
+    audit = next(
+        item
+        for item in repository.added
+        if isinstance(item, AuditEvent) and item.event_type == "promotion.restored"
+    )
+    assert audit.object_id == promotion.id
+
+
+@pytest.mark.asyncio
+async def test_promotion_must_be_archived_before_deletion_and_keeps_audit() -> None:
+    repository = RecordingAdminRepository()
+    promotion = Promotion(
+        id=uuid4(),
+        title="Летний напиток",
+        body="Попробуйте новинку",
+        status=PromotionStatus.DRAFT,
+        created_by_staff_id=uuid4(),
+    )
+    repository.promotion = promotion
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    with pytest.raises(AppError) as conflict:
+        await service.delete_promotion(actor=_actor(), promotion_id=promotion.id)
+    assert conflict.value.status_code == 409
+    assert repository.deleted_promotions == []
+
+    promotion.status = PromotionStatus.ARCHIVED
+    await service.delete_promotion(actor=_actor(), promotion_id=promotion.id)
+
+    assert repository.deleted_promotions == [promotion]
+    audit = next(
+        item
+        for item in repository.added
+        if isinstance(item, AuditEvent) and item.event_type == "promotion.deleted"
+    )
+    assert audit.object_id == promotion.id
 
 
 @pytest.mark.asyncio

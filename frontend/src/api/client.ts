@@ -913,10 +913,14 @@ export const coffeeApi = {
             body: jsonBody(payload),
           },
         ),
-  getAdminPromotions: (): Promise<ListResponse<Promotion>> =>
+  getAdminPromotions: (
+    status?: Promotion["status"],
+  ): Promise<ListResponse<Promotion>> =>
     isDemoMode
-      ? demoApi.getAdminPromotions()
-      : request("/admin/promotions?page=1&page_size=50"),
+      ? demoApi.getAdminPromotions(status)
+      : request(
+          `/admin/promotions${queryString({ status, page: 1, page_size: 50 })}`,
+        ),
   publishPromotion: (promotion: Promotion): Promise<Promotion> =>
     isDemoMode
       ? demoApi.publishPromotion(promotion)
@@ -951,6 +955,19 @@ export const coffeeApi = {
           `/admin/promotions/${encodeURIComponent(promotion.id)}/archive`,
           { method: "POST" },
         ),
+  restorePromotion: (promotion: Promotion): Promise<Promotion> =>
+    isDemoMode
+      ? demoApi.restorePromotion(promotion)
+      : request(
+          `/admin/promotions/${encodeURIComponent(promotion.id)}/restore`,
+          { method: "POST" },
+        ),
+  deletePromotion: (promotion: Promotion): Promise<void> =>
+    isDemoMode
+      ? demoApi.deletePromotion(promotion)
+      : request(`/admin/promotions/${encodeURIComponent(promotion.id)}`, {
+          method: "DELETE",
+        }),
   previewAdjustment(
     user: AdminUser,
     deltaPoints: number,

@@ -16,6 +16,7 @@ from app.services.notifications import (
     RetryPolicy,
     render_notification,
 )
+from app.worker.main import _keyboard
 
 NOW = datetime(2026, 7, 21, 12, tzinfo=UTC)
 LEASE = NOW + timedelta(minutes=1)
@@ -210,6 +211,28 @@ async def test_purchase_notification_opens_post_purchase_web_app() -> None:
     assert message.open_as_web_app is True
 
 
+async def test_generic_notification_opens_the_main_mini_app() -> None:
+    job = NotificationJob(
+        id=uuid4(),
+        telegram_id=101,
+        event_type="promotion.published",
+        payload={},
+        attempts=1,
+        lease_until=LEASE,
+    )
+
+    message = render_notification(job, webapp_url="https://coffee.example/")
+
+    assert message.button_label == "Открыть приложение"
+    assert message.button_url == "https://coffee.example/"
+    assert message.open_as_web_app is True
+
+    button = _keyboard(message).inline_keyboard[0][0]
+    assert button.web_app is not None
+    assert button.web_app.url == "https://coffee.example/"
+    assert button.url is None
+
+
 async def test_broadcast_isolates_failures_and_skips_inactive_users(tmp_path: Path) -> None:
     broadcast_id = uuid4()
     failed = _broadcast_job(broadcast_id, telegram_id=101)
@@ -244,6 +267,37 @@ async def test_broadcast_isolates_failures_and_skips_inactive_users(tmp_path: Pa
     assert repository.finalized == [{broadcast_id}]
 
 
+async def test_broadcast_uses_web_app_only_for_its_configured_app_origin(tmp_path: Path) -> None:
+    broadcast_id = uuid4()
+    internal = _broadcast_job(
+        broadcast_id,
+        telegram_id=101,
+        button_url="https://coffee.example/rewards",
+    )
+    external = _broadcast_job(
+        broadcast_id,
+        telegram_id=202,
+        button_url="https://example.org/news",
+    )
+    sender = FakeSender()
+    service = BroadcastService(
+        repository=FakeBroadcastRepository([internal, external]),
+        sender=sender,
+        retry_policy=RetryPolicy(max_attempts=3),
+        media_root=tmp_path,
+        webapp_url="https://coffee.example/",
+    )
+
+    await service.process_batch(
+        limit=10,
+        lease_for=timedelta(minutes=1),
+        now=NOW,
+    )
+
+    assert sender.calls[0][1].open_as_web_app is True
+    assert sender.calls[1][1].open_as_web_app is False
+
+
 def _notification_job(*, telegram_id: int, attempts: int = 1) -> NotificationJob:
     return NotificationJob(
         id=uuid4(),
@@ -260,6 +314,7 @@ def _broadcast_job(
     *,
     telegram_id: int,
     user_status: UserStatus = UserStatus.ACTIVE,
+    button_url: str | None = None,
 ) -> BroadcastJob:
     return BroadcastJob(
         id=uuid4(),
@@ -267,8 +322,8 @@ def _broadcast_job(
         telegram_id=telegram_id,
         user_status=user_status,
         message="Нейтральное сообщение",
-        button_label=None,
-        button_url=None,
+        button_label="Открыть" if button_url else None,
+        button_url=button_url,
         image_storage_key=None,
         attempts=1,
         lease_until=LEASE,

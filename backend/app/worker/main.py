@@ -155,6 +155,7 @@ async def run_worker(
                         sender=resolved_sender,
                         retry_policy=retry_policy,
                         media_root=settings.media_root,
+                        webapp_url=settings.telegram_webapp_url,
                     )
                     broadcast_result = await broadcasts.process_batch(
                         limit=resolved_options.batch_size,

@@ -10,8 +10,17 @@ class Role(StrEnum):
     OWNER = "owner"
 
 
+class IdentityProvider(StrEnum):
+    """Authentication/contact namespaces attached to a customer profile."""
+
+    TELEGRAM = "telegram"
+    PHONE = "phone"
+    MAX = "max"
+
+
 class PermissionCode(StrEnum):
     CARD_LOOKUP = "card.lookup"
+    CUSTOMERS_CREATE = "customers.create"
     POINTS_ACCRUE = "points.accrue"
     POINTS_REDEEM = "points.redeem"
     VISITS_MARK = "visits.mark"
@@ -37,6 +46,7 @@ class UserStatus(StrEnum):
     BLOCKED = "blocked"
     INACTIVE = "inactive"
     ANONYMIZED = "anonymized"
+    MERGED = "merged"
 
 
 class CardStatus(StrEnum):
@@ -65,6 +75,8 @@ class LoyaltyOperationType(StrEnum):
     REWARD_CREATED = "reward_created"
     REWARD_REDEEMED = "reward_redeemed"
     REWARD_CANCELLED = "reward_cancelled"
+    ACCOUNT_MERGE_DEBIT = "account_merge_debit"
+    ACCOUNT_MERGE_CREDIT = "account_merge_credit"
 
 
 class RoundingMode(StrEnum):

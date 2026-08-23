@@ -24,7 +24,7 @@ from app.models.media import MediaFile
 @dataclass(frozen=True, slots=True)
 class NotificationJob:
     id: UUID
-    telegram_id: int
+    telegram_id: int | None
     event_type: str
     payload: dict[str, Any]
     attempts: int
@@ -35,7 +35,7 @@ class NotificationJob:
 class BroadcastJob:
     id: UUID
     broadcast_id: UUID
-    telegram_id: int
+    telegram_id: int | None
     user_status: UserStatus
     message: str
     button_label: str | None

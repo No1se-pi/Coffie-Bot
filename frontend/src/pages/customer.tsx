@@ -10,6 +10,7 @@ import type {
 } from "../api/types";
 import { useResource } from "../hooks/useResource";
 import { formatDate, formatDateTime, formatMoney } from "../utils/format";
+import { VenueSelector, useVenueSelection } from "../components/VenueSelector";
 import {
   Avatar,
   Badge,
@@ -33,6 +34,8 @@ export function getTimeGreeting(date = new Date()): string {
 
 export function HomePage() {
   const resource = useResource(coffeeApi.getHome);
+  const venueResource = useResource(coffeeApi.getVenues);
+  const venueSelection = useVenueSelection(venueResource.data?.items ?? null);
   const greeting = getTimeGreeting();
   const customerName = resource.data?.card.display_name.trim().split(/\s+/)[0];
   const highlightedReward = resource.data?.active_rewards[0];
@@ -44,6 +47,20 @@ export function HomePage() {
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
+      )}
+      {venueResource.error && (
+        <ErrorState
+          error={venueResource.error}
+          onRetry={venueResource.reload}
+          compact
+        />
+      )}
+      {venueResource.data && venueResource.data.items.length > 0 && (
+        <VenueSelector
+          venues={venueResource.data.items}
+          selectedVenueId={venueSelection.selectedVenueId}
+          onSelect={venueSelection.selectVenue}
+        />
       )}
       {resource.data && (
         <>
@@ -895,7 +912,7 @@ export function MorePage() {
                   onChange={(event) => setCategory(event.target.value)}
                 >
                   <option value="service">Обслуживание</option>
-                  <option value="food">Напитки и еда</option>
+                  <option value="food_and_drinks">Напитки и еда</option>
                   <option value="application">Приложение</option>
                   <option value="loyalty">Программа лояльности</option>
                   <option value="other">Другое</option>

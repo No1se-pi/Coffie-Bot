@@ -25,6 +25,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 STAFF_DEFAULT_PERMISSIONS = frozenset(
     {
         PermissionCode.CARD_LOOKUP,
+        PermissionCode.CUSTOMERS_CREATE,
         PermissionCode.POINTS_ACCRUE,
         PermissionCode.POINTS_REDEEM,
         PermissionCode.VISITS_MARK,
@@ -107,10 +108,16 @@ async def load_actor(
         )
     )
     db_session = await session.scalar(statement)
-    if db_session is None or db_session.user.status in {
-        UserStatus.INACTIVE,
-        UserStatus.ANONYMIZED,
-    }:
+    if (
+        db_session is None
+        or db_session.user.telegram_id is None
+        or db_session.user.status
+        in {
+            UserStatus.INACTIVE,
+            UserStatus.ANONYMIZED,
+            UserStatus.MERGED,
+        }
+    ):
         raise AppError(
             code=ErrorCode.INVALID_SESSION,
             message="Session is invalid or expired",

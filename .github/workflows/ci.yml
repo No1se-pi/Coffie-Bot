@@ -25,7 +25,7 @@ jobs:
       - name: Validate demo seed and POSIX scripts
         run: |
           python -m json.tool configs/demo-seed.json >/dev/null
-          sh -n scripts/backup.sh scripts/restore.sh
+          sh -n scripts/backup.sh scripts/restore.sh scripts/deploy.sh
       - name: Validate PowerShell scripts
         shell: pwsh
         run: |
@@ -93,6 +93,8 @@ jobs:
         run: mypy app
       - name: Apply migrations to clean PostgreSQL
         run: alembic upgrade head
+      - name: Check model and migration parity
+        run: alembic check
       - name: Pytest
         run: pytest
 

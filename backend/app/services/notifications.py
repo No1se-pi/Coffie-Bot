@@ -124,6 +124,20 @@ class NotificationService:
         )
         result = DeliveryBatchResult(claimed=len(jobs))
         for job in jobs:
+            if job.telegram_id is None:
+                # Phone-only customers are valid loyalty participants but have no
+                # Telegram delivery channel until they explicitly link an identity.
+                settled = await self._repository.mark_notification_failed(
+                    job.id,
+                    lease_until=job.lease_until,
+                    error_code="telegram_identity_missing",
+                    retry_at=None,
+                )
+                if settled:
+                    result.failed += 1
+                else:
+                    result.stale += 1
+                continue
             try:
                 message = render_notification(job, webapp_url=self._webapp_url)
                 await self._sender.send(job.telegram_id, message)

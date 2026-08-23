@@ -38,18 +38,23 @@ Dangerous POST endpoints требуют `Idempotency-Key` (UUID, до 128 сим
 - `GET /me/card` — active QR payload, короткий код, balance/progress.
 - `GET /me/history?page=&page_size=&type=` — собственные операции.
 - `GET /me/rewards?status=` — собственные награды.
+- `GET /me/identities` — подтверждённые provider identities текущего профиля.
 
 ## Публичный контент для авторизованного пользователя
 
 - `GET /menu/categories`, `GET /menu/items?category_id=&available=`.
 - `GET /promotions?active=true`.
 - `GET /contacts` — кофейня и locations.
+- `GET /venues` — активные заведения организации в настроенном порядке.
 - `GET /staff-profiles` — только approved/visible tip profiles.
 - `POST /feedback` — rating/category/message/may_contact.
 
 ## Staff operations
 
-- `POST /staff/cards/lookup` — один из `{qr_token, short_code}`; только чтение, без операции.
+- `POST /staff/cards/lookup` — ровно один из `{qr_token, short_code, phone}`; телефон
+  нормализуется backend, операция остаётся read-only.
+- `POST /staff/customers` — phone-only профиль + карта + loyalty aggregate; требует
+  `customers.create` и `Idempotency-Key`, возвращает только маскированный телефон.
 - `POST /staff/operations/accrual/preview` — `{user_id, purchase_amount_minor}`.
 - `POST /staff/operations/accrual` — confirm с тем же business input; результат всегда пересчитывается.
 - `POST /staff/operations/redemption/preview`, `POST /staff/operations/redemption`.
@@ -69,12 +74,20 @@ Preview не принимает и не возвращает секреты; con
 - `POST /admin/users/{user_id}/adjustments` — `{delta_points, reason}`.
 - `POST /admin/users/{user_id}/block`, `/unblock`, `/cards/reissue`.
 - `POST /admin/users/{user_id}/rewards` и `/rewards/{reward_id}/cancel`.
+- `GET /admin/users/{user_id}/identities` — provider identities для поддержки/merge.
+- `POST /admin/customer-merge/preview` — проверка source/canonical и расчёт
+  transfer/revoke summary с `preview_hash`.
+- `POST /admin/customer-merge/confirm` — обязательные `preview_hash`, `reason`,
+  `confirm=true` и `Idempotency-Key`; повторно проверяет состояние внутри транзакции.
 - `GET|POST /admin/staff`, `GET|PATCH /admin/staff/{staff_id}`.
 - `POST /admin/staff/{staff_id}/revoke-sessions`.
 - `POST /admin/staff/invites` — TTL-limited one-time token.
 - `POST /admin/staff/{staff_id}/role` — `admin`/`owner` transitions требуют owner.
 
 ## Admin audit/content
+
+- `GET /admin/venues`, `GET /admin/venues/{id}`, `POST|PATCH /admin/venues`;
+  explicit `/{id}/archive` и `/{id}/restore`.
 
 - `GET /admin/events` — period/actor/user/type/severity/suspicious/adjustments/reversed filters.
 - `GET|PUT /admin/loyalty-settings` — `visit_reward` и `stamp_reward` принимают один из компактных вариантов: позиция меню (`menu_item`), собственная текстовая награда (`custom`) или автоматическое начисление (`points`).

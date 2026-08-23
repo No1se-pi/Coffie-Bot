@@ -4,6 +4,7 @@ import pytest
 
 from app.bot.main import BotCommandService, build_mini_app_keyboard
 from app.security.telegram import TelegramUserData
+from app.services.customers import VerifiedPhoneLinkResult
 
 pytestmark = pytest.mark.asyncio
 
@@ -61,3 +62,25 @@ async def test_human_menu_uses_only_mini_app_buttons_and_expected_routes() -> No
         "https://coffee.example/more",
     ]
     assert all(button.url is None for button in buttons)
+
+
+async def test_verified_phone_link_reply_does_not_expose_another_profile() -> None:
+    async def register(_user: TelegramUserData) -> bool:
+        return False
+
+    async def link_phone(
+        telegram_id: int,
+        contact_user_id: int,
+        phone_number: str,
+    ) -> VerifiedPhoneLinkResult:
+        assert (telegram_id, contact_user_id, phone_number) == (101, 101, "+79991234567")
+        return VerifiedPhoneLinkResult(status="merge_required", masked_phone="+7*****4567")
+
+    reply = await BotCommandService(register, link_phone).link_phone(
+        telegram_id=101,
+        contact_user_id=101,
+        phone_number="+79991234567",
+    )
+
+    assert "без изменений" in reply.text
+    assert "+79991234567" not in reply.text

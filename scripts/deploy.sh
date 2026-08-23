@@ -91,9 +91,11 @@ if [ "$STATUS_ONLY" = true ]; then
     exit 0
 fi
 
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-    printf '%s\n' "Tracked files have local changes; deploy refused to preserve them." >&2
-    git status --short --untracked-files=no >&2
+if [ -n "$(git status --porcelain)" ]; then
+    # Untracked application or migration files are part of the Docker build context and
+    # could otherwise execute even though they do not belong to the deployed commit.
+    printf '%s\n' "Working tree has tracked or untracked changes; deploy refused." >&2
+    git status --short >&2
     exit 1
 fi
 
@@ -137,6 +139,12 @@ fi
 
 printf '%s\n' "Building production images..."
 compose build --pull
+
+# Backfills and constraint changes must see a quiescent database. Keeping old
+# API/bot/worker writers alive during Alembic can otherwise create rows between
+# the backfill and the new invariant becoming authoritative.
+printf '%s\n' "Stopping application writers before migrations..."
+compose stop frontend backend bot worker
 
 printf '%s\n' "Applying forward-only database migrations..."
 compose run --rm migrate

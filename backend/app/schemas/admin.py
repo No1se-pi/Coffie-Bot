@@ -348,7 +348,7 @@ class PermissionOverride(ApiSchema):
 class StaffResponse(ApiSchema):
     id: UUID
     user_id: UUID
-    telegram_id: int
+    telegram_id: int | None
     username: str | None
     display_name: str
     position: str | None

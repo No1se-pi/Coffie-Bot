@@ -27,6 +27,34 @@ from app.db.types import enum_type
 from app.models.enums import PromotionStatus
 
 
+class Venue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A customer-facing establishment/brand within this installation.
+
+    A venue deliberately does not contain a physical address or opening hours:
+    those belong to :class:`Location`, whose lifecycle also covers future shared
+    pickup and consolidation points.
+    """
+
+    __tablename__ = "venues"
+    __table_args__ = (Index("ix_venues_public_sort", "is_active", "archived_at", "sort_order"),)
+
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(String(64))
+    email: Mapped[str | None] = mapped_column(String(254))
+    website: Mapped[str | None] = mapped_column(String(2048))
+    telegram: Mapped[str | None] = mapped_column(String(2048))
+    logo_media_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("media_files.id", ondelete="SET NULL")
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Location(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "locations"
     __table_args__ = (
@@ -49,8 +77,12 @@ class Location(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             postgresql_where=text("is_default = true"),
         ),
         Index("ix_locations_active_sort", "is_active", "sort_order"),
+        Index("ix_locations_venue_active_sort", "venue_id", "is_active", "sort_order"),
     )
 
+    # Nullable by design: a future organization-level consolidation point may
+    # serve several venues without itself being owned by one of them.
+    venue_id: Mapped[UUID | None] = mapped_column(ForeignKey("venues.id", ondelete="SET NULL"))
     slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)

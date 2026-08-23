@@ -1,9 +1,14 @@
 # Coffie Bot
 
-Coffie Bot — автономный шаблон Telegram-бота и Telegram Mini App для программы
-лояльности одной небольшой кофейни. Каждый клиентский экземпляр получает отдельный
+Coffie Bot — автономный шаблон Telegram-бота и web-приложения для одной локальной
+организации с несколькими заведениями и физическими точками. Каждый клиентский экземпляр получает отдельный
 репозиторий, Telegram-бота, PostgreSQL, media-хранилище и Docker Compose deployment.
 Проект намеренно не является multi-tenant SaaS.
+
+Текущая V1 лояльности расширяется поэтапно до V2 с заведениями, заказами и доставкой.
+Фактический статус каждой фазы, compatibility-решения и выполненные проверки находятся в
+[`IMPLEMENTATION_PLAN_V2.md`](IMPLEMENTATION_PLAN_V2.md); незавершённые пункты там не следует
+считать готовыми функциями.
 
 ## Архитектура
 
@@ -177,6 +182,9 @@ Telegram API.
 
 - [CUSTOMIZATION.md](CUSTOMIZATION.md) — подготовка отдельного экземпляра для кофейни;
 - [DEPLOYMENT.md](DEPLOYMENT.md) — production Compose, HTTPS, обновления и backup/restore;
+- [MIGRATION_V2.md](MIGRATION_V2.md) — forward-only V2 revisions, preflight и проверки;
+- [docs/LOYALTY_V2.md](docs/LOYALTY_V2.md) — design отложенной Phase 2, а не описание
+  текущего release;
 - [SECURITY.md](SECURITY.md) — модель доверия, секреты и incident response;
 - [docs/PRODUCT_DECISIONS.md](docs/PRODUCT_DECISIONS.md) — demo-значения, которые владелец
   обязан подтвердить до production;

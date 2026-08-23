@@ -43,6 +43,7 @@ class ApiSchema(BaseModel):
 class CardLookupRequest(ApiSchema):
     qr_token: str | None = Field(default=None, min_length=16, max_length=128)
     short_code: str | None = Field(default=None, min_length=4, max_length=16)
+    phone: str | None = Field(default=None, min_length=5, max_length=64)
 
     @field_validator("short_code")
     @classmethod
@@ -56,8 +57,9 @@ class CardLookupRequest(ApiSchema):
 
     @model_validator(mode="after")
     def exactly_one_identifier(self) -> CardLookupRequest:
-        if (self.qr_token is None) == (self.short_code is None):
-            raise ValueError("exactly one of qr_token or short_code is required")
+        provided = sum(value is not None for value in (self.qr_token, self.short_code, self.phone))
+        if provided != 1:
+            raise ValueError("exactly one of qr_token, short_code or phone is required")
         return self
 
 
@@ -298,7 +300,7 @@ class RewardListResponse(ApiSchema):
 
 class AdminUserListItemResponse(ApiSchema):
     id: UUID
-    telegram_id: int
+    telegram_id: int | None
     display_name: str
     username: str | None
     status: UserStatus

@@ -8,6 +8,10 @@ import type {
   AuditEvent,
   AuthSession,
   CardData,
+  CustomerMergeConfirmRequest,
+  CustomerMergePreview,
+  CustomerMergePreviewRequest,
+  CustomerMergeResult,
   HistoryItem,
   ListResponse,
   LoyaltySettings,
@@ -16,6 +20,8 @@ import type {
   MenuItem,
   MenuItemDraft,
   OperationResult,
+  PhoneCustomer,
+  PhoneCustomerCreate,
   Promotion,
   PromotionDraft,
   PublicMoreData,
@@ -24,8 +30,10 @@ import type {
   Reward,
   Role,
   StaffClient,
+  StaffClientLookup,
   StaffMemberDraft,
   TipProfile,
+  Venue,
 } from "./types";
 
 const now = () => new Date().toISOString();
@@ -49,7 +57,47 @@ let card: CardData = {
   updated_at: now(),
 };
 
+const venues: Venue[] = [
+  {
+    id: "00000000-0000-4000-8000-000000000101",
+    slug: "coffee-point",
+    name: "Кофейня и точка",
+    description: "Кофе, завтраки и десерты",
+    phone: null,
+    email: null,
+    website: null,
+    telegram: null,
+    logo_url: null,
+    sort_order: 10,
+  },
+  {
+    id: "00000000-0000-4000-8000-000000000102",
+    slug: "food-court",
+    name: "ФудДворик",
+    description: "Еда и напитки на каждый день",
+    phone: null,
+    email: null,
+    website: null,
+    telegram: null,
+    logo_url: null,
+    sort_order: 20,
+  },
+  {
+    id: "00000000-0000-4000-8000-000000000103",
+    slug: "shashlik-dzhan",
+    name: "Шашлык Джан",
+    description: "Блюда на огне",
+    phone: null,
+    email: null,
+    website: null,
+    telegram: null,
+    logo_url: null,
+    sort_order: 30,
+  },
+];
+
 let lastAutomaticVisitDate: string | null = null;
+let phoneOnlyStaffClient: StaffClient | null = null;
 
 let history: HistoryItem[] = [
   {
@@ -280,6 +328,49 @@ let adminStaff: AdminStaffMember[] = [
   },
 ];
 
+const demoMergeReceipts = new Map<
+  string,
+  { payload: CustomerMergeConfirmRequest; result: CustomerMergeResult }
+>();
+
+function demoCustomerMergePreview(
+  payload: CustomerMergePreviewRequest,
+): CustomerMergePreview {
+  return {
+    source: {
+      user_id: payload.source_user_id,
+      display_name: "Телефонный профиль",
+      status: "active",
+      identity_providers: ["phone"],
+      points_balance: 70,
+      stamp_count: 3,
+      visit_streak: 2,
+      last_visit_business_date: "2026-08-23",
+      staff_role: null,
+    },
+    canonical: {
+      user_id: payload.canonical_user_id,
+      display_name: "Основной профиль",
+      status: "active",
+      identity_providers: ["telegram"],
+      points_balance: 120,
+      stamp_count: 4,
+      visit_streak: 5,
+      last_visit_business_date: "2026-08-24",
+      staff_role: null,
+    },
+    preview_hash: "d".repeat(64),
+    points_to_transfer: 70,
+    stamps_to_transfer: 3,
+    visit_snapshot_from_user_id: payload.canonical_user_id,
+    identities_to_move: 1,
+    rewards_to_move: 2,
+    sessions_to_revoke: 1,
+    cards_to_revoke: 1,
+    source_staff_rebound: false,
+  };
+}
+
 let events: AuditEvent[] = [
   {
     id: "event-1",
@@ -347,7 +438,12 @@ export const demoApi = {
         username: "yaroslav",
         role: "owner",
         available_roles: ["customer", "staff", "admin", "owner"],
-        permissions: ["points.accrue", "points.redeem", "rewards.redeem"],
+        permissions: [
+          "customers.create",
+          "points.accrue",
+          "points.redeem",
+          "rewards.redeem",
+        ],
       },
     };
   },
@@ -358,6 +454,10 @@ export const demoApi = {
       active_rewards: rewards.filter((item) => item.status === "active"),
       promotions: promotions.filter((item) => item.status === "published"),
     };
+  },
+  async getVenues(): Promise<ListResponse<Venue>> {
+    await wait();
+    return list(venues.map((venue) => ({ ...venue })));
   },
   async getCard() {
     await wait();
@@ -416,12 +516,9 @@ export const demoApi = {
     await wait();
     return { id: `feedback-${Date.now()}`, status: "new" };
   },
-  async lookupStaffClient(payload: {
-    qr_token?: string;
-    short_code?: string;
-  }): Promise<StaffClient> {
+  async lookupStaffClient(payload: StaffClientLookup): Promise<StaffClient> {
     await wait();
-    if (!payload.qr_token && !payload.short_code)
+    if (!payload.qr_token && !payload.short_code && !payload.phone)
       throw new ApiError("Введите код карты", {
         status: 422,
         code: "invalid_card_code",
@@ -431,6 +528,8 @@ export const demoApi = {
         status: 404,
         code: "card_not_found",
       });
+    if (payload.phone && phoneOnlyStaffClient)
+      return { ...phoneOnlyStaffClient };
     return {
       user_id: card.user_id,
       display_name: card.display_name,
@@ -446,6 +545,42 @@ export const demoApi = {
       blocked: card.blocked,
       suspicious: false,
       recent_operations: history.slice(0, 3),
+    };
+  },
+  async createPhoneCustomer(
+    payload: PhoneCustomerCreate,
+    idempotencyKey: string,
+  ): Promise<PhoneCustomer> {
+    void idempotencyKey;
+    await wait();
+    const userId = `user-phone-${Date.now()}`;
+    const displayName = payload.display_name?.trim() || "Гость";
+    const shortCode = "PHONE123";
+    const digits = payload.phone.replace(/\D/g, "");
+    phoneOnlyStaffClient = {
+      user_id: userId,
+      display_name: displayName,
+      short_code: shortCode,
+      masked_short_code: `••••${shortCode.slice(-4)}`,
+      balance_points: 0,
+      currency_name: card.currency_name,
+      visit_streak: 0,
+      visit_goal: card.visit_goal,
+      stamps: 0,
+      stamp_goal: card.stamp_goal,
+      available_rewards: [],
+      blocked: false,
+      suspicious: false,
+      recent_operations: [],
+    };
+    return {
+      user_id: userId,
+      card_id: `card-phone-${Date.now()}`,
+      display_name: displayName,
+      masked_phone: `+7•••••••${digits.slice(-4).padStart(4, "•")}`,
+      short_code: shortCode,
+      points_balance: 0,
+      idempotent_replay: false,
     };
   },
   async previewAccrual(payload: {
@@ -812,6 +947,67 @@ export const demoApi = {
         code: "user_not_found",
       });
     return { ...user };
+  },
+  async previewCustomerMerge(
+    payload: CustomerMergePreviewRequest,
+  ): Promise<CustomerMergePreview> {
+    await wait();
+    if (payload.source_user_id === payload.canonical_user_id)
+      throw new ApiError("Выберите два разных профиля", {
+        status: 422,
+        code: "same_customer_merge",
+      });
+    return demoCustomerMergePreview(payload);
+  },
+  async confirmCustomerMerge(
+    payload: CustomerMergeConfirmRequest,
+    idempotencyKey: string,
+  ): Promise<CustomerMergeResult> {
+    await wait();
+    const existing = demoMergeReceipts.get(idempotencyKey);
+    if (existing) {
+      if (
+        existing.payload.source_user_id !== payload.source_user_id ||
+        existing.payload.canonical_user_id !== payload.canonical_user_id ||
+        existing.payload.preview_hash !== payload.preview_hash ||
+        existing.payload.reason !== payload.reason
+      ) {
+        throw new ApiError("Ключ подтверждения уже использован", {
+          status: 409,
+          code: "idempotency_key_reused",
+        });
+      }
+      return { ...existing.result, idempotent_replay: true };
+    }
+
+    const preview = demoCustomerMergePreview(payload);
+    if (payload.preview_hash !== preview.preview_hash)
+      throw new ApiError("Предпросмотр устарел. Получите новый.", {
+        status: 409,
+        code: "customer_merge_preview_stale",
+      });
+    const result: CustomerMergeResult = {
+      merge_id: "00000000-0000-4000-8000-000000000301",
+      source_user_id: payload.source_user_id,
+      canonical_user_id: payload.canonical_user_id,
+      preview_hash: payload.preview_hash,
+      completed_at: now(),
+      points_transferred: preview.points_to_transfer,
+      canonical_points_after:
+        preview.canonical.points_balance + preview.points_to_transfer,
+      stamps_transferred: preview.stamps_to_transfer,
+      canonical_stamps_after:
+        preview.canonical.stamp_count + preview.stamps_to_transfer,
+      visit_snapshot_from_user_id: preview.visit_snapshot_from_user_id,
+      identities_moved: preview.identities_to_move,
+      rewards_moved: preview.rewards_to_move,
+      sessions_revoked: preview.sessions_to_revoke,
+      cards_revoked: preview.cards_to_revoke,
+      source_staff_rebound: preview.source_staff_rebound,
+      idempotent_replay: false,
+    };
+    demoMergeReceipts.set(idempotencyKey, { payload: { ...payload }, result });
+    return { ...result };
   },
   async getAdminEvents(filters: { severity?: string; suspicious?: boolean }) {
     await wait();

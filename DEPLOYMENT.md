@@ -192,7 +192,8 @@ PowerShell:
 ## Обновление
 
 Для обычного обновления используйте скрипт из корня репозитория. Он откажется работать при
-локальных изменениях или не-fast-forward истории, создаст backup работающей БД и media,
+любых tracked или untracked изменениях и при не-fast-forward истории. Это не даёт постороннему файлу
+из Docker build context попасть в release image. Затем скрипт создаст backup работающей БД и media,
 обновит текущую ветку, соберёт images, применит migrations, дождётся health checks и проверит
 локальные HTTP endpoints. `.env` и секреты не выводятся:
 
@@ -208,8 +209,11 @@ sh deploy.sh --status
 ```
 
 `--skip-backup` используйте только осознанно (например, при самом первом запуске без данных).
-Скрипт не выполняет автоматический rollback схемы: migrations forward-only, а предыдущий
-commit и путь backup печатаются в финале для контролируемого восстановления.
+Перед migration скрипт останавливает frontend/API/bot/worker, чтобы старые процессы не писали
+данные одновременно с backfill. Если migration завершится ошибкой, application services
+останутся выключены для безопасной диагностики. Скрипт не выполняет автоматический rollback
+схемы: migrations forward-only, а предыдущий commit и путь backup печатаются в финале для
+контролируемого восстановления.
 
 Ручная последовательность, если автоматический скрипт неприменим:
 
@@ -220,6 +224,7 @@ commit и путь backup печатаются в финале для контр
 
    ```bash
    docker compose --env-file .env -f compose.prod.yaml build --pull
+   docker compose --env-file .env -f compose.prod.yaml stop frontend backend bot worker
    docker compose --env-file .env -f compose.prod.yaml run --rm migrate
    docker compose --env-file .env -f compose.prod.yaml up --detach
    ```

@@ -14,20 +14,26 @@ from aiogram.types import (
     BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     MenuButtonWebApp,
     Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     WebAppInfo,
 )
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import Database, create_database
+from app.repositories.customers import CustomerRepository
 from app.repositories.identity import IdentityRepository
 from app.security.telegram import TelegramUserData
+from app.services.customers import CustomerService, VerifiedPhoneLinkResult
 from app.services.identity import IdentityService
 
 logger = get_logger(__name__)
 RegisterTelegramUser = Callable[[TelegramUserData], Awaitable[bool]]
+LinkVerifiedPhone = Callable[[int, int, str], Awaitable[VerifiedPhoneLinkResult]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +45,13 @@ class CommandReply:
 class BotCommandService:
     """Transport-independent command copy and shared registration invocation."""
 
-    def __init__(self, register_user: RegisterTelegramUser) -> None:
+    def __init__(
+        self,
+        register_user: RegisterTelegramUser,
+        link_phone: LinkVerifiedPhone | None = None,
+    ) -> None:
         self._register_user = register_user
+        self._link_phone = link_phone
 
     async def start(self, telegram_user: TelegramUserData) -> CommandReply:
         created = await self._register_user(telegram_user)
@@ -56,6 +67,7 @@ class BotCommandService:
                 "Доступные команды:\n"
                 "/start — зарегистрироваться или открыть карту\n"
                 "/menu — открыть меню приложения\n"
+                "/phone — подтвердить свой номер телефона\n"
                 "/contact — посмотреть контакты организации\n"
                 "/help — показать эту справку"
             ),
@@ -73,6 +85,25 @@ class BotCommandService:
             text="Выберите нужный раздел приложения.",
             show_mini_app=True,
         )
+
+    async def link_phone(
+        self,
+        *,
+        telegram_id: int,
+        contact_user_id: int,
+        phone_number: str,
+    ) -> CommandReply:
+        if self._link_phone is None:
+            return CommandReply("Привязка телефона временно недоступна.")
+        result = await self._link_phone(telegram_id, contact_user_id, phone_number)
+        if result.status == "merge_required":
+            return CommandReply(
+                "Этот номер уже относится к другой карте. Данные сохранены без изменений; "
+                "обратитесь к администратору для безопасного объединения профилей."
+            )
+        if result.status == "already_linked":
+            return CommandReply(f"Номер {result.masked_phone} уже подтверждён.")
+        return CommandReply(f"Номер {result.masked_phone} подтверждён и привязан.")
 
 
 def build_dispatcher(
@@ -110,12 +141,55 @@ def build_dispatcher(
         await _answer(message, command_service.help(), webapp_url=webapp_url)
 
     @router.message(Command("contact"))
-    async def contact_handler(message: Message) -> None:
+    async def organization_contact_handler(message: Message) -> None:
         await _answer(message, command_service.contact(), webapp_url=webapp_url)
 
     @router.message(Command("menu"))
     async def menu_handler(message: Message) -> None:
         await _answer(message, command_service.menu(), webapp_url=webapp_url)
+
+    @router.message(Command("phone"))
+    async def phone_handler(message: Message) -> None:
+        # Telegram fills this button with an authenticated Contact object; a
+        # manually typed phone number never enters the verified linking flow.
+        await message.answer(
+            "Нажмите кнопку ниже, чтобы подтвердить собственный номер Telegram.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Подтвердить мой номер", request_contact=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True,
+            ),
+        )
+
+    @router.message(F.contact)
+    async def verified_contact_handler(message: Message) -> None:
+        if message.from_user is None or message.contact is None:
+            await message.answer(
+                "Не удалось проверить контакт.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return
+        contact_user_id = message.contact.user_id
+        if contact_user_id is None:
+            await message.answer(
+                "Отправьте номер именно кнопкой «Подтвердить мой номер».",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return
+        try:
+            reply = await command_service.link_phone(
+                telegram_id=message.from_user.id,
+                contact_user_id=contact_user_id,
+                phone_number=message.contact.phone_number,
+            )
+        except Exception:
+            logger.exception("bot_phone_link_failed")
+            await message.answer(
+                "Не удалось подтвердить номер. Попробуйте позже.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return
+        await message.answer(reply.text, reply_markup=ReplyKeyboardRemove())
 
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
@@ -132,7 +206,19 @@ async def run_bot(settings: Settings) -> None:
     async def register_user(telegram_user: TelegramUserData) -> bool:
         return await _register_with_shared_service(database, settings, telegram_user)
 
-    command_service = BotCommandService(register_user)
+    async def link_phone(
+        telegram_id: int,
+        contact_user_id: int,
+        phone_number: str,
+    ) -> VerifiedPhoneLinkResult:
+        return await _link_phone_with_shared_service(
+            database,
+            telegram_id=telegram_id,
+            contact_user_id=contact_user_id,
+            phone_number=phone_number,
+        )
+
+    command_service = BotCommandService(register_user, link_phone)
     dispatcher = build_dispatcher(
         command_service,
         webapp_url=settings.telegram_webapp_url,
@@ -142,6 +228,7 @@ async def run_bot(settings: Settings) -> None:
             [
                 BotCommand(command="start", description="Открыть карту лояльности"),
                 BotCommand(command="menu", description="Меню приложения"),
+                BotCommand(command="phone", description="Подтвердить номер телефона"),
                 BotCommand(command="contact", description="Контакты организации"),
                 BotCommand(command="help", description="Справка"),
             ]
@@ -176,6 +263,21 @@ async def _register_with_shared_service(
             repository=IdentityRepository(session),
         ).register_telegram_user(telegram_user)
     return result.created
+
+
+async def _link_phone_with_shared_service(
+    database: Database,
+    *,
+    telegram_id: int,
+    contact_user_id: int,
+    phone_number: str,
+) -> VerifiedPhoneLinkResult:
+    async with database.session_factory() as session:
+        return await CustomerService(CustomerRepository(session)).link_verified_telegram_contact(
+            telegram_id=telegram_id,
+            contact_user_id=contact_user_id,
+            phone=phone_number,
+        )
 
 
 async def _answer(

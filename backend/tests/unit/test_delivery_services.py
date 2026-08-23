@@ -193,6 +193,27 @@ async def test_notification_retry_uses_exponential_backoff() -> None:
     assert repository.failed == [(job.id, "telegram_network_error", NOW + timedelta(seconds=40))]
 
 
+async def test_phone_only_notification_fails_once_without_calling_telegram() -> None:
+    job = _notification_job(telegram_id=None)
+    repository = FakeNotificationRepository([job])
+    sender = FakeSender()
+    service = NotificationService(
+        repository=repository,
+        sender=sender,
+        retry_policy=RetryPolicy(max_attempts=3),
+    )
+
+    result = await service.process_batch(
+        limit=1,
+        lease_for=timedelta(minutes=1),
+        now=NOW,
+    )
+
+    assert sender.calls == []
+    assert result.failed == 1
+    assert repository.failed == [(job.id, "telegram_identity_missing", None)]
+
+
 async def test_purchase_notification_opens_post_purchase_web_app() -> None:
     operation_id = uuid4()
     job = NotificationJob(
@@ -267,6 +288,29 @@ async def test_broadcast_isolates_failures_and_skips_inactive_users(tmp_path: Pa
     assert repository.finalized == [{broadcast_id}]
 
 
+async def test_broadcast_skips_phone_only_customer(tmp_path: Path) -> None:
+    broadcast_id = uuid4()
+    job = _broadcast_job(broadcast_id, telegram_id=None)
+    repository = FakeBroadcastRepository([job])
+    sender = FakeSender()
+    service = BroadcastService(
+        repository=repository,
+        sender=sender,
+        retry_policy=RetryPolicy(max_attempts=3),
+        media_root=tmp_path,
+    )
+
+    result = await service.process_batch(
+        limit=1,
+        lease_for=timedelta(minutes=1),
+        now=NOW,
+    )
+
+    assert sender.calls == []
+    assert result.skipped == 1
+    assert repository.skipped == [(job.id, "telegram_identity_missing")]
+
+
 async def test_broadcast_uses_web_app_only_for_its_configured_app_origin(tmp_path: Path) -> None:
     broadcast_id = uuid4()
     internal = _broadcast_job(
@@ -298,7 +342,7 @@ async def test_broadcast_uses_web_app_only_for_its_configured_app_origin(tmp_pat
     assert sender.calls[1][1].open_as_web_app is False
 
 
-def _notification_job(*, telegram_id: int, attempts: int = 1) -> NotificationJob:
+def _notification_job(*, telegram_id: int | None, attempts: int = 1) -> NotificationJob:
     return NotificationJob(
         id=uuid4(),
         telegram_id=telegram_id,
@@ -312,7 +356,7 @@ def _notification_job(*, telegram_id: int, attempts: int = 1) -> NotificationJob
 def _broadcast_job(
     broadcast_id: UUID,
     *,
-    telegram_id: int,
+    telegram_id: int | None,
     user_status: UserStatus = UserStatus.ACTIVE,
     button_url: str | None = None,
 ) -> BroadcastJob:

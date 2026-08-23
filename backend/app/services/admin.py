@@ -1168,7 +1168,11 @@ class AdminService:
         current_time = _aware_now(now)
         async with self._repository.transaction():
             user = await self._repository.get_user_for_staff_creation(user_id)
-            if user is None or user.status in {UserStatus.INACTIVE, UserStatus.ANONYMIZED}:
+            if user is None or user.status in {
+                UserStatus.INACTIVE,
+                UserStatus.ANONYMIZED,
+                UserStatus.MERGED,
+            }:
                 _not_found("User was not found")
             existing = await self._repository.get_staff_by_user(user_id, for_update=True)
             if existing is not None:

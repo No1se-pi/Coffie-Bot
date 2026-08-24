@@ -24,17 +24,30 @@ from app.models.enums import PermissionCode, Role, UserStatus
 
 if TYPE_CHECKING:
     from app.models.cards import UserCard
+    from app.models.customers import CustomerIdentity
     from app.models.loyalty import UserLoyaltyState
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
+        CheckConstraint(
+            "(status = 'merged' AND merged_into_user_id IS NOT NULL AND merged_at IS NOT NULL) "
+            "OR (status <> 'merged' AND merged_into_user_id IS NULL AND merged_at IS NULL)",
+            name="valid_merge_state",
+        ),
+        CheckConstraint(
+            "merged_into_user_id IS NULL OR merged_into_user_id <> id",
+            name="not_self_merged",
+        ),
         Index("ix_users_username", "username"),
         Index("ix_users_status", "status"),
+        Index("ix_users_merged_into", "merged_into_user_id", "merged_at"),
     )
 
-    telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    # Kept as a nullable compatibility projection while authoritative lookup
+    # moves to CustomerIdentity. Phone-only profiles intentionally leave it NULL.
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
     username: Mapped[str | None] = mapped_column(String(64))
     first_name: Mapped[str] = mapped_column(String(128), nullable=False)
     last_name: Mapped[str | None] = mapped_column(String(128))
@@ -48,6 +61,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     internal_note: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    merged_into_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     staff_member: Mapped[StaffMember | None] = relationship(
         back_populates="user",
@@ -55,6 +72,16 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     sessions: Mapped[list[Session]] = relationship(back_populates="user")
     cards: Mapped[list[UserCard]] = relationship(back_populates="user")
+    identities: Mapped[list[CustomerIdentity]] = relationship(back_populates="user")
+    merged_into: Mapped[User | None] = relationship(
+        remote_side="User.id",
+        foreign_keys=[merged_into_user_id],
+        back_populates="merged_sources",
+    )
+    merged_sources: Mapped[list[User]] = relationship(
+        foreign_keys=[merged_into_user_id],
+        back_populates="merged_into",
+    )
     loyalty_state: Mapped[UserLoyaltyState | None] = relationship(
         back_populates="user",
         uselist=False,

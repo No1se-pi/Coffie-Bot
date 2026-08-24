@@ -45,6 +45,8 @@ testpaths = ["tests"]
 target-version = "py313"
 line-length = 100
 src = ["app", "tests"]
+# Published Alembic revisions are immutable; preserve this legacy migration byte-for-byte.
+extend-exclude = ["alembic/versions/0002_ensure_default_loyalty_settings.py"]
 
 [tool.ruff.lint]
 select = ["ASYNC", "B", "C4", "DTZ", "E", "F", "I", "PT", "RUF", "UP"]

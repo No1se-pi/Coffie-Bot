@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { coffeeApi, MEDIA_FILE_ACCEPT } from "../api/client";
+import {
+  coffeeApi,
+  createIdempotencyKey,
+  MEDIA_FILE_ACCEPT,
+} from "../api/client";
 import type {
   AdminFeedback,
   AdminStaffMember,
   AdjustmentPreview,
+  CustomerIdentityProvider,
+  CustomerMergePreview,
+  CustomerMergeProfile,
+  CustomerMergeResult,
   FeedbackStatus,
   LoyaltyRewardConfig,
   LoyaltySettings,
@@ -120,6 +128,15 @@ export function AdminOverviewPage() {
   );
 }
 
+function adminIdentityLabel(
+  username: string | null | undefined,
+  telegramId: string | number | null,
+): string {
+  if (username) return `@${username}`;
+  if (telegramId !== null) return `Telegram ${telegramId}`;
+  return "Без Telegram";
+}
+
 export function AdminUsersPage() {
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
@@ -133,7 +150,15 @@ export function AdminUsersPage() {
     setQuery(input.trim());
   };
   return (
-    <Page title="Клиенты" eyebrow="Поиск и управление">
+    <Page
+      title="Клиенты"
+      eyebrow="Поиск и управление"
+      action={
+        <Link className="button button--secondary" to="/admin/customer-merge">
+          Объединить профили
+        </Link>
+      }
+    >
       <Panel>
         <form className="search-form" onSubmit={search}>
           <input
@@ -177,11 +202,7 @@ export function AdminUsersPage() {
                 <Avatar name={user.display_name} />
                 <div className="user-list__identity">
                   <h2>{user.display_name}</h2>
-                  <p>
-                    {user.username
-                      ? `@${user.username}`
-                      : `Telegram ${user.telegram_id}`}
-                  </p>
+                  <p>{adminIdentityLabel(user.username, user.telegram_id)}</p>
                   <small>
                     {user.last_seen_at
                       ? `Был ${formatDateTime(user.last_seen_at)}`
@@ -212,8 +233,415 @@ export function AdminUsersPage() {
   );
 }
 
+const customerIdentityLabels: Record<CustomerIdentityProvider, string> = {
+  telegram: "Telegram",
+  phone: "Телефон",
+  max: "MAX",
+};
+
+const customerMergeStatusLabels: Record<
+  CustomerMergeProfile["status"],
+  string
+> = {
+  active: "Активен",
+  blocked: "Заблокирован",
+  inactive: "Неактивен",
+  anonymized: "Анонимизирован",
+  merged: "Уже объединён",
+};
+
+const customerUuidPattern =
+  "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+const customerUuidRegex = new RegExp(`^${customerUuidPattern}$`);
+
+function CustomerMergeProfileCard({
+  profile,
+  label,
+}: {
+  profile: CustomerMergeProfile;
+  label: string;
+}) {
+  return (
+    <Panel>
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">{label}</p>
+          <h2>{profile.display_name}</h2>
+        </div>
+        <Badge tone={profile.status === "active" ? "success" : "warning"}>
+          {customerMergeStatusLabels[profile.status]}
+        </Badge>
+      </div>
+      <p className="muted">UUID: {profile.user_id}</p>
+      <p>
+        Идентификация:{" "}
+        {profile.identity_providers.length
+          ? profile.identity_providers
+              .map((provider) => customerIdentityLabels[provider])
+              .join(", ")
+          : "не привязана"}
+      </p>
+      <div className="metrics-grid">
+        <Metric value={profile.points_balance} label="баллов сейчас" />
+        <Metric value={profile.stamp_count} label="штампов сейчас" />
+        <Metric value={profile.visit_streak} label="визитов подряд" />
+      </div>
+      {profile.staff_role && (
+        <p className="muted">Роль сотрудника: {profile.staff_role}</p>
+      )}
+    </Panel>
+  );
+}
+
+export function AdminCustomerMergePage() {
+  const [sourceUserId, setSourceUserId] = useState("");
+  const [canonicalUserId, setCanonicalUserId] = useState("");
+  const [preview, setPreview] = useState<CustomerMergePreview | null>(null);
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [result, setResult] = useState<CustomerMergeResult | null>(null);
+  const [busy, setBusy] = useState<"preview" | "confirm" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const idempotencyKey = useRef(createIdempotencyKey());
+
+  // An ambiguous failure must be retried with the same key; changing any
+  // business input creates a new request identity before the next confirm.
+  const rotateConfirmation = () => {
+    idempotencyKey.current = createIdempotencyKey();
+    setConfirmed(false);
+    setError(null);
+    setResult(null);
+  };
+
+  const changeSourceUserId = (value: string) => {
+    setSourceUserId(value);
+    setPreview(null);
+    rotateConfirmation();
+  };
+
+  const changeCanonicalUserId = (value: string) => {
+    setCanonicalUserId(value);
+    setPreview(null);
+    rotateConfirmation();
+  };
+
+  const requestPreview = async (event: FormEvent) => {
+    event.preventDefault();
+    const source = sourceUserId.trim().toLowerCase();
+    const canonical = canonicalUserId.trim().toLowerCase();
+    if (!customerUuidRegex.test(source) || !customerUuidRegex.test(canonical)) {
+      setError("Укажите два UUID клиента в полном формате");
+      return;
+    }
+    if (source === canonical) {
+      setError("Исходный и основной профиль должны отличаться");
+      return;
+    }
+
+    setBusy("preview");
+    setError(null);
+    setResult(null);
+    try {
+      const nextPreview = await coffeeApi.previewCustomerMerge({
+        source_user_id: source,
+        canonical_user_id: canonical,
+      });
+      setSourceUserId(source);
+      setCanonicalUserId(canonical);
+      setPreview(nextPreview);
+      setReason("");
+      setConfirmed(false);
+      idempotencyKey.current = createIdempotencyKey();
+    } catch (reasonValue) {
+      setError(
+        reasonValue instanceof Error
+          ? reasonValue.message
+          : "Не удалось подготовить объединение",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const changeReason = (value: string) => {
+    if (value !== reason) rotateConfirmation();
+    setReason(value);
+  };
+
+  const confirmMerge = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!preview) return;
+    const normalizedReason = reason.trim().replace(/\s+/g, " ");
+    if (normalizedReason.length < 3) {
+      setError("Укажите причину объединения минимум из трёх символов");
+      return;
+    }
+    if (!confirmed) {
+      setError("Подтвердите необратимые последствия объединения");
+      return;
+    }
+
+    setBusy("confirm");
+    setError(null);
+    try {
+      const mergeResult = await coffeeApi.confirmCustomerMerge(
+        {
+          source_user_id: preview.source.user_id,
+          canonical_user_id: preview.canonical.user_id,
+          preview_hash: preview.preview_hash,
+          reason: normalizedReason,
+          confirm: true,
+        },
+        idempotencyKey.current,
+      );
+      setResult(mergeResult);
+    } catch (reasonValue) {
+      setError(
+        reasonValue instanceof Error
+          ? reasonValue.message
+          : "Не удалось объединить профили",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const editProfiles = () => {
+    setPreview(null);
+    setReason("");
+    rotateConfirmation();
+  };
+
+  const reset = () => {
+    setSourceUserId("");
+    setCanonicalUserId("");
+    setPreview(null);
+    setReason("");
+    rotateConfirmation();
+  };
+
+  return (
+    <Page title="Объединение клиентов" eyebrow="Необратимая операция">
+      {result ? (
+        <Panel className="operation-panel">
+          <div className="operation-success" role="status">
+            <span>✓</span>
+            <h2>Профили объединены</h2>
+            {result.idempotent_replay && (
+              <Badge>Повтор ранее выполненного запроса</Badge>
+            )}
+            <p>
+              Исходный профиль {result.source_user_id} теперь недоступен. Все
+              данные закреплены за {result.canonical_user_id}.
+            </p>
+            <div className="metrics-grid">
+              <Metric
+                value={result.points_transferred}
+                label="баллов перенесено"
+              />
+              <Metric
+                value={result.canonical_points_after}
+                label="баллов в основном"
+              />
+              <Metric
+                value={result.stamps_transferred}
+                label="штампов перенесено"
+              />
+              <Metric
+                value={result.canonical_stamps_after}
+                label="штампов в основном"
+              />
+              <Metric
+                value={result.identities_moved}
+                label="связей перенесено"
+              />
+              <Metric value={result.rewards_moved} label="наград перенесено" />
+              <Metric
+                value={result.sessions_revoked}
+                label="сеансов отозвано"
+              />
+              <Metric value={result.cards_revoked} label="карт отозвано" />
+            </div>
+            <div className="action-row">
+              <Button type="button" variant="secondary" onClick={reset}>
+                Новое объединение
+              </Button>
+              <Link className="button button--secondary" to="/admin/users">
+                Вернуться к клиентам
+              </Link>
+            </div>
+          </div>
+        </Panel>
+      ) : preview ? (
+        <section aria-label="Предпросмотр объединения">
+          <div className="form-grid">
+            <CustomerMergeProfileCard
+              profile={preview.source}
+              label="Исходный профиль — станет недоступен"
+            />
+            <CustomerMergeProfileCard
+              profile={preview.canonical}
+              label="Основной профиль — останется доступен"
+            />
+          </div>
+          <Panel>
+            <h2>Итог переноса</h2>
+            <div className="metrics-grid">
+              <Metric value={preview.points_to_transfer} label="баллов" />
+              <Metric value={preview.stamps_to_transfer} label="штампов" />
+              <Metric value={preview.identities_to_move} label="связей входа" />
+              <Metric value={preview.rewards_to_move} label="наград" />
+              <Metric
+                value={preview.sessions_to_revoke}
+                label="сеансов к отзыву"
+              />
+              <Metric value={preview.cards_to_revoke} label="карт к отзыву" />
+            </div>
+            <p className="muted">
+              Серия посещений будет взята из профиля:{" "}
+              {preview.visit_snapshot_from_user_id ?? "не переносится"}.
+            </p>
+          </Panel>
+          <div className="inline-warning">
+            <strong>Исходный профиль станет недоступен.</strong> Все его
+            активные карты будут отозваны ({preview.cards_to_revoke}), а сеансы
+            завершены ({preview.sessions_to_revoke}). Отменить объединение после
+            подтверждения нельзя.
+          </div>
+          {preview.source_staff_rebound && (
+            <div className="inline-warning">
+              Профиль сотрудника исходного клиента будет перепривязан к
+              основному профилю.
+            </div>
+          )}
+          <Panel className="operation-panel">
+            <form
+              className="form"
+              onSubmit={(event) => void confirmMerge(event)}
+            >
+              <Field label="Причина объединения" hint="Причина попадёт в аудит">
+                <textarea
+                  required
+                  rows={3}
+                  minLength={3}
+                  maxLength={2000}
+                  value={reason}
+                  onChange={(event) => changeReason(event.target.value)}
+                  placeholder="Например: клиент подтвердил дубликат профиля"
+                  disabled={busy !== null}
+                />
+              </Field>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  disabled={busy !== null}
+                  onChange={(event) => {
+                    setConfirmed(event.target.checked);
+                    setError(null);
+                  }}
+                />
+                <span>
+                  Я понимаю, что исходный профиль станет недоступен, а его карты
+                  и сеансы будут отозваны
+                </span>
+              </label>
+              {error && (
+                <div className="inline-error" role="alert">
+                  {error}
+                </div>
+              )}
+              <div className="action-row">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={editProfiles}
+                  disabled={busy !== null}
+                >
+                  Изменить UUID
+                </Button>
+                <Button
+                  type="submit"
+                  variant="danger"
+                  disabled={
+                    busy !== null || !confirmed || reason.trim().length < 3
+                  }
+                >
+                  {busy === "confirm" ? "Объединяем…" : "Объединить профили"}
+                </Button>
+              </div>
+            </form>
+          </Panel>
+        </section>
+      ) : (
+        <>
+          <div className="inline-warning">
+            Перепроверьте UUID. Исходный профиль будет помечен объединённым и
+            больше не сможет использоваться для входа или карт лояльности.
+          </div>
+          <Panel>
+            <form
+              className="form"
+              onSubmit={(event) => void requestPreview(event)}
+            >
+              <Field
+                label="UUID исходного профиля"
+                hint="Дубликат, который станет недоступен"
+              >
+                <input
+                  required
+                  pattern={customerUuidPattern}
+                  value={sourceUserId}
+                  onChange={(event) => changeSourceUserId(event.target.value)}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={busy !== null}
+                />
+              </Field>
+              <Field
+                label="UUID основного профиля"
+                hint="Профиль, который останется доступен"
+              >
+                <input
+                  required
+                  pattern={customerUuidPattern}
+                  value={canonicalUserId}
+                  onChange={(event) =>
+                    changeCanonicalUserId(event.target.value)
+                  }
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={busy !== null}
+                />
+              </Field>
+              {error && (
+                <div className="inline-error" role="alert">
+                  {error}
+                </div>
+              )}
+              <div className="action-row">
+                <Button type="submit" disabled={busy !== null}>
+                  {busy === "preview"
+                    ? "Проверяем профили…"
+                    : "Показать последствия"}
+                </Button>
+                <Link className="button button--secondary" to="/admin/users">
+                  Отмена
+                </Link>
+              </div>
+            </form>
+          </Panel>
+        </>
+      )}
+    </Page>
+  );
+}
+
 const staffPermissionLabels: Record<OperationalPermission, string> = {
   "card.lookup": "Поиск и сканирование карт",
+  "customers.create": "Создание клиента по телефону",
   "points.accrue": "Начисление баллов",
   "points.redeem": "Списание баллов",
   "visits.mark": "Отметка посещений",
@@ -367,9 +795,7 @@ function StaffMemberEditor({
           </div>
           <h2>{member.display_name}</h2>
           <small>
-            {member.username
-              ? `@${member.username}`
-              : `Telegram ${member.telegram_id}`}
+            {adminIdentityLabel(member.username, member.telegram_id)}
           </small>
         </div>
         {manageable && (
@@ -615,7 +1041,8 @@ export function AdminStaffPage() {
                   <option value="">Выберите клиента</option>
                   {availableCustomers.map((user) => (
                     <option key={user.id} value={user.id}>
-                      {user.display_name} · {user.telegram_id}
+                      {user.display_name} ·{" "}
+                      {adminIdentityLabel(user.username, user.telegram_id)}
                     </option>
                   ))}
                 </select>

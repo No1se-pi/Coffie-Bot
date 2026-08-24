@@ -58,19 +58,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const cleanupTelegram = initializeTelegram();
     const initData = getTelegramInitData();
 
-    if (!coffeeApi.isDemo && !initData) {
-      setError(
-        new Error("Откройте приложение из Telegram, чтобы подтвердить вход."),
-      );
-      setLoading(false);
-      return () => {
-        alive = false;
-        cleanupTelegram();
-      };
-    }
-
     setLoading(true);
     setError(null);
+    // Authentication is a backend trust boundary: only the server may accept an
+    // empty initData for explicitly enabled local DEV_AUTH. Production still
+    // verifies configuration, Telegram signature and TTL before issuing a session.
     coffeeApi
       .bootstrapAuth(initData)
       .then((session) => {

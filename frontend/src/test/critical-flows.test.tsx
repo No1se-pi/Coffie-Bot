@@ -1,5 +1,5 @@
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
@@ -9,17 +9,21 @@ import type {
   AdminUserListItem,
   AdminUser,
   CardData,
+  CustomerMergePreview,
+  CustomerMergeResult,
   LoyaltySettings,
   MenuCategory,
   OperationResult,
   PurchasePreview,
   StaffClient,
+  Venue,
 } from "../api/types";
 import {
   CardPage,
   getTimeGreeting,
   HomePage,
   MenuPage,
+  MorePage,
   RewardsPage,
 } from "../pages/customer";
 import {
@@ -30,6 +34,7 @@ import {
 } from "../pages/staff";
 import {
   AdminAdjustmentPage,
+  AdminCustomerMergePage,
   AdminFeedbackPage,
   AdminMenuPage,
   AdminPromotionsPage,
@@ -37,8 +42,13 @@ import {
   AdminStaffPage,
   AdminUsersPage,
 } from "../pages/admin";
-import { AuthContext } from "../auth/AuthContext";
+import { AuthContext, AuthProvider } from "../auth/AuthContext";
 import { AuthGate } from "../components/AppShell";
+import {
+  SELECTED_VENUE_STORAGE_KEY,
+  VenueSelector,
+  useVenueSelection,
+} from "../components/VenueSelector";
 import { applyTheme, readTheme } from "../theme";
 
 const card: CardData = {
@@ -75,7 +85,93 @@ const client: StaffClient = {
   recent_operations: [],
 };
 
+const coffeeVenue: Venue = {
+  id: "venue-coffee",
+  slug: "coffee-point",
+  name: "Кофейня и точка",
+  description: "Кофе и десерты",
+  phone: null,
+  email: null,
+  website: null,
+  telegram: null,
+  logo_url: null,
+  sort_order: 10,
+};
+
+const foodVenue: Venue = {
+  id: "venue-food",
+  slug: "food-court",
+  name: "ФудДворик",
+  description: "Еда и напитки",
+  phone: null,
+  email: null,
+  website: null,
+  telegram: null,
+  logo_url: null,
+  sort_order: 20,
+};
+
+const grillVenue: Venue = {
+  id: "venue-grill",
+  slug: "shashlik-dzhan",
+  name: "Шашлык Джан",
+  description: "Блюда на огне",
+  phone: null,
+  email: null,
+  website: null,
+  telegram: null,
+  logo_url: null,
+  sort_order: 30,
+};
+
+const venues = [coffeeVenue, foodVenue, grillVenue];
+
+function VenueSelectionHarness({ items }: { items: Venue[] }) {
+  const selection = useVenueSelection(items);
+  return (
+    <VenueSelector
+      venues={items}
+      selectedVenueId={selection.selectedVenueId}
+      onSelect={selection.selectVenue}
+    />
+  );
+}
+
 describe("critical Mini App flows", () => {
+  it("delegates empty initData acceptance to the backend DEV_AUTH boundary", async () => {
+    const originalDemoMode = coffeeApi.isDemo;
+    coffeeApi.isDemo = false;
+    window.sessionStorage.clear();
+    const bootstrap = vi.spyOn(coffeeApi, "bootstrapAuth").mockResolvedValue({
+      access_token: "local-dev-session",
+      expires_at: "2026-08-24T12:00:00Z",
+      actor: {
+        id: "local-owner",
+        telegram_id: "1000000000000",
+        display_name: "Локальный владелец",
+        role: "owner",
+        available_roles: ["customer", "owner"],
+        permissions: [],
+      },
+    });
+
+    try {
+      render(
+        <AuthProvider>
+          <AuthContext.Consumer>
+            {(auth) => <span>{auth?.actor?.display_name ?? "Входим"}</span>}
+          </AuthContext.Consumer>
+        </AuthProvider>,
+      );
+
+      expect(await screen.findByText("Локальный владелец")).toBeInTheDocument();
+      expect(bootstrap).toHaveBeenCalledWith("");
+    } finally {
+      coffeeApi.isDemo = originalDemoMode;
+      window.sessionStorage.clear();
+    }
+  });
+
   it("renders the personal card with an opaque QR and short code", async () => {
     vi.spyOn(coffeeApi, "getCard").mockResolvedValue(card);
     render(
@@ -118,6 +214,104 @@ describe("critical Mini App flows", () => {
 
     expect(await screen.findByText("Карточка найдена")).toBeInTheDocument();
     expect(lookup).toHaveBeenCalledWith({ short_code: "BEAN2026" });
+  });
+
+  it("passes a formatted phone to the backend customer lookup", async () => {
+    const user = userEvent.setup();
+    const lookup = vi
+      .spyOn(coffeeApi, "lookupStaffClient")
+      .mockResolvedValue(client);
+    render(
+      <MemoryRouter initialEntries={["/staff/scan"]}>
+        <StaffWorkspaceProvider>
+          <Routes>
+            <Route path="/staff/scan" element={<ScannerPage />} />
+            <Route
+              path="/staff/client/:userId"
+              element={<div>Клиент найден по телефону</div>}
+            />
+          </Routes>
+        </StaffWorkspaceProvider>
+      </MemoryRouter>,
+    );
+
+    await user.type(
+      screen.getByLabelText("Телефон клиента"),
+      "8 (999) 123-45-67",
+    );
+    await user.click(screen.getByRole("button", { name: "Найти по телефону" }));
+
+    expect(
+      await screen.findByText("Клиент найден по телефону"),
+    ).toBeInTheDocument();
+    expect(lookup).toHaveBeenCalledWith({ phone: "8 (999) 123-45-67" });
+  });
+
+  it("reuses one idempotency key when phone customer creation is retried", async () => {
+    const user = userEvent.setup();
+    const phoneClient: StaffClient = {
+      ...client,
+      user_id: "user-phone",
+      display_name: "Мария",
+      short_code: "PHONE123",
+      masked_short_code: "••••E123",
+      balance_points: 0,
+    };
+    const create = vi
+      .spyOn(coffeeApi, "createPhoneCustomer")
+      .mockRejectedValueOnce(new Error("Соединение потеряно"))
+      .mockResolvedValue({
+        user_id: phoneClient.user_id,
+        card_id: "card-phone",
+        display_name: phoneClient.display_name,
+        masked_phone: "+7*******4567",
+        short_code: phoneClient.short_code,
+        points_balance: 0,
+        idempotent_replay: true,
+      });
+    const lookup = vi
+      .spyOn(coffeeApi, "lookupStaffClient")
+      .mockResolvedValue(phoneClient);
+    render(
+      <MemoryRouter initialEntries={["/staff/scan"]}>
+        <StaffWorkspaceProvider>
+          <Routes>
+            <Route path="/staff/scan" element={<ScannerPage />} />
+            <Route
+              path="/staff/client/:userId"
+              element={<div>Карточка создана</div>}
+            />
+          </Routes>
+        </StaffWorkspaceProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Создать нового клиента" }),
+    );
+    await user.type(
+      screen.getByLabelText("Телефон нового клиента"),
+      "+7 999 123-45-67",
+    );
+    await user.type(screen.getByLabelText("Имя"), "Мария");
+    await user.click(screen.getByRole("button", { name: "Создать карту" }));
+
+    expect(await screen.findByText("Соединение потеряно")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Создать карту" }));
+
+    expect(await screen.findByText("Карточка создана")).toBeInTheDocument();
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0]?.[0]).toEqual({
+      phone: "+7 999 123-45-67",
+      display_name: "Мария",
+    });
+    const firstKey = create.mock.calls[0]?.[1];
+    const retryKey = create.mock.calls[1]?.[1];
+    expect(firstKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(retryKey).toBe(firstKey);
+    expect(lookup).toHaveBeenCalledWith({ phone: "+7 999 123-45-67" });
   });
 
   it("previews and confirms a purchase with stamps and automatic visit", async () => {
@@ -308,6 +502,45 @@ describe("critical Mini App flows", () => {
     ).toBeInTheDocument();
   });
 
+  it("submits the backend feedback category for food and drinks", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getMore").mockResolvedValue({
+      contacts: {
+        coffee_shop_name: "Кофейня",
+        description: "Описание",
+        privacy_policy: "Политика",
+        locations: [],
+      },
+      staff: [],
+      promotions: [],
+    });
+    const submit = vi.spyOn(coffeeApi, "submitFeedback").mockResolvedValue({
+      id: "feedback-1",
+      status: "new",
+    });
+
+    render(
+      <MemoryRouter>
+        <MorePage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Кофейня");
+    await user.selectOptions(
+      screen.getByLabelText("Категория"),
+      "food_and_drinks",
+    );
+    await user.type(screen.getByLabelText("Сообщение"), "Очень вкусный кофе");
+    await user.click(screen.getByRole("button", { name: "Отправить" }));
+
+    expect(submit).toHaveBeenCalledWith({
+      rating: 5,
+      category: "food_and_drinks",
+      message: "Очень вкусный кофе",
+      may_contact: true,
+    });
+  });
+
   it("hides disabled loyalty progress and uses time-aware greetings", async () => {
     vi.spyOn(coffeeApi, "getHome").mockResolvedValue({
       card: { ...card, visits_enabled: false, stamps_enabled: false },
@@ -327,6 +560,63 @@ describe("critical Mini App flows", () => {
     expect(getTimeGreeting(new Date(2026, 0, 1, 12))).toBe("Добрый день");
     expect(getTimeGreeting(new Date(2026, 0, 1, 18))).toBe("Добрый вечер");
     expect(getTimeGreeting(new Date(2026, 0, 1, 23))).toBe("Доброй ночи");
+  });
+
+  it("restores and persists the customer venue selection on home", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(SELECTED_VENUE_STORAGE_KEY, foodVenue.id);
+    vi.spyOn(coffeeApi, "getHome").mockResolvedValue({
+      card,
+      active_rewards: [],
+      promotions: [],
+    });
+    vi.spyOn(coffeeApi, "getVenues").mockResolvedValue({
+      items: venues,
+      page: 1,
+      page_size: venues.length,
+      total: venues.length,
+    });
+
+    try {
+      render(
+        <MemoryRouter>
+          <HomePage />
+        </MemoryRouter>,
+      );
+
+      const selector = await screen.findByLabelText("Заведение");
+      expect(selector).toHaveValue(foodVenue.id);
+      await user.selectOptions(selector, grillVenue.id);
+
+      expect(selector).toHaveValue(grillVenue.id);
+      expect(window.localStorage.getItem(SELECTED_VENUE_STORAGE_KEY)).toBe(
+        grillVenue.id,
+      );
+    } finally {
+      window.localStorage.removeItem(SELECTED_VENUE_STORAGE_KEY);
+    }
+  });
+
+  it("falls back when the selected venue disappears from the public list", async () => {
+    window.localStorage.setItem(SELECTED_VENUE_STORAGE_KEY, foodVenue.id);
+
+    try {
+      const view = render(<VenueSelectionHarness items={venues} />);
+      expect(screen.getByLabelText("Заведение")).toHaveValue(foodVenue.id);
+
+      view.rerender(
+        <VenueSelectionHarness items={[grillVenue, coffeeVenue]} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Заведение")).toHaveValue(grillVenue.id);
+        expect(window.localStorage.getItem(SELECTED_VENUE_STORAGE_KEY)).toBe(
+          grillVenue.id,
+        );
+      });
+    } finally {
+      window.localStorage.removeItem(SELECTED_VENUE_STORAGE_KEY);
+    }
   });
 
   it("shows an earned visit or stamp reward as a scannable QR on home", async () => {
@@ -523,6 +813,153 @@ describe("critical Mini App flows", () => {
     });
   });
 
+  it("previews a merge and preserves its idempotency key across retries", async () => {
+    const user = userEvent.setup();
+    const sourceUserId = "11111111-1111-4111-8111-111111111111";
+    const canonicalUserId = "22222222-2222-4222-8222-222222222222";
+    const preview: CustomerMergePreview = {
+      source: {
+        user_id: sourceUserId,
+        display_name: "Телефонный дубль",
+        status: "active",
+        identity_providers: ["phone"],
+        points_balance: 70,
+        stamp_count: 3,
+        visit_streak: 2,
+        last_visit_business_date: "2026-08-23",
+        staff_role: null,
+      },
+      canonical: {
+        user_id: canonicalUserId,
+        display_name: "Основной клиент",
+        status: "active",
+        identity_providers: ["telegram"],
+        points_balance: 120,
+        stamp_count: 4,
+        visit_streak: 5,
+        last_visit_business_date: "2026-08-24",
+        staff_role: null,
+      },
+      preview_hash: "a".repeat(64),
+      points_to_transfer: 70,
+      stamps_to_transfer: 3,
+      visit_snapshot_from_user_id: canonicalUserId,
+      identities_to_move: 1,
+      rewards_to_move: 2,
+      sessions_to_revoke: 3,
+      cards_to_revoke: 2,
+      source_staff_rebound: false,
+    };
+    const result: CustomerMergeResult = {
+      merge_id: "33333333-3333-4333-8333-333333333333",
+      source_user_id: sourceUserId,
+      canonical_user_id: canonicalUserId,
+      preview_hash: preview.preview_hash,
+      completed_at: "2026-08-24T12:00:00Z",
+      points_transferred: 70,
+      canonical_points_after: 190,
+      stamps_transferred: 3,
+      canonical_stamps_after: 7,
+      visit_snapshot_from_user_id: canonicalUserId,
+      identities_moved: 1,
+      rewards_moved: 2,
+      sessions_revoked: 3,
+      cards_revoked: 2,
+      source_staff_rebound: false,
+      idempotent_replay: false,
+    };
+    const requestPreview = vi
+      .spyOn(coffeeApi, "previewCustomerMerge")
+      .mockResolvedValue(preview);
+    const confirm = vi
+      .spyOn(coffeeApi, "confirmCustomerMerge")
+      .mockRejectedValueOnce(new Error("Ответ сервера потерян"))
+      .mockRejectedValueOnce(new Error("Ответ сервера потерян"))
+      .mockResolvedValue(result);
+
+    render(
+      <MemoryRouter>
+        <AdminCustomerMergePage />
+      </MemoryRouter>,
+    );
+
+    await user.type(
+      screen.getByLabelText("UUID исходного профиля"),
+      sourceUserId,
+    );
+    await user.type(
+      screen.getByLabelText("UUID основного профиля"),
+      canonicalUserId,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Показать последствия" }),
+    );
+
+    const previewRegion = await screen.findByLabelText(
+      "Предпросмотр объединения",
+    );
+    expect(requestPreview).toHaveBeenCalledWith({
+      source_user_id: sourceUserId,
+      canonical_user_id: canonicalUserId,
+    });
+    expect(previewRegion).toHaveTextContent(
+      "Исходный профиль станет недоступен",
+    );
+    expect(previewRegion).toHaveTextContent("карт к отзыву");
+    expect(previewRegion).toHaveTextContent("сеансов к отзыву");
+    expect(previewRegion).toHaveTextContent("карты будут отозваны (2)");
+    expect(previewRegion).toHaveTextContent("сеансы завершены (3)");
+
+    await user.type(
+      screen.getByLabelText("Причина объединения"),
+      "Подтверждённый дубликат",
+    );
+    await user.click(screen.getByRole("checkbox", { name: /я понимаю/i }));
+    const confirmButton = screen.getByRole("button", {
+      name: "Объединить профили",
+    });
+    await user.click(confirmButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Ответ сервера потерян",
+    );
+
+    await user.click(confirmButton);
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
+    const firstKey = confirm.mock.calls[0]?.[1];
+    const retryKey = confirm.mock.calls[1]?.[1];
+    expect(confirm.mock.calls[0]?.[0]).toEqual({
+      source_user_id: sourceUserId,
+      canonical_user_id: canonicalUserId,
+      preview_hash: preview.preview_hash,
+      reason: "Подтверждённый дубликат",
+      confirm: true,
+    });
+    expect(confirm.mock.calls[1]?.[0]).toEqual(confirm.mock.calls[0]?.[0]);
+    expect(firstKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(retryKey).toBe(firstKey);
+
+    await user.clear(screen.getByLabelText("Причина объединения"));
+    await user.type(
+      screen.getByLabelText("Причина объединения"),
+      "Клиент подтвердил дубликат",
+    );
+    await user.click(screen.getByRole("checkbox", { name: /я понимаю/i }));
+    await user.click(confirmButton);
+
+    expect(await screen.findByText("Профили объединены")).toBeInTheDocument();
+    expect(confirm).toHaveBeenCalledTimes(3);
+    expect(confirm.mock.calls[2]?.[0]).toEqual({
+      source_user_id: sourceUserId,
+      canonical_user_id: canonicalUserId,
+      preview_hash: preview.preview_hash,
+      reason: "Клиент подтвердил дубликат",
+      confirm: true,
+    });
+    expect(confirm.mock.calls[2]?.[1]).not.toBe(firstKey);
+  });
+
   it("shows only list-safe client fields before opening a client", async () => {
     const clientItem: AdminUserListItem = {
       id: "user-1",
@@ -552,6 +989,33 @@ describe("critical Mini App flows", () => {
       screen.getByRole("link", { name: "Открыть клиента" }),
     ).toHaveAttribute("href", "/admin/users/user-1/adjust");
     expect(screen.queryByText(/баллов/i)).not.toBeInTheDocument();
+  });
+
+  it("renders a phone-only customer without a null Telegram label", async () => {
+    const clientItem: AdminUserListItem = {
+      id: "phone-user",
+      telegram_id: null,
+      display_name: "Мария",
+      username: null,
+      status: "active",
+      created_at: "2026-08-24T10:00:00Z",
+    };
+    vi.spyOn(coffeeApi, "getAdminUsers").mockResolvedValue({
+      items: [clientItem],
+      page: 1,
+      page_size: 50,
+      total: 1,
+    });
+
+    render(
+      <MemoryRouter>
+        <AdminUsersPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Мария")).toBeInTheDocument();
+    expect(screen.getByText("Без Telegram")).toBeInTheDocument();
+    expect(screen.queryByText("Telegram null")).not.toBeInTheDocument();
   });
 
   it("lets the owner process a customer review", async () => {
@@ -644,13 +1108,12 @@ describe("critical Mini App flows", () => {
     expect(remove).toHaveBeenCalledWith("feedback-archived");
   });
 
-  it("shows employee actions only in settings and supports disable and delete", async () => {
+  it("shows phone-only staff actions only in settings and supports disable and delete", async () => {
     const user = userEvent.setup();
     const member: AdminStaffMember = {
       id: "staff-1",
       user_id: "user-1",
-      telegram_id: "10001",
-      username: "anna",
+      telegram_id: null,
       display_name: "Анна",
       position: "Бариста",
       role: "staff",
@@ -706,6 +1169,8 @@ describe("critical Mini App flows", () => {
     );
 
     expect(await screen.findByText("Анна")).toBeInTheDocument();
+    expect(screen.getByText("Без Telegram")).toBeInTheDocument();
+    expect(screen.queryByText("Telegram null")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Сохранить" }),
     ).not.toBeInTheDocument();

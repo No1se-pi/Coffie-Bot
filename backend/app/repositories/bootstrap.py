@@ -14,8 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
-from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion
-from app.models.enums import AuditSeverity, PermissionCode, Role, UserStatus
+from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion, Venue
+from app.models.customers import CustomerIdentity
+from app.models.enums import (
+    AuditSeverity,
+    IdentityProvider,
+    PermissionCode,
+    Role,
+    UserStatus,
+)
 from app.models.loyalty import LoyaltySettings, RewardTemplate
 from app.models.media import MediaFile
 
@@ -85,6 +92,28 @@ class BootstrapRepository:
             )
         )
         await self._session.execute(statement)
+
+    async def upsert_venue(
+        self,
+        entity_id: UUID,
+        slug: str,
+        values: Mapping[str, Any],
+    ) -> UUID:
+        """Upsert a seeded Venue while adopting a same-slug admin row safely."""
+
+        venue = await self._session.get(Venue, entity_id, with_for_update=True)
+        if venue is None:
+            venue = await self._session.scalar(
+                select(Venue).where(Venue.slug == slug).with_for_update()
+            )
+        if venue is None:
+            venue = Venue(id=entity_id, slug=slug, **values)
+            self._session.add(venue)
+        else:
+            venue.slug = slug
+            _assign(venue, values)
+        await self._session.flush()
+        return venue.id
 
     async def upsert_location(self, slug: str, values: Mapping[str, Any]) -> UUID:
         if values.get("is_default") is True:
@@ -321,6 +350,14 @@ class BootstrapRepository:
         locations = list(
             (await self._session.scalars(select(Location).order_by(Location.sort_order))).all()
         )
+        venues = list(
+            (
+                await self._session.scalars(
+                    select(Venue).order_by(Venue.sort_order, Venue.name, Venue.id)
+                )
+            ).all()
+        )
+        venue_slugs = {item.id: item.slug for item in venues}
         loyalty = await self._session.scalar(
             select(LoyaltySettings).where(LoyaltySettings.singleton_key == "default")
         )
@@ -356,7 +393,16 @@ class BootstrapRepository:
             "schema_version": 1,
             "exported_at": datetime.now(UTC).isoformat(),
             "app_settings": app_settings,
-            "locations": [_location_export(item) for item in locations],
+            "venues": [_venue_export(item) for item in venues],
+            "locations": [
+                _location_export(
+                    item,
+                    venue_slug=(
+                        venue_slugs.get(item.venue_id) if item.venue_id is not None else None
+                    ),
+                )
+                for item in locations
+            ],
             "loyalty_settings": _loyalty_export(loyalty),
             "reward_templates": [_reward_export(item) for item in rewards],
             "menu": {
@@ -373,26 +419,66 @@ class BootstrapRepository:
         first_name: str,
         replace_name: bool = False,
     ) -> User:
+        subject = str(telegram_id)
+        user = await self._session.scalar(
+            select(User)
+            .join(CustomerIdentity, CustomerIdentity.user_id == User.id)
+            .where(
+                CustomerIdentity.provider == IdentityProvider.TELEGRAM,
+                CustomerIdentity.subject == subject,
+            )
+            .with_for_update(of=User)
+        )
         set_values: dict[str, Any] = {"status": UserStatus.ACTIVE}
         if replace_name:
             set_values["first_name"] = first_name
-        user_id = await self._session.scalar(
-            pg_insert(User)
-            .values(
-                id=uuid4(),
-                telegram_id=telegram_id,
-                first_name=first_name,
-                status=UserStatus.ACTIVE,
+        if user is None:
+            user_id = await self._session.scalar(
+                pg_insert(User)
+                .values(
+                    id=uuid4(),
+                    telegram_id=telegram_id,
+                    first_name=first_name,
+                    status=UserStatus.ACTIVE,
+                )
+                .on_conflict_do_update(
+                    index_elements=[User.telegram_id],
+                    set_=set_values,
+                )
+                .returning(User.id)
             )
-            .on_conflict_do_update(
-                index_elements=[User.telegram_id],
-                set_=set_values,
-            )
-            .returning(User.id)
-        )
-        user = await self._session.get(User, user_id)
+            user = await self._session.get(User, user_id)
         if user is None:
             raise RuntimeError("User upsert did not return a row")
+
+        # Seed/owner CLI runs after migrations and must obey the same
+        # identity-first rule as Telegram auth, including after account merge.
+        now = datetime.now(UTC)
+        identity_owner_id = await self._session.scalar(
+            pg_insert(CustomerIdentity)
+            .values(
+                id=uuid4(),
+                user_id=user.id,
+                provider=IdentityProvider.TELEGRAM,
+                subject=subject,
+                is_verified=True,
+                verified_at=now,
+                last_used_at=now,
+                provider_metadata={"source": "bootstrap"},
+            )
+            .on_conflict_do_update(
+                index_elements=[CustomerIdentity.provider, CustomerIdentity.subject],
+                set_={"is_verified": True, "last_used_at": now},
+            )
+            .returning(CustomerIdentity.user_id)
+        )
+        if identity_owner_id != user.id:
+            raise RuntimeError("Telegram identity belongs to another customer profile")
+        if user.telegram_id is None:
+            user.telegram_id = telegram_id
+        user.status = UserStatus.ACTIVE
+        if replace_name:
+            user.first_name = first_name
         return user
 
 
@@ -401,10 +487,29 @@ def _assign(target: object, values: Mapping[str, Any]) -> None:
         setattr(target, key, value)
 
 
-def _location_export(item: Location) -> dict[str, Any]:
+def _venue_export(item: Venue) -> dict[str, Any]:
     return {
         "id": str(item.id),
         "slug": item.slug,
+        "name": item.name,
+        "description": item.description,
+        "phone": item.phone,
+        "email": item.email,
+        "website": item.website,
+        "telegram": item.telegram,
+        "logo_media_id": str(item.logo_media_id) if item.logo_media_id is not None else None,
+        "is_active": item.is_active,
+        "sort_order": item.sort_order,
+        "archived_at": _json_value(item.archived_at),
+    }
+
+
+def _location_export(item: Location, *, venue_slug: str | None) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "slug": item.slug,
+        "venue_id": str(item.venue_id) if item.venue_id is not None else None,
+        "venue_slug": venue_slug,
         "name": item.name,
         "description": item.description,
         "address": item.address,

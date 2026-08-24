@@ -21,6 +21,7 @@ import {
 } from "./pages/staff";
 import {
   AdminAdjustmentPage,
+  AdminCustomerMergePage,
   AdminEventsPage,
   AdminFeedbackPage,
   AdminMenuPage,
@@ -82,6 +83,10 @@ export default function App() {
               >
                 <Route index element={<AdminOverviewPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
+                <Route
+                  path="customer-merge"
+                  element={<AdminCustomerMergePage />}
+                />
                 <Route path="staff" element={<AdminStaffPage />} />
                 <Route
                   path="users/:userId/adjust"

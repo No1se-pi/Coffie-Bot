@@ -95,20 +95,30 @@ class BroadcastService:
         result = DeliveryBatchResult(claimed=len(jobs))
         touched = {job.broadcast_id for job in jobs}
         for job in jobs:
-            if job.user_status != UserStatus.ACTIVE:
+            telegram_id = job.telegram_id
+            if telegram_id is None:
+                reason = "telegram_identity_missing"
+            elif job.user_status != UserStatus.ACTIVE:
+                reason = f"user_{job.user_status.value}"
+            else:
+                reason = None
+            if reason is not None:
+                # Broadcast audience can include phone-only profiles. Mark those
+                # rows as skipped instead of retrying an impossible Telegram send.
                 settled = await self._repository.mark_broadcast_skipped(
                     job.id,
                     lease_until=job.lease_until,
-                    reason=f"user_{job.user_status.value}",
+                    reason=reason,
                 )
                 if settled:
                     result.skipped += 1
                 else:
                     result.stale += 1
                 continue
+            assert telegram_id is not None  # Narrowed by the channel check above.
             try:
                 message_id = await self._sender.send(
-                    job.telegram_id,
+                    telegram_id,
                     OutboundMessage(
                         text=job.message,
                         button_label=job.button_label,

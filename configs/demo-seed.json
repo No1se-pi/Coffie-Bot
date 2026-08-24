@@ -24,13 +24,43 @@
     "telegram": "https://t.me/example",
     "privacy_policy_url": "https://example.com/privacy"
   },
+  "venues": [
+    {
+      "slug": "coffee-point",
+      "name": "Кофейня и точка",
+      "description": "Синтетическое демонстрационное заведение с кофейным меню.",
+      "phone": "+7 900 000-00-01",
+      "website": "https://example.com/coffee-point",
+      "is_active": true,
+      "sort_order": 10
+    },
+    {
+      "slug": "food-court",
+      "name": "ФудДворик",
+      "description": "Синтетическое демонстрационное заведение с блюдами на каждый день.",
+      "phone": "+7 900 000-00-02",
+      "website": "https://example.com/food-court",
+      "is_active": true,
+      "sort_order": 20
+    },
+    {
+      "slug": "shashlik-dzhan",
+      "name": "Шашлык Джан",
+      "description": "Синтетическое демонстрационное заведение с блюдами на гриле.",
+      "phone": "+7 900 000-00-03",
+      "website": "https://example.com/shashlik-dzhan",
+      "is_active": true,
+      "sort_order": 30
+    }
+  ],
   "locations": [
     {
-      "slug": "main",
-      "name": "Основная кофейня",
+      "slug": "coffee-point-main",
+      "venue_slug": "coffee-point",
+      "name": "Кофейня и точка — основная точка",
       "address": "Демо-адрес, 1",
       "timezone": "Europe/Moscow",
-      "phone": "+7 900 000-00-00",
+      "phone": "+7 900 000-00-01",
       "opening_hours": {
         "monday": "08:00-21:00",
         "tuesday": "08:00-21:00",
@@ -41,7 +71,48 @@
         "sunday": "09:00-21:00"
       },
       "is_default": true,
-      "is_active": true
+      "is_active": true,
+      "sort_order": 10
+    },
+    {
+      "slug": "food-court-main",
+      "venue_slug": "food-court",
+      "name": "ФудДворик — основная точка",
+      "address": "Демо-адрес, 2",
+      "timezone": "Europe/Moscow",
+      "phone": "+7 900 000-00-02",
+      "opening_hours": {
+        "monday": "10:00-22:00",
+        "tuesday": "10:00-22:00",
+        "wednesday": "10:00-22:00",
+        "thursday": "10:00-22:00",
+        "friday": "10:00-23:00",
+        "saturday": "10:00-23:00",
+        "sunday": "10:00-22:00"
+      },
+      "is_default": false,
+      "is_active": true,
+      "sort_order": 20
+    },
+    {
+      "slug": "shashlik-dzhan-main",
+      "venue_slug": "shashlik-dzhan",
+      "name": "Шашлык Джан — основная точка",
+      "address": "Демо-адрес, 3",
+      "timezone": "Europe/Moscow",
+      "phone": "+7 900 000-00-03",
+      "opening_hours": {
+        "monday": "11:00-23:00",
+        "tuesday": "11:00-23:00",
+        "wednesday": "11:00-23:00",
+        "thursday": "11:00-23:00",
+        "friday": "11:00-00:00",
+        "saturday": "11:00-00:00",
+        "sunday": "11:00-23:00"
+      },
+      "is_default": false,
+      "is_active": true,
+      "sort_order": 30
     }
   ],
   "loyalty": {

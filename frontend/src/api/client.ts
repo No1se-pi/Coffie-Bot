@@ -11,6 +11,10 @@ import type {
   AuthSession,
   CardData,
   ContactsData,
+  CustomerMergeConfirmRequest,
+  CustomerMergePreview,
+  CustomerMergePreviewRequest,
+  CustomerMergeResult,
   HistoryItem,
   HomeData,
   ListResponse,
@@ -21,6 +25,8 @@ import type {
   MenuItemDraft,
   MediaUpload,
   OperationResult,
+  PhoneCustomer,
+  PhoneCustomerCreate,
   Promotion,
   PromotionDraft,
   PointsMenuPurchase,
@@ -31,11 +37,13 @@ import type {
   Reward,
   Role,
   StaffClient,
+  StaffClientLookup,
   StaffRewardLookup,
   StaffMemberDraft,
   StaffProfile,
   TipProfile,
   PendingTipProfile,
+  Venue,
 } from "./types";
 import { demoApi } from "./demo";
 
@@ -169,11 +177,25 @@ function jsonBody(value: unknown): string {
 }
 
 function uuid(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `fallback-${Date.now()}-${Math.random()}`
-  );
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+
+  // FastAPI validates Idempotency-Key as a UUID, including in older WebViews
+  // where randomUUID is missing but getRandomValues is still available.
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 }
+
+export const createIdempotencyKey = uuid;
 
 function validateMediaFile(file: File): void {
   if (file.size > MAX_MEDIA_BYTES) {
@@ -488,6 +510,8 @@ export const coffeeApi = {
     setSessionToken(null);
   },
   getHome,
+  getVenues: (): Promise<ListResponse<Venue>> =>
+    isDemoMode ? demoApi.getVenues() : request("/venues"),
   getCard: (): Promise<CardData> =>
     isDemoMode ? demoApi.getCard() : request("/me/card"),
   getHistory: (type?: string): Promise<ListResponse<HistoryItem>> =>
@@ -540,10 +564,9 @@ export const coffeeApi = {
     isDemoMode
       ? demoApi.submitFeedback(payload)
       : request("/feedback", { method: "POST", body: jsonBody(payload) }),
-  lookupStaffClient: async (payload: {
-    qr_token?: string;
-    short_code?: string;
-  }): Promise<StaffClient> =>
+  lookupStaffClient: async (
+    payload: StaffClientLookup,
+  ): Promise<StaffClient> =>
     isDemoMode
       ? demoApi.lookupStaffClient(payload)
       : normalizeStaffClient(
@@ -552,6 +575,17 @@ export const coffeeApi = {
             body: jsonBody(payload),
           }),
         ),
+  createPhoneCustomer: (
+    payload: PhoneCustomerCreate,
+    idempotencyKey: string,
+  ): Promise<PhoneCustomer> =>
+    isDemoMode
+      ? demoApi.createPhoneCustomer(payload, idempotencyKey)
+      : request("/staff/customers", {
+          method: "POST",
+          body: jsonBody(payload),
+          idempotencyKey,
+        }),
   previewAccrual: async (payload: {
     user_id: string;
     purchase_amount_minor: number;
@@ -756,6 +790,26 @@ export const coffeeApi = {
             `/admin/users/${encodeURIComponent(id)}`,
           ),
         ),
+  previewCustomerMerge: (
+    payload: CustomerMergePreviewRequest,
+  ): Promise<CustomerMergePreview> =>
+    isDemoMode
+      ? demoApi.previewCustomerMerge(payload)
+      : request("/admin/customer-merge/preview", {
+          method: "POST",
+          body: jsonBody(payload),
+        }),
+  confirmCustomerMerge: (
+    payload: CustomerMergeConfirmRequest,
+    idempotencyKey: string,
+  ): Promise<CustomerMergeResult> =>
+    isDemoMode
+      ? demoApi.confirmCustomerMerge(payload, idempotencyKey)
+      : request("/admin/customer-merge/confirm", {
+          method: "POST",
+          body: jsonBody(payload),
+          idempotencyKey,
+        }),
   getAdminEvents: (
     filters: { severity?: string; suspicious?: boolean } = {},
   ): Promise<ListResponse<AuditEvent>> =>

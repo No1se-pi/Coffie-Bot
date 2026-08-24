@@ -3,7 +3,8 @@
 from app.models.access import Session, StaffInvite, StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
-from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion
+from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion, Venue
+from app.models.customers import CustomerIdentity, CustomerMerge
 from app.models.delivery import Broadcast, BroadcastDelivery, NotificationOutbox
 from app.models.loyalty import (
     LoyaltyOperation,
@@ -23,6 +24,8 @@ __all__ = [
     "AuditEvent",
     "Broadcast",
     "BroadcastDelivery",
+    "CustomerIdentity",
+    "CustomerMerge",
     "FeedbackItem",
     "Location",
     "LoyaltyOperation",
@@ -44,5 +47,6 @@ __all__ = [
     "User",
     "UserCard",
     "UserLoyaltyState",
+    "Venue",
     "Visit",
 ]

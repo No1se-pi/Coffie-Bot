@@ -113,8 +113,13 @@ class FakeRepository:
         *,
         qr_token: str | None,
         short_code: str | None,
+        phone: str | None,
     ) -> LoyaltyContext | None:
-        if qr_token == self.context.card.qr_token or short_code == self.context.card.short_code:
+        if (
+            qr_token == self.context.card.qr_token
+            or short_code == self.context.card.short_code
+            or phone == "+79991234567"
+        ):
             return self.context
         return None
 
@@ -328,6 +333,22 @@ async def test_lookup_card_returns_operational_customer_summary() -> None:
     assert result.currency_name == context.settings.currency_name
     assert result.active_rewards == ()
     assert result.recent_operations == ()
+
+
+@pytest.mark.asyncio
+async def test_lookup_card_normalizes_phone_before_repository_query() -> None:
+    context = loyalty_context(points_balance=37)
+    repository = FakeRepository(context)
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+
+    result = await service.lookup_card(
+        staff_actor(PermissionCode.CARD_LOOKUP),
+        qr_token=None,
+        short_code=None,
+        phone="8 (999) 123-45-67",
+    )
+
+    assert result.user_id == context.user.id
 
 
 @pytest.mark.asyncio

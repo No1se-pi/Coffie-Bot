@@ -24,6 +24,19 @@ export interface ListResponse<T> {
   total: number;
 }
 
+export interface Venue {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  telegram: string | null;
+  logo_url: string | null;
+  sort_order: number;
+}
+
 export interface CardData {
   user_id: string;
   display_name: string;
@@ -220,6 +233,26 @@ export interface StaffClient {
   recent_operations: HistoryItem[];
 }
 
+export type StaffClientLookup =
+  | { qr_token: string; short_code?: never; phone?: never }
+  | { qr_token?: never; short_code: string; phone?: never }
+  | { qr_token?: never; short_code?: never; phone: string };
+
+export interface PhoneCustomerCreate {
+  phone: string;
+  display_name?: string | null;
+}
+
+export interface PhoneCustomer {
+  user_id: string;
+  card_id: string;
+  display_name: string;
+  masked_phone: string;
+  short_code: string;
+  points_balance: number;
+  idempotent_replay: boolean;
+}
+
 export interface AccrualPreview {
   user_id: string;
   customer_name: string;
@@ -328,7 +361,7 @@ export interface PostPurchase {
 
 export interface AdminUserListItem {
   id: string;
-  telegram_id: string | number;
+  telegram_id: string | number | null;
   display_name: string;
   username?: string | null;
   status: "active" | "blocked";
@@ -378,6 +411,7 @@ export interface AdminFeedback {
 
 export type OperationalPermission =
   | "card.lookup"
+  | "customers.create"
   | "points.accrue"
   | "points.redeem"
   | "visits.mark"
@@ -394,7 +428,7 @@ export interface PermissionOverride {
 export interface AdminStaffMember {
   id: string;
   user_id: string;
-  telegram_id: string | number;
+  telegram_id: string | number | null;
   username?: string | null;
   display_name: string;
   position?: string | null;
@@ -405,6 +439,64 @@ export interface AdminStaffMember {
   permissions: PermissionOverride[];
   created_at: string;
   updated_at: string;
+}
+
+export type CustomerIdentityProvider = "telegram" | "phone" | "max";
+
+export interface CustomerMergeProfile {
+  user_id: string;
+  display_name: string;
+  status: "active" | "blocked" | "inactive" | "anonymized" | "merged";
+  identity_providers: CustomerIdentityProvider[];
+  points_balance: number;
+  stamp_count: number;
+  visit_streak: number;
+  last_visit_business_date: string | null;
+  staff_role: Role | null;
+}
+
+export interface CustomerMergePreviewRequest {
+  source_user_id: string;
+  canonical_user_id: string;
+}
+
+export interface CustomerMergePreview {
+  source: CustomerMergeProfile;
+  canonical: CustomerMergeProfile;
+  preview_hash: string;
+  points_to_transfer: number;
+  stamps_to_transfer: number;
+  visit_snapshot_from_user_id: string | null;
+  identities_to_move: number;
+  rewards_to_move: number;
+  sessions_to_revoke: number;
+  cards_to_revoke: number;
+  source_staff_rebound: boolean;
+}
+
+export interface CustomerMergeConfirmRequest extends CustomerMergePreviewRequest {
+  preview_hash: string;
+  reason: string;
+  confirm: true;
+}
+
+export interface CustomerMergeResult {
+  merge_id: string;
+  source_user_id: string;
+  canonical_user_id: string;
+  preview_hash: string;
+  completed_at: string;
+  points_transferred: number;
+  canonical_points_after: number;
+  stamps_transferred: number;
+  canonical_stamps_after: number;
+  visit_snapshot_from_user_id: string | null;
+  identities_moved: number;
+  rewards_moved: number;
+  sessions_revoked: number;
+  cards_revoked: number;
+  source_staff_rebound: boolean;
+  idempotent_replay: boolean;
 }
 
 export interface StaffMemberDraft {

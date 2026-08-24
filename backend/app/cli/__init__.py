@@ -54,6 +54,7 @@ async def run_command(args: argparse.Namespace, settings: Settings) -> int:
                 )
                 print(
                     "Seed applied: "
+                    f"{report.venues} venues, "
                     f"{report.locations} locations, "
                     f"{report.reward_templates} rewards, "
                     f"{report.menu_items} menu items, "

@@ -10,18 +10,21 @@ from datetime import date, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import Select, String, func, or_, select, update
+from sqlalchemy import Select, String, func, literal, or_, select, update
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.access import Session, StaffMember, User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
 from app.models.content import MenuItem
+from app.models.customers import CustomerIdentity, CustomerMerge
 from app.models.delivery import NotificationOutbox
 from app.models.enums import (
     AuditSeverity,
     CardStatus,
+    IdentityProvider,
     LoyaltyOperationType,
     OperationStatus,
     RewardStatus,
@@ -129,21 +132,33 @@ class LoyaltyRepository:
         *,
         qr_token: str | None,
         short_code: str | None,
+        phone: str | None,
     ) -> LoyaltyContext | None:
         identifiers = []
         if qr_token is not None:
             identifiers.append(UserCard.qr_token == qr_token)
         if short_code is not None:
             identifiers.append(UserCard.short_code == short_code)
+        if phone is not None:
+            identifiers.append(CustomerIdentity.subject == phone)
         if len(identifiers) != 1:
             raise ValueError("exactly one card identifier is required")
-        return await self._context_from_statement(
+        statement = (
             select(User, UserCard, UserLoyaltyState, LoyaltySettings)
             .join(UserCard, UserCard.user_id == User.id)
             .join(UserLoyaltyState, UserLoyaltyState.user_id == User.id)
             .join(LoyaltySettings, LoyaltySettings.singleton_key == "default")
             .where(UserCard.status == CardStatus.ACTIVE, identifiers[0])
         )
+        if phone is not None:
+            statement = statement.join(
+                CustomerIdentity,
+                CustomerIdentity.user_id == User.id,
+            ).where(
+                CustomerIdentity.provider == IdentityProvider.PHONE,
+                CustomerIdentity.is_verified.is_(True),
+            )
+        return await self._context_from_statement(statement)
 
     async def get_context(
         self,
@@ -388,9 +403,19 @@ class LoyaltyRepository:
         page: int,
         page_size: int,
     ) -> OperationPage:
-        filters = []
+        filters: list[ColumnElement[bool]] = []
         if user_id is not None:
-            filters.append(LoyaltyOperation.user_id == user_id)
+            lineage = select(literal(user_id).label("user_id")).cte(
+                "admin_customer_history_lineage",
+                recursive=True,
+            )
+            merge_edges = CustomerMerge.__table__.alias("admin_customer_history_merge_edges")
+            lineage = lineage.union_all(
+                select(merge_edges.c.source_user_id).where(
+                    merge_edges.c.canonical_user_id == lineage.c.user_id
+                )
+            )
+            filters.append(LoyaltyOperation.user_id.in_(select(lineage.c.user_id)))
         if actor_staff_id is not None:
             filters.append(LoyaltyOperation.actor_staff_id == actor_staff_id)
         total = int(

@@ -3,24 +3,28 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.access import Session, StaffMember, User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.customers import CustomerIdentity, CustomerMerge
 from app.models.delivery import NotificationOutbox
 from app.models.enums import (
     AuditSeverity,
     CardStatus,
+    IdentityProvider,
     LoyaltyOperationType,
     OperationStatus,
     OutboxStatus,
@@ -95,38 +99,83 @@ class IdentityRepository:
         *,
         now: datetime,
     ) -> tuple[User, bool]:
-        """Insert exactly once by Telegram ID, then lock and refresh public fields."""
+        """Resolve the Telegram identity, lazily repairing the legacy projection.
 
-        user_id = uuid4()
-        values = {
-            "id": user_id,
-            "telegram_id": telegram_user.id,
-            "username": _truncate(telegram_user.username, 64),
-            "first_name": _truncate(telegram_user.first_name, 128) or "Telegram user",
-            "last_name": _truncate(telegram_user.last_name, 128),
-            "language_code": _truncate(telegram_user.language_code, 16),
-            "photo_url": _truncate(telegram_user.photo_url, 2048),
-            "status": UserStatus.ACTIVE,
-            "last_seen_at": now,
-        }
-        statement = (
-            pg_insert(User)
-            .values(**values)
-            .on_conflict_do_nothing(index_elements=[User.telegram_id])
-            .returning(User.id)
-        )
-        inserted_id = await self._session.scalar(statement)
-        created = inserted_id is not None
+        The legacy unique ``users.telegram_id`` remains an expand/contract safety net
+        during rollout. Authoritative lookups use ``customer_identities`` first, so a
+        user inserted by an old process during migration is repaired on first login.
+        """
 
-        if created:
-            user = await self._session.get(User, inserted_id)
-        else:
-            user = await self._session.scalar(
-                select(User).where(User.telegram_id == telegram_user.id).with_for_update()
+        subject = str(telegram_user.id)
+        user = await self._session.scalar(
+            select(User)
+            .join(CustomerIdentity, CustomerIdentity.user_id == User.id)
+            .where(
+                CustomerIdentity.provider == IdentityProvider.TELEGRAM,
+                CustomerIdentity.subject == subject,
             )
-        if user is None:  # Defensive: ON CONFLICT must identify the existing row.
-            raise RuntimeError("Telegram user upsert did not return a user")
+            .with_for_update(of=User)
+        )
+        if user is not None:
+            created = False
+        else:
+            user_id = uuid4()
+            values = {
+                "id": user_id,
+                "telegram_id": telegram_user.id,
+                "username": _truncate(telegram_user.username, 64),
+                "first_name": _truncate(telegram_user.first_name, 128) or "Telegram user",
+                "last_name": _truncate(telegram_user.last_name, 128),
+                "language_code": _truncate(telegram_user.language_code, 16),
+                "photo_url": _truncate(telegram_user.photo_url, 2048),
+                "status": UserStatus.ACTIVE,
+                "last_seen_at": now,
+            }
+            statement = (
+                pg_insert(User)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[User.telegram_id])
+                .returning(User.id)
+            )
+            inserted_id = await self._session.scalar(statement)
+            created = inserted_id is not None
 
+            if created:
+                user = await self._session.get(User, inserted_id)
+            else:
+                user = await self._session.scalar(
+                    select(User).where(User.telegram_id == telegram_user.id).with_for_update()
+                )
+            if user is None:  # Defensive: ON CONFLICT must identify the existing row.
+                raise RuntimeError("Telegram user upsert did not return a user")
+
+        identity_owner_id = await self._session.scalar(
+            pg_insert(CustomerIdentity)
+            .values(
+                id=uuid4(),
+                user_id=user.id,
+                provider=IdentityProvider.TELEGRAM,
+                subject=subject,
+                is_verified=True,
+                verified_at=now,
+                last_used_at=now,
+                provider_metadata={},
+            )
+            .on_conflict_do_update(
+                index_elements=[CustomerIdentity.provider, CustomerIdentity.subject],
+                set_={
+                    "is_verified": True,
+                    "verified_at": now,
+                    "last_used_at": now,
+                },
+            )
+            .returning(CustomerIdentity.user_id)
+        )
+        if identity_owner_id != user.id:
+            raise RuntimeError("Telegram identity belongs to another customer profile")
+
+        if user.telegram_id is None:
+            user.telegram_id = telegram_user.id
         user.username = _truncate(telegram_user.username, 64)
         user.first_name = _truncate(telegram_user.first_name, 128) or user.first_name
         user.last_name = _truncate(telegram_user.last_name, 128)
@@ -151,8 +200,19 @@ class IdentityRepository:
         now: datetime,
         ip_address: str | None,
         user_agent: str | None,
+        actor_user_id: UUID | None = None,
+        actor_staff_id: UUID | None = None,
+        event_type: str = "user.registered",
+        event_idempotency_key: str | None = None,
+        event_metadata: Mapping[str, Any] | None = None,
+        enqueue_telegram_notification: bool = True,
     ) -> None:
-        """Stage the complete first-registration aggregate in the current transaction."""
+        """Stage a card, loyalty snapshot, journal, audit, and optional outbox atomically.
+
+        Phone-only registration deliberately skips the Telegram outbox. The caller still
+        receives the same loyalty aggregate, while worker code never receives an invalid
+        chat ID.
+        """
 
         card_id = uuid4()
         loyalty_state = UserLoyaltyState(
@@ -181,7 +241,8 @@ class IdentityRepository:
             operation = LoyaltyOperation(
                 id=operation_id,
                 user_id=user_id,
-                actor_user_id=user_id,
+                actor_user_id=actor_user_id or user_id,
+                actor_staff_id=actor_staff_id,
                 operation_type=LoyaltyOperationType.WELCOME_BONUS,
                 status=OperationStatus.COMMITTED,
                 idempotency_key=f"welcome:{user_id}",
@@ -204,27 +265,35 @@ class IdentityRepository:
 
         audit = AuditEvent(
             id=uuid4(),
-            event_type="user.registered",
-            actor_user_id=user_id,
+            event_type=event_type,
+            actor_user_id=actor_user_id or user_id,
+            actor_staff_id=actor_staff_id,
             subject_user_id=user_id,
             object_type="user_card",
             object_id=card_id,
-            event_metadata={"welcome_bonus_points": welcome_bonus_points},
+            idempotency_key=event_idempotency_key,
+            event_metadata={
+                "welcome_bonus_points": welcome_bonus_points,
+                **dict(event_metadata or {}),
+            },
             severity=AuditSeverity.INFO,
             is_suspicious=False,
             ip_address=ip_address,
             user_agent=user_agent,
         )
-        notification = NotificationOutbox(
-            id=uuid4(),
-            user_id=user_id,
-            event_type="user.registered",
-            payload={"welcome_bonus_points": welcome_bonus_points},
-            idempotency_key=f"registration:{user_id}",
-            status=OutboxStatus.PENDING,
-            attempts=0,
-        )
-        staged.extend([audit, notification])
+        staged.append(audit)
+        if enqueue_telegram_notification:
+            staged.append(
+                NotificationOutbox(
+                    id=uuid4(),
+                    user_id=user_id,
+                    event_type="user.registered",
+                    payload={"welcome_bonus_points": welcome_bonus_points},
+                    idempotency_key=f"registration:{user_id}",
+                    status=OutboxStatus.PENDING,
+                    attempts=0,
+                )
+            )
         self._session.add_all(staged)
 
     def create_session(
@@ -309,7 +378,21 @@ class IdentityRepository:
         page: int,
         page_size: int,
     ) -> HistoryPageRecord:
-        filters = [LoyaltyOperation.user_id == user_id]
+        # Merge lineage is intentionally traversed at read time: immutable
+        # operations retain their original user_id, including across merge chains.
+        lineage = select(literal(user_id).label("user_id")).cte(
+            "customer_history_lineage",
+            recursive=True,
+        )
+        merge_edges = CustomerMerge.__table__.alias("customer_history_merge_edges")
+        lineage = lineage.union_all(
+            select(merge_edges.c.source_user_id).where(
+                merge_edges.c.canonical_user_id == lineage.c.user_id
+            )
+        )
+        filters: list[ColumnElement[bool]] = [
+            LoyaltyOperation.user_id.in_(select(lineage.c.user_id))
+        ]
         if operation_type is not None:
             filters.append(LoyaltyOperation.operation_type == operation_type)
         total = int(

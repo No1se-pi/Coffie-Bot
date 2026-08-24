@@ -57,6 +57,7 @@ async def lookup_card(
         actor,
         qr_token=payload.qr_token,
         short_code=payload.short_code,
+        phone=payload.phone,
     )
     return card_lookup_response(value)
 

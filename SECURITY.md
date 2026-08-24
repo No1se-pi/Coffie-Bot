@@ -1,7 +1,7 @@
 # Security policy and threat model
 
-Coffie Bot обрабатывает Telegram identity, историю лояльности, административные действия и
-контент одной кофейни. Backend является единственной доверенной границей для identity,
+Coffie Bot обрабатывает Telegram/phone identities, историю лояльности, заказы, доставку,
+административные действия и контент одной организации с несколькими заведениями. Backend является единственной доверенной границей для identity,
 ролей, расчётов и изменений состояния. Frontend, QR payload и входящие Telegram/HTTP данные
 считаются недоверенными.
 
@@ -32,6 +32,19 @@ Mini App отправляет backend исходную строку Telegram `in
 
 `DEV_AUTH_ENABLED` — только browser-development bypass. Production Settings и
 `compose.prod.yaml` должны завершать запуск при попытке включить bypass.
+
+## Customer identities и merge
+
+- Telegram и phone subjects уникальны внутри provider namespace; `users.id` остаётся
+  стабильным customer profile ID.
+- Phone-only профиль создаёт сотрудник с `customers.create`; API и audit возвращают только
+  маскированный номер/последние четыре цифры.
+- Self-link принимает только Telegram Contact с `contact.user_id == from_user.id`; вручную
+  введённый или пересланный контакт не считается доказательством владения.
+- Коллизия двух профилей не разрешается автоматическим переносом. Privileged preview/confirm
+  повторно блокирует обе записи, проверяет hash, требует reason/idempotency и пишет lineage.
+- Merge не меняет owner IDs immutable journals. Source sessions/cards отзываются, source
+  становится `merged`, а canonical history читает lineage рекурсивно.
 
 ## Sessions
 

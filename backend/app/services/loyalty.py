@@ -85,6 +85,7 @@ class LoyaltyRepositoryPort(Protocol):
         *,
         qr_token: str | None,
         short_code: str | None,
+        phone: str | None,
     ) -> LoyaltyContext | None: ...
 
     async def get_context(
@@ -348,17 +349,27 @@ class LoyaltyService:
         *,
         qr_token: str | None,
         short_code: str | None,
+        phone: str | None = None,
     ) -> CardLookupView:
         _require_permission(actor, PermissionCode.CARD_LOOKUP)
-        if (qr_token is None) == (short_code is None):
-            _raise_validation("card_identifier_required", "Укажите QR или короткий код")
+        if sum(value is not None for value in (qr_token, short_code, phone)) != 1:
+            _raise_validation("card_identifier_required", "Укажите QR, короткий код или телефон")
+        normalized_phone = None
+        if phone is not None:
+            # Import stays local so the loyalty calculation module remains independent
+            # from registration flows while sharing one canonical phone normalizer.
+            from app.services.customers import normalize_phone
+
+            normalized_phone = normalize_phone(phone)
         context = await self._repository.lookup_card(
             qr_token=qr_token,
             short_code=short_code,
+            phone=normalized_phone,
         )
         if context is None or context.user.status in {
             UserStatus.INACTIVE,
             UserStatus.ANONYMIZED,
+            UserStatus.MERGED,
         }:
             _raise_not_found("Активная карта не найдена")
         rewards = await self._repository.list_rewards(

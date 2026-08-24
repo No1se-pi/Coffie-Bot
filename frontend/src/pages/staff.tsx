@@ -8,12 +8,17 @@ import {
   type ReactNode,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { coffeeApi, MEDIA_FILE_ACCEPT } from "../api/client";
+import {
+  coffeeApi,
+  createIdempotencyKey,
+  MEDIA_FILE_ACCEPT,
+} from "../api/client";
 import type {
   OperationResult,
   PurchasePreview,
   RedemptionPreview,
   StaffClient,
+  StaffClientLookup,
   StaffRewardLookup,
   TipProfile,
 } from "../api/types";
@@ -68,7 +73,7 @@ export function StaffHomePage() {
           <p>Сканирование безопасно: само по себе оно не меняет баланс.</p>
         </div>
         <Link className="button button--primary" to="/staff/scan">
-          Сканировать или ввести код
+          Сканировать, ввести код или телефон
         </Link>
       </Panel>
       <section>
@@ -120,7 +125,13 @@ export function ScannerPage() {
   const navigate = useNavigate();
   const { setClient } = useStaffWorkspace();
   const [shortCode, setShortCode] = useState("");
+  const [phone, setPhone] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [creationKey, setCreationKey] = useState(createIdempotencyKey);
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
   const [reward, setReward] = useState<StaffRewardLookup | null>(null);
@@ -129,10 +140,7 @@ export function ScannerPage() {
 
   useEffect(() => () => closeTelegramScanner(), []);
 
-  const lookup = async (payload: {
-    qr_token?: string;
-    short_code?: string;
-  }) => {
+  const lookup = async (payload: StaffClientLookup) => {
     setLoading(true);
     setError(null);
     try {
@@ -188,6 +196,52 @@ export function ScannerPage() {
       return;
     }
     void lookup({ short_code: value });
+  };
+
+  const submitPhone = (event: FormEvent) => {
+    event.preventDefault();
+    const value = phone.trim();
+    if (value.length < 5) {
+      setError(new Error("Введите корректный номер телефона"));
+      return;
+    }
+    // The browser trims presentation whitespace only. Canonical phone
+    // normalization and identity matching remain backend responsibilities.
+    void lookup({ phone: value });
+  };
+
+  const rotateCreationKey = () => setCreationKey(createIdempotencyKey());
+  const createPhoneCustomer = async (event: FormEvent) => {
+    event.preventDefault();
+    const value = newCustomerPhone.trim();
+    if (value.length < 5) {
+      setError(new Error("Введите корректный номер телефона нового клиента"));
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      // The key changes with edited business input, but stays stable across a
+      // retry after an ambiguous response so the backend can replay one result.
+      await coffeeApi.createPhoneCustomer(
+        {
+          phone: value,
+          display_name: newCustomerName.trim() || null,
+        },
+        creationKey,
+      );
+      const found = await coffeeApi.lookupStaffClient({ phone: value });
+      setClient(found);
+      navigate(`/staff/client/${encodeURIComponent(found.user_id)}`);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason
+          : new Error("Не удалось создать клиента"),
+      );
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -285,7 +339,88 @@ export function ScannerPage() {
           </Button>
         </form>
       </Panel>
+      <Panel>
+        <h2>Поиск по телефону</h2>
+        <form className="form" onSubmit={submitPhone}>
+          <Field
+            label="Телефон клиента"
+            hint="Можно вводить +7, 8 и привычные пробелы или скобки"
+          >
+            <input
+              type="tel"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="+7 999 123-45-67"
+              autoComplete="tel"
+              inputMode="tel"
+              maxLength={64}
+            />
+          </Field>
+          <Button type="submit" disabled={loading || creating}>
+            {loading ? "Ищем…" : "Найти по телефону"}
+          </Button>
+        </form>
+        <div className="action-row">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={loading || creating}
+            onClick={() => {
+              setShowCreate((value) => !value);
+              setError(null);
+              if (!showCreate) setCreationKey(createIdempotencyKey());
+            }}
+          >
+            {showCreate ? "Закрыть создание" : "Создать нового клиента"}
+          </Button>
+        </div>
+      </Panel>
+      {showCreate && (
+        <Panel>
+          <h2>Новый клиент без Telegram</h2>
+          <p className="muted">
+            Создадим профиль, карту и баланс. Telegram можно будет привязать
+            позже после подтверждения телефона.
+          </p>
+          <form
+            className="form"
+            onSubmit={(event) => void createPhoneCustomer(event)}
+          >
+            <Field label="Телефон нового клиента">
+              <input
+                type="tel"
+                value={newCustomerPhone}
+                onChange={(event) => {
+                  setNewCustomerPhone(event.target.value);
+                  rotateCreationKey();
+                }}
+                placeholder="+7 999 123-45-67"
+                autoComplete="tel"
+                inputMode="tel"
+                maxLength={64}
+                required
+              />
+            </Field>
+            <Field label="Имя" hint="Необязательно — по умолчанию «Гость»">
+              <input
+                value={newCustomerName}
+                onChange={(event) => {
+                  setNewCustomerName(event.target.value);
+                  rotateCreationKey();
+                }}
+                maxLength={128}
+                autoComplete="name"
+                placeholder="Например, Мария"
+              />
+            </Field>
+            <Button type="submit" disabled={creating || loading}>
+              {creating ? "Создаём…" : "Создать карту"}
+            </Button>
+          </form>
+        </Panel>
+      )}
       {loading && <Loader label="Проверяем карту…" />}
+      {creating && <Loader label="Создаём карту клиента…" />}
       {error && <ErrorState error={error} compact />}
       <div className="notice">
         <span aria-hidden="true">i</span>
@@ -306,7 +441,7 @@ export function ClientPreviewPage() {
       <Page title="Карточка клиента">
         <EmptyState
           title="Клиент не выбран"
-          text="Сначала отсканируйте QR или найдите карту по короткому коду."
+          text="Сначала отсканируйте QR или найдите карту по коду или телефону."
           action={
             <Link className="button button--primary" to="/staff/scan">
               Перейти к сканеру

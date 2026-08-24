@@ -56,8 +56,25 @@ class ContactsSeed(SeedModel):
     privacy_policy_text: str | None = None
 
 
+class VenueSeed(SeedModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    name: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4_000)
+    phone: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=254)
+    website: str | None = Field(default=None, max_length=2_048)
+    telegram: str | None = Field(default=None, max_length=2_048)
+    logo_media_key: str | None = None
+    is_active: bool = True
+    sort_order: int = 0
+
+
 class LocationSeed(SeedModel):
     slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    venue_slug: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,63}$",
+    )
     name: str = Field(min_length=1, max_length=160)
     description: str | None = None
     address: str = Field(min_length=1)
@@ -215,6 +232,9 @@ class SeedDocument(SeedModel):
     installation: InstallationSeed
     brand: BrandSeed
     contacts: ContactsSeed
+    # Optional for schema-v1 compatibility.  A missing collection preserves
+    # the Venue assignment already present in an upgraded installation.
+    venues: list[VenueSeed] = Field(default_factory=list)
     locations: list[LocationSeed] = Field(default_factory=list)
     loyalty: LoyaltySeed
     reward_templates: list[RewardTemplateSeed] = Field(default_factory=list)
@@ -224,7 +244,13 @@ class SeedDocument(SeedModel):
 
     @model_validator(mode="after")
     def validate_references(self) -> SeedDocument:
+        venue_slugs = [item.slug for item in self.venues]
+        _unique(venue_slugs, "venue slug")
+        venue_set = set(venue_slugs)
         _unique([item.slug for item in self.locations], "location slug")
+        for location in self.locations:
+            if location.venue_slug is not None and location.venue_slug not in venue_set:
+                raise ValueError(f"unknown venue slug: {location.venue_slug}")
         reward_slugs = [item.slug for item in self.reward_templates]
         _unique(reward_slugs, "reward template slug")
         reward_set = set(reward_slugs)
@@ -262,6 +288,13 @@ class SeedRepositoryPort(Protocol):
 
     async def upsert_app_setting(self, key: str, value: Any, *, is_public: bool) -> None: ...
 
+    async def upsert_venue(
+        self,
+        entity_id: UUID,
+        slug: str,
+        values: dict[str, Any],
+    ) -> UUID: ...
+
     async def upsert_location(self, slug: str, values: dict[str, Any]) -> UUID: ...
 
     async def find_media_id(self, storage_key: str | None) -> UUID | None: ...
@@ -293,6 +326,7 @@ class SeedRepositoryPort(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class SeedReport:
+    venues: int
     locations: int
     reward_templates: int
     menu_categories: int
@@ -332,26 +366,54 @@ class SeedService:
                 "contacts", document.contacts.model_dump(mode="json"), is_public=True
             )
 
+            venue_ids: dict[str, UUID] = {}
+            for venue in document.venues:
+                entity_key = f"venue:{venue.slug}"
+                entity_id = _stable_id(entity_ids, entity_key)
+                persisted_id = await self._repository.upsert_venue(
+                    entity_id,
+                    venue.slug,
+                    {
+                        "name": venue.name,
+                        "description": venue.description,
+                        "phone": venue.phone,
+                        "email": venue.email,
+                        "website": venue.website,
+                        "telegram": venue.telegram,
+                        "logo_media_id": await self._repository.find_media_id(venue.logo_media_key),
+                        "is_active": venue.is_active,
+                        "sort_order": venue.sort_order,
+                        "archived_at": None if venue.is_active else current_time,
+                    },
+                )
+                # If an administrator created the same slug before the first
+                # seed run, adopt that row instead of fighting its unique key.
+                entity_ids[entity_key] = persisted_id
+                venue_ids[venue.slug] = persisted_id
+
             for location in document.locations:
+                values: dict[str, Any] = {
+                    "name": location.name,
+                    "description": location.description,
+                    "address": location.address,
+                    "latitude": location.latitude,
+                    "longitude": location.longitude,
+                    "timezone": location.timezone,
+                    "business_day_boundary_minutes": _boundary_minutes(
+                        location.business_day_boundary
+                    ),
+                    "phone": location.phone,
+                    "map_url": location.map_url,
+                    "opening_hours": location.opening_hours,
+                    "is_default": location.is_default,
+                    "is_active": location.is_active,
+                    "sort_order": location.sort_order,
+                }
+                if location.venue_slug is not None:
+                    values["venue_id"] = venue_ids[location.venue_slug]
                 await self._repository.upsert_location(
                     location.slug,
-                    {
-                        "name": location.name,
-                        "description": location.description,
-                        "address": location.address,
-                        "latitude": location.latitude,
-                        "longitude": location.longitude,
-                        "timezone": location.timezone,
-                        "business_day_boundary_minutes": _boundary_minutes(
-                            location.business_day_boundary
-                        ),
-                        "phone": location.phone,
-                        "map_url": location.map_url,
-                        "opening_hours": location.opening_hours,
-                        "is_default": location.is_default,
-                        "is_active": location.is_active,
-                        "sort_order": location.sort_order,
-                    },
+                    values,
                 )
 
             development_staff = 0
@@ -513,6 +575,7 @@ class SeedService:
             await self._repository.save_seed_entity_ids(entity_ids)
 
         return SeedReport(
+            venues=len(document.venues),
             locations=len(document.locations),
             reward_templates=len(document.reward_templates),
             menu_categories=len(document.menu.categories),

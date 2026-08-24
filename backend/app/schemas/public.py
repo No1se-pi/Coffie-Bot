@@ -79,6 +79,9 @@ class PromotionListResponse(ApiSchema):
 
 class LocationResponse(ApiSchema):
     id: UUID
+    # Additive compatibility field: legacy clients can ignore it, while V2
+    # clients can group physical points under the public Venue catalogue.
+    venue_id: UUID | None = None
     name: str
     address: str
     hours: str
@@ -263,6 +266,7 @@ def feedback_response(item: FeedbackItem) -> FeedbackResponse:
 def _location_response(item: Location) -> LocationResponse:
     return LocationResponse(
         id=item.id,
+        venue_id=item.venue_id,
         name=item.name,
         address=item.address,
         hours=_format_opening_hours(item.opening_hours),

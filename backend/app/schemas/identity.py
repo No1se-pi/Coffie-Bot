@@ -36,7 +36,7 @@ class TelegramAuthRequest(ApiSchema):
 
 class CurrentUserResponse(ApiSchema):
     id: UUID
-    telegram_id: int
+    telegram_id: int | None
     display_name: str
     username: str | None
     photo_url: str | None
@@ -321,5 +321,7 @@ def _operation_description(operation_type: LoyaltyOperationType) -> str:
         LoyaltyOperationType.REWARD_CREATED: "Получена награда",
         LoyaltyOperationType.REWARD_REDEEMED: "Награда использована",
         LoyaltyOperationType.REWARD_CANCELLED: "Награда отменена",
+        LoyaltyOperationType.ACCOUNT_MERGE_DEBIT: "Перенос баллов при объединении аккаунтов",
+        LoyaltyOperationType.ACCOUNT_MERGE_CREDIT: "Получение баллов при объединении аккаунтов",
     }
     return descriptions[operation_type]

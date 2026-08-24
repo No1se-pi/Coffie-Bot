@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -23,6 +24,8 @@ class FakeSeedRepository:
         self.entity_ids: dict[str, UUID] = {}
         self.entity_id_calls: list[UUID] = []
         self.settings: dict[str, Any] = {}
+        self.venue_ids: dict[str, UUID] = {}
+        self.location_venue_ids: dict[str, UUID | None] = {}
         self.development_staff_calls: list[int] = []
         self.commits = 0
         self.rollbacks = 0
@@ -50,9 +53,21 @@ class FakeSeedRepository:
         assert is_public is True
         self.settings[key] = value
 
+    async def upsert_venue(
+        self,
+        entity_id: UUID,
+        slug: str,
+        values: dict[str, Any],
+    ) -> UUID:
+        assert values["name"]
+        persisted_id = self.venue_ids.setdefault(slug, entity_id)
+        self.entity_id_calls.append(persisted_id)
+        return persisted_id
+
     async def upsert_location(self, slug: str, values: dict[str, Any]) -> UUID:
         assert slug
         assert values["name"]
+        self.location_venue_ids[slug] = values.get("venue_id")
         return uuid4()
 
     async def find_media_id(self, storage_key: str | None) -> UUID | None:
@@ -130,7 +145,38 @@ def test_demo_seed_file_is_valid_and_neutral() -> None:
     assert document.schema_version == 1
     assert document.installation.mode == "single_organization"
     assert document.brand.name == "Демо Кофе"
+    assert [item.name for item in document.venues] == [
+        "Кофейня и точка",
+        "ФудДворик",
+        "Шашлык Джан",
+    ]
+    assert {location.venue_slug for location in document.locations} == {
+        "coffee-point",
+        "food-court",
+        "shashlik-dzhan",
+    }
     assert document.development_only.staff_members[0].synthetic is True
+
+
+def test_seed_rejects_unknown_location_venue_reference() -> None:
+    payload = json.loads(SEED_PATH.read_text(encoding="utf-8"))
+    payload["locations"][0]["venue_slug"] = "missing-venue"
+
+    with pytest.raises(ValueError, match="unknown venue slug"):
+        SeedDocument.model_validate(payload)
+
+
+def test_schema_v1_seed_without_venues_remains_valid() -> None:
+    payload = json.loads(SEED_PATH.read_text(encoding="utf-8"))
+    payload.pop("venues")
+    for location in payload["locations"]:
+        location.pop("venue_slug")
+
+    document = SeedDocument.model_validate(payload)
+
+    assert document.schema_version == 1
+    assert document.venues == []
+    assert all(location.venue_slug is None for location in document.locations)
 
 
 @pytest.mark.asyncio
@@ -145,11 +191,14 @@ async def test_development_seed_is_repeatable_with_stable_entity_ids() -> None:
     second = await service.apply(document, environment=AppEnvironment.DEVELOPMENT, now=NOW)
 
     assert first.development_staff == 1
+    assert first.venues == 3
+    assert first.locations == 3
     assert second.development_staff == 1
     assert repository.development_staff_calls == [1000000000001, 1000000000001]
     assert repository.entity_id_calls == first_call_ids
     assert repository.commits == 2
     assert len(repository.entity_ids) == len(first_call_ids)
+    assert set(repository.location_venue_ids.values()) == set(repository.venue_ids.values())
 
 
 @pytest.mark.asyncio

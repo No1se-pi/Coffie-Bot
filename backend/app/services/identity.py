@@ -288,7 +288,11 @@ class IdentityService:
             telegram_user,
             now=now,
         )
-        if user.status in {UserStatus.INACTIVE, UserStatus.ANONYMIZED}:
+        if user.status in {
+            UserStatus.INACTIVE,
+            UserStatus.ANONYMIZED,
+            UserStatus.MERGED,
+        }:
             raise AppError(
                 code=ErrorCode.FORBIDDEN,
                 message="Account is unavailable",

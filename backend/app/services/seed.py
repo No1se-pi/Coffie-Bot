@@ -19,6 +19,7 @@ from app.models.enums import (
     RewardType,
     Role,
     RoundingMode,
+    WalletMode,
 )
 
 
@@ -65,6 +66,9 @@ class VenueSeed(SeedModel):
     website: str | None = Field(default=None, max_length=2_048)
     telegram: str | None = Field(default=None, max_length=2_048)
     logo_media_key: str | None = None
+    loyalty_points_enabled: bool = True
+    accrual_basis_points: int = Field(default=1_000, ge=0, le=10_000)
+    loyalty_rounding_mode: RoundingMode = RoundingMode.FLOOR
     is_active: bool = True
     sort_order: int = 0
 
@@ -101,6 +105,13 @@ class PointsSeed(SeedModel):
     minimum_redemption_points: int = Field(default=1, ge=0)
     welcome_bonus_points: int = Field(default=0, ge=0)
     expiry_days: int | None = Field(default=None, gt=0)
+    expiry_months: int = Field(default=6, gt=0, le=120)
+    expiry_reminder_days: int = Field(default=14, ge=0, le=365)
+    wallet_mode: WalletMode = WalletMode.SHARED
+    default_bonus_venue_slug: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9-]{0,63}$",
+    )
     daily_accrual_limit_points: int | None = Field(default=None, gt=0)
     per_operation_limit_points: int | None = Field(default=None, gt=0)
     approval_threshold_minor: int | None = Field(default=None, gt=0)
@@ -129,10 +140,19 @@ class StampsSeed(SeedModel):
     reset_after_reward: bool = True
 
 
+class BirthdaySeed(SeedModel):
+    enabled: bool = True
+    discount_percent: int = Field(default=10, ge=0, le=100)
+    window_days: int = Field(default=1, ge=1, le=31)
+    stackable: bool = False
+    eligible_venue_slugs: list[str] = Field(default_factory=list)
+
+
 class LoyaltySeed(SeedModel):
     points: PointsSeed
     visits: VisitsSeed
     stamps: StampsSeed
+    birthday: BirthdaySeed = Field(default_factory=BirthdaySeed)
 
 
 class RewardTemplateSeed(SeedModel):
@@ -251,6 +271,16 @@ class SeedDocument(SeedModel):
         for location in self.locations:
             if location.venue_slug is not None and location.venue_slug not in venue_set:
                 raise ValueError(f"unknown venue slug: {location.venue_slug}")
+        if (
+            venue_set
+            and self.loyalty.points.default_bonus_venue_slug is not None
+            and self.loyalty.points.default_bonus_venue_slug not in venue_set
+        ):
+            raise ValueError("unknown default bonus venue slug")
+        _unique(self.loyalty.birthday.eligible_venue_slugs, "birthday venue slug")
+        for venue_slug in self.loyalty.birthday.eligible_venue_slugs:
+            if venue_set and venue_slug not in venue_set:
+                raise ValueError(f"unknown birthday venue slug: {venue_slug}")
         reward_slugs = [item.slug for item in self.reward_templates]
         _unique(reward_slugs, "reward template slug")
         reward_set = set(reward_slugs)
@@ -282,6 +312,8 @@ class SeedRepositoryPort(Protocol):
 
     async def acquire_lock(self) -> None: ...
 
+    async def lock_existing_loyalty_settings(self) -> None: ...
+
     async def load_seed_entity_ids(self) -> dict[str, UUID]: ...
 
     async def save_seed_entity_ids(self, values: dict[str, UUID]) -> None: ...
@@ -302,6 +334,12 @@ class SeedRepositoryPort(Protocol):
     async def upsert_reward_template(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
 
     async def upsert_loyalty_settings(self, values: dict[str, Any]) -> UUID: ...
+
+    async def replace_birthday_promotion_venues(
+        self,
+        settings_id: UUID,
+        venue_ids: list[UUID],
+    ) -> None: ...
 
     async def upsert_menu_category(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
 
@@ -353,6 +391,11 @@ class SeedService:
         current_time = now or datetime.now(UTC)
         async with self._repository.transaction():
             await self._repository.acquire_lock()
+            # Live seed reruns and owner wallet-mode changes touch both the
+            # singleton settings row and venues.  Take the shared global lock
+            # order (settings -> venues) before any venue upsert to avoid a
+            # settings/venue deadlock under concurrent administration.
+            await self._repository.lock_existing_loyalty_settings()
             entity_ids = await self._repository.load_seed_entity_ids()
             await self._repository.upsert_app_setting(
                 "installation",
@@ -381,6 +424,9 @@ class SeedService:
                         "website": venue.website,
                         "telegram": venue.telegram,
                         "logo_media_id": await self._repository.find_media_id(venue.logo_media_key),
+                        "loyalty_points_enabled": venue.loyalty_points_enabled,
+                        "loyalty_accrual_basis_points": venue.accrual_basis_points,
+                        "loyalty_rounding_mode": venue.loyalty_rounding_mode,
                         "is_active": venue.is_active,
                         "sort_order": venue.sort_order,
                         "archived_at": None if venue.is_active else current_time,
@@ -456,7 +502,8 @@ class SeedService:
             points = document.loyalty.points
             visits = document.loyalty.visits
             stamps = document.loyalty.stamps
-            await self._repository.upsert_loyalty_settings(
+            birthday = document.loyalty.birthday
+            settings_id = await self._repository.upsert_loyalty_settings(
                 {
                     "currency_name": document.brand.loyalty_currency_name,
                     "currency_code": document.installation.currency_code,
@@ -470,6 +517,14 @@ class SeedService:
                     "minimum_redemption_points": points.minimum_redemption_points,
                     "welcome_bonus_points": points.welcome_bonus_points,
                     "points_validity_days": points.expiry_days,
+                    "points_expiry_months": points.expiry_months,
+                    "expiry_reminder_days": points.expiry_reminder_days,
+                    "wallet_mode": points.wallet_mode,
+                    "default_bonus_venue_id": (
+                        venue_ids[points.default_bonus_venue_slug]
+                        if points.default_bonus_venue_slug is not None
+                        else None
+                    ),
                     "daily_accrual_limit_points": points.daily_accrual_limit_points,
                     "operation_accrual_limit_points": points.per_operation_limit_points,
                     "large_operation_threshold_minor": points.approval_threshold_minor,
@@ -500,8 +555,16 @@ class SeedService:
                     ),
                     "stamp_reward_validity_days": stamps.reward_validity_days,
                     "reset_stamps_after_reward": stamps.reset_after_reward,
+                    "birthday_promotion_enabled": birthday.enabled,
+                    "birthday_discount_basis_points": birthday.discount_percent * 100,
+                    "birthday_window_days": birthday.window_days,
+                    "birthday_stackable": birthday.stackable,
                     "updated_by_staff_id": creator_id,
                 }
+            )
+            await self._repository.replace_birthday_promotion_venues(
+                settings_id,
+                [venue_ids[slug] for slug in birthday.eligible_venue_slugs],
             )
 
             category_ids: dict[str, UUID] = {}

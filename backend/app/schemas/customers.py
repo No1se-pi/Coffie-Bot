@@ -18,6 +18,7 @@ class ApiSchema(BaseModel):
 class PhoneCustomerCreate(ApiSchema):
     phone: str = Field(min_length=5, max_length=64)
     display_name: str | None = Field(default=None, max_length=128)
+    venue_id: UUID | None = None
 
     @field_validator("display_name")
     @classmethod

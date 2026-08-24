@@ -126,6 +126,7 @@ async def adjust_points(
         user_id=user_id,
         delta_points=payload.delta_points,
         reason=payload.reason,
+        venue_id=payload.venue_id,
         idempotency_key=str(idempotency_key),
         metadata=_request_metadata(request),
     )
@@ -200,6 +201,7 @@ async def issue_reward(
         template_id=payload.template_id,
         validity_days=payload.validity_days,
         reason=payload.reason,
+        venue_id=payload.venue_id,
         idempotency_key=str(idempotency_key),
         metadata=_request_metadata(request),
     )

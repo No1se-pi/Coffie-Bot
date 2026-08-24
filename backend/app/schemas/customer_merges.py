@@ -29,6 +29,7 @@ class CustomerMergeConfirmRequest(CustomerMergePreviewRequest):
     preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     reason: str = Field(min_length=3, max_length=2_000)
     confirm: Literal[True]
+    birthday_resolution: Literal["keep_canonical", "use_source"] | None = None
 
     @field_validator("reason")
     @classmethod
@@ -49,6 +50,7 @@ class CustomerMergeProfileResponse(ApiSchema):
     visit_streak: int
     last_visit_business_date: date | None
     staff_role: Role | None
+    birthday_set: bool
 
 
 class CustomerMergePreviewResponse(ApiSchema):
@@ -62,7 +64,10 @@ class CustomerMergePreviewResponse(ApiSchema):
     rewards_to_move: int
     sessions_to_revoke: int
     cards_to_revoke: int
+    feedback_to_move: int
     source_staff_rebound: bool
+    birthday_conflict: bool
+    birthday_resolution_required: bool
 
 
 class CustomerMergeConfirmResponse(ApiSchema):
@@ -80,6 +85,8 @@ class CustomerMergeConfirmResponse(ApiSchema):
     rewards_moved: int
     sessions_revoked: int
     cards_revoked: int
+    feedback_moved: int
+    birthday_resolution: Literal["keep_canonical", "use_source"] | None
     source_staff_rebound: bool
     idempotent_replay: bool
 
@@ -98,7 +105,10 @@ def customer_merge_preview_response(
         rewards_to_move=preview.rewards_to_move,
         sessions_to_revoke=preview.sessions_to_revoke,
         cards_to_revoke=preview.cards_to_revoke,
+        feedback_to_move=preview.feedback_to_move,
         source_staff_rebound=preview.source_staff_rebound,
+        birthday_conflict=preview.birthday_conflict,
+        birthday_resolution_required=preview.birthday_resolution_required,
     )
 
 
@@ -121,6 +131,8 @@ def customer_merge_confirm_response(
         rewards_moved=merge.rewards_moved,
         sessions_revoked=merge.sessions_revoked,
         cards_revoked=merge.cards_revoked,
+        feedback_moved=merge.feedback_moved,
+        birthday_resolution=merge.birthday_resolution,
         source_staff_rebound=merge.source_staff_rebound,
         idempotent_replay=result.idempotent_replay,
     )
@@ -137,4 +149,5 @@ def _profile_response(profile: MergeProfilePreview) -> CustomerMergeProfileRespo
         visit_streak=profile.visit_streak,
         last_visit_business_date=profile.last_visit_business_date,
         staff_role=profile.staff_role,
+        birthday_set=profile.birthday_set,
     )

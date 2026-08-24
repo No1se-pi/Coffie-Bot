@@ -9,20 +9,39 @@
 - Часовой пояс: `Europe/Moscow`; новый бизнес-день начинается в 04:00.
 - Три demo-заведения одной организации: «Кофейня и точка», «ФудДворик» и «Шашлык Джан»;
   физические точки остаются отдельными `locations`.
-- Начисление V2: соответственно 10%, 7% и 5% оплаченной суммы; проценты хранятся в настройках
-  venue и рассчитываются backend целочисленно с выбранным rounding mode.
+- Начисление V2: соответственно 10%, 7% и 5% оплаченной суммы; enabled,
+  1000/700/500 bps и rounding mode хранятся отдельно для venue и применяются
+  backend. 100 ₽ при 10% дают 10 баллов независимо от настроенной
+  redemption value балла.
+- V1 staff client без location в shared mode использует server-side trusted default
+  active Location/Venue и его политику; в separate mode validated active location обязателен.
+  Возврата к старой global accrual formula нет.
 - Начальный/migration wallet mode — `shared`; `separate` включается только owner через
   preview/confirm и объяснимые transfer operations.
+- Shared → separate переносит source-attributed lots в wallet их active origin venue.
+  Opening/origin-less и archived-origin lots требуют в preview явный active fallback
+  venue. Выбор входит в preview/request hash; автоматического распределения
+  надогадкой нет.
+- Route lot фиксируется и при mode switch, и при account merge, включая
+  полностью израсходованный lot с нулевым остатком; это нужно для позднего
+  reversal и объяснимой lineage.
 - Один балл покрывает 1 ₽; отрицательный баланс запрещён; максимум оплаты баллами — 50%
   стоимости части заказа соответствующего venue.
 - Новые начисления V2 действуют 6 календарных месяцев отдельными lots; день при
   необходимости ограничивается последним днём целевого месяца. Расход и сгорание идут FIFO.
   Opening lot старого баланса не получает ретроактивный expiry.
+- FIFO строго сортирует доступные lots по `earned_at, id`, а не по ближайшему
+  `expires_at`. Expiry/reminder идемпотентно создают immutable allocation и outbox;
+  worker обрабатывает ограниченные партии по отдельному cadence.
 - Birthday offer по умолчанию — 10% на один день, non-stackable; birthday после первого
   сохранения меняется только admin/owner с причиной и audit. Окно считается в timezone
   организации; хранятся только месяц и день без ненужного года. 29 февраля в
   невисокосный год по умолчанию отмечается 28 февраля; offer доступен в каждом годовом
   окне без не указанного в ТЗ одноразового лимита.
+- Offer действует только в configured eligible venues: пустой список
+  означает все active venues, непустой — точное множество. Month/day не попадают
+  в staff/courier DTO, обычные логи и audit metadata. Phase 2 закрепляет policy и annual eligibility, а применение
+  к final order price проходит через server-side pricing/order pipeline следующих фаз.
 - Посещения: одна отметка за бизнес-день, пять последовательных дней, один пропуск не допускается, награда действует семь дней, затем начинается новый цикл.
 - Штампы: один за подтверждённую покупку; после девятого штампа выдаётся награда «десятый напиток бесплатно», счётчик сбрасывается.
 - Session TTL: 15 минут; Telegram init data принимается не старше 10 минут.

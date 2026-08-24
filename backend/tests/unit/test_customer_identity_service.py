@@ -14,6 +14,7 @@ from app.core.errors import AppError
 from app.models.access import Session, User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.content import Venue
 from app.models.customers import CustomerIdentity
 from app.models.enums import (
     CardStatus,
@@ -21,6 +22,7 @@ from app.models.enums import (
     PermissionCode,
     Role,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import LoyaltySettings, UserLoyaltyState
 from app.repositories.customers import CustomerCreationReceipt
@@ -38,6 +40,8 @@ class FakeCustomerRepository:
         self.cards: dict[UUID, UserCard] = {}
         self.card_views: dict[UUID, CardViewRecord] = {}
         self.receipts: dict[str, CustomerCreationReceipt] = {}
+        self.venues: dict[UUID, Venue] = {}
+        self.settings: LoyaltySettings | None = None
         self.locks: list[tuple[str, str]] = []
         self.initialize_calls: list[dict[str, Any]] = []
         self.audits: list[AuditEvent] = []
@@ -78,6 +82,9 @@ class FakeCustomerRepository:
     async def get_card(self, card_id: UUID) -> UserCard | None:
         return self.cards.get(card_id)
 
+    async def get_venue(self, venue_id: UUID) -> Venue | None:
+        return self.venues.get(venue_id)
+
     def add(self, value: object) -> None:
         if isinstance(value, CustomerIdentity):
             self.identities[(value.provider, value.subject)] = value
@@ -90,7 +97,7 @@ class FakeCustomerRepository:
         return self.receipts.get(key)
 
     async def get_loyalty_settings(self) -> LoyaltySettings | None:
-        return None
+        return self.settings
 
     def create_phone_profile(
         self,
@@ -133,6 +140,10 @@ class FakeCustomerRepository:
         qr_token: str,
         short_code: str,
         welcome_bonus_points: int,
+        wallet_mode: WalletMode = WalletMode.SHARED,
+        points_expiry_months: int = 6,
+        points_validity_days: int | None = None,
+        bonus_venue_id: UUID | None = None,
         now: datetime,
         ip_address: str | None,
         user_agent: str | None,
@@ -364,6 +375,53 @@ async def test_customer_identity_unique_phone_rejects_a_second_request() -> None
     assert raised.value.status_code == 409
     assert repository.create_calls == 1
     assert repository.commits == 1
+    assert repository.rollbacks == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("venue_state", ["unknown", "inactive", "archived"])
+async def test_phone_creation_rejects_unavailable_explicit_venue_with_zero_bonus(
+    venue_state: str,
+) -> None:
+    """A forged venue id must be a validation error, never a database 500."""
+
+    repository = FakeCustomerRepository()
+    venue_id = uuid4()
+    repository.settings = LoyaltySettings(
+        id=uuid4(),
+        singleton_key="default",
+        currency_name="баллы",
+        currency_code="RUB",
+        points_enabled=True,
+        welcome_bonus_points=0,
+        wallet_mode=WalletMode.SEPARATE,
+        visit_required_count=5,
+        stamp_required_count=9,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    if venue_state != "unknown":
+        repository.venues[venue_id] = Venue(
+            id=venue_id,
+            slug=f"venue-{venue_state}",
+            name="Unavailable venue",
+            is_active=venue_state != "inactive",
+            archived_at=(NOW if venue_state == "archived" else None),
+        )
+
+    with pytest.raises(AppError) as raised:
+        await CustomerService(repository).create_phone_customer(
+            _staff_actor(),
+            phone="+79991234567",
+            display_name="Мария",
+            idempotency_key=str(uuid4()),
+            venue_id=venue_id,
+            now=NOW,
+        )
+
+    assert raised.value.code == "bonus_venue_unavailable"
+    assert raised.value.status_code == 422
+    assert repository.create_calls == 0
     assert repository.rollbacks == 1
 
 

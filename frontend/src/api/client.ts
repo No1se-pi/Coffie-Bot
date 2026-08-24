@@ -1,20 +1,26 @@
 import type {
   AccrualPreview,
   Actor,
+  AdminCustomerBirthday,
   AdminStaffMember,
   AdminOverview,
   AdminFeedback,
+  AdminLoyaltyV2Settings,
+  AdminLoyaltyV2Update,
   AdminUser,
   AdminUserListItem,
   AdjustmentPreview,
   AuditEvent,
   AuthSession,
+  BirthdayValue,
   CardData,
   ContactsData,
   CustomerMergeConfirmRequest,
   CustomerMergePreview,
   CustomerMergePreviewRequest,
   CustomerMergeResult,
+  CustomerBirthday,
+  CustomerWalletSummary,
   HistoryItem,
   HomeData,
   ListResponse,
@@ -44,6 +50,10 @@ import type {
   TipProfile,
   PendingTipProfile,
   Venue,
+  WalletModeChangeResult,
+  WalletModeConfirmRequest,
+  WalletModePreview,
+  WalletModePreviewRequest,
 } from "./types";
 import { demoApi } from "./demo";
 
@@ -220,6 +230,40 @@ interface RawAuthResponse {
     telegram_id: string | number;
   };
   staff?: { role?: Role; permissions?: string[] } | null;
+}
+
+interface BackendCustomerWallets {
+  mode: CustomerWalletSummary["mode"];
+  total_balance: number;
+  point_value_minor: number;
+  max_redemption_percent: number;
+  entries: Array<{
+    wallet_id: string;
+    venue: { id: string; name: string; available: boolean } | null;
+    balance: number;
+    expiring_amount: number;
+    expires_at: string | null;
+  }>;
+}
+
+function normalizeCustomerWallets(
+  response: BackendCustomerWallets,
+): CustomerWalletSummary {
+  // Phase 2 transport names stay behind this adapter so screen state remains
+  // stable if persistence-oriented DTO fields change during backend rollout.
+  return {
+    mode: response.mode,
+    total_balance_points: response.total_balance,
+    point_value_minor: response.point_value_minor,
+    max_redemption_percent: response.max_redemption_percent,
+    entries: response.entries.map((entry) => ({
+      id: entry.wallet_id,
+      venue: entry.venue,
+      balance_points: entry.balance,
+      expiring_points: entry.expiring_amount,
+      expires_at: entry.expires_at,
+    })),
+  };
 }
 
 async function bootstrapAuth(initData: string): Promise<AuthSession> {
@@ -512,6 +556,21 @@ export const coffeeApi = {
   getHome,
   getVenues: (): Promise<ListResponse<Venue>> =>
     isDemoMode ? demoApi.getVenues() : request("/venues"),
+  getMyWallets: async (): Promise<CustomerWalletSummary> =>
+    isDemoMode
+      ? demoApi.getMyWallets()
+      : normalizeCustomerWallets(
+          await request<BackendCustomerWallets>("/me/wallets"),
+        ),
+  getMyBirthday: (): Promise<CustomerBirthday> =>
+    isDemoMode ? demoApi.getMyBirthday() : request("/me/birthday"),
+  setMyBirthday: (birthday: BirthdayValue): Promise<CustomerBirthday> =>
+    isDemoMode
+      ? demoApi.setMyBirthday(birthday)
+      : request("/me/birthday", {
+          method: "PUT",
+          body: jsonBody({ birthday }),
+        }),
   getCard: (): Promise<CardData> =>
     isDemoMode ? demoApi.getCard() : request("/me/card"),
   getHistory: (type?: string): Promise<ListResponse<HistoryItem>> =>
@@ -555,6 +614,8 @@ export const coffeeApi = {
           },
         ),
   getMore,
+  getContacts: (): Promise<ContactsData> =>
+    isDemoMode ? demoApi.getContacts() : request("/contacts"),
   submitFeedback: (payload: {
     rating: number;
     category: string;
@@ -619,6 +680,7 @@ export const coffeeApi = {
     user_id: string;
     purchase_amount_minor: number;
     stamps_to_add: number;
+    location_id: string;
   }): Promise<PurchasePreview> =>
     isDemoMode
       ? demoApi.previewPurchase(payload)
@@ -641,11 +703,13 @@ export const coffeeApi = {
           visit_already_counted: preview.visit_already_counted,
           visit_streak_after: preview.projected_visit_streak,
           requires_approval: preview.requires_approval,
+          location_id: payload.location_id,
         })),
   confirmPurchase: async (payload: {
     user_id: string;
     purchase_amount_minor: number;
     stamps_to_add: number;
+    location_id: string;
   }): Promise<OperationResult> =>
     isDemoMode
       ? demoApi.confirmPurchase(payload)
@@ -658,6 +722,7 @@ export const coffeeApi = {
     user_id: string;
     purchase_amount_minor: number;
     requested_points: number;
+    location_id: string;
   }): Promise<RedemptionPreview> =>
     isDemoMode
       ? demoApi.previewRedemption(payload)
@@ -673,11 +738,13 @@ export const coffeeApi = {
           maximum_points_for_purchase: preview.maximum_points_for_purchase,
           balance_before: preview.balance_before,
           balance_after: preview.projected_balance_after,
+          location_id: payload.location_id,
         })),
   confirmRedemption: async (payload: {
     user_id: string;
     purchase_amount_minor: number;
     requested_points: number;
+    location_id: string;
   }): Promise<OperationResult> =>
     isDemoMode
       ? demoApi.confirmRedemption(payload)
@@ -810,6 +877,16 @@ export const coffeeApi = {
           body: jsonBody(payload),
           idempotencyKey,
         }),
+  changeAdminCustomerBirthday: (
+    userId: string,
+    payload: { birthday: BirthdayValue; reason: string },
+  ): Promise<AdminCustomerBirthday> =>
+    isDemoMode
+      ? demoApi.changeAdminCustomerBirthday(userId, payload)
+      : request(`/admin/users/${encodeURIComponent(userId)}/birthday`, {
+          method: "PUT",
+          body: jsonBody(payload),
+        }),
   getAdminEvents: (
     filters: { severity?: string; suspicious?: boolean } = {},
   ): Promise<ListResponse<AuditEvent>> =>
@@ -924,6 +1001,37 @@ export const coffeeApi = {
       : request("/admin/loyalty-settings", {
           method: "PUT",
           body: jsonBody(settings),
+        }),
+  getAdminLoyaltyV2: (): Promise<AdminLoyaltyV2Settings> =>
+    isDemoMode ? demoApi.getAdminLoyaltyV2() : request("/admin/loyalty"),
+  saveAdminLoyaltyV2: (
+    settings: AdminLoyaltyV2Update,
+  ): Promise<AdminLoyaltyV2Settings> =>
+    isDemoMode
+      ? demoApi.saveAdminLoyaltyV2(settings)
+      : request("/admin/loyalty", {
+          method: "PUT",
+          body: jsonBody(settings),
+        }),
+  previewWalletMode: (
+    payload: WalletModePreviewRequest,
+  ): Promise<WalletModePreview> =>
+    isDemoMode
+      ? demoApi.previewWalletMode(payload)
+      : request("/admin/loyalty/wallet-mode/preview", {
+          method: "POST",
+          body: jsonBody(payload),
+        }),
+  confirmWalletMode: (
+    payload: WalletModeConfirmRequest,
+    idempotencyKey: string,
+  ): Promise<WalletModeChangeResult> =>
+    isDemoMode
+      ? demoApi.confirmWalletMode(payload, idempotencyKey)
+      : request("/admin/loyalty/wallet-mode/confirm", {
+          method: "POST",
+          body: jsonBody(payload),
+          idempotencyKey,
         }),
   getAdminMenu: async (
     includeArchived = false,
@@ -1068,6 +1176,8 @@ export const coffeeApi = {
     user: AdminUser,
     deltaPoints: number,
     reason: string,
+    venueId: string | null,
+    scopeLabel: string,
   ): AdjustmentPreview {
     return {
       user_id: user.id,
@@ -1076,12 +1186,15 @@ export const coffeeApi = {
       balance_before: user.balance_points,
       balance_after: user.balance_points + deltaPoints,
       reason,
+      venue_id: venueId,
+      scope_label: scopeLabel,
     };
   },
   confirmAdjustment: async (payload: {
     user_id: string;
     delta_points: number;
     reason: string;
+    venue_id: string | null;
   }): Promise<OperationResult> =>
     isDemoMode
       ? demoApi.confirmAdjustment(payload)
@@ -1092,6 +1205,7 @@ export const coffeeApi = {
             body: jsonBody({
               delta_points: payload.delta_points,
               reason: payload.reason,
+              venue_id: payload.venue_id,
             }),
             idempotencyKey: uuid(),
           },

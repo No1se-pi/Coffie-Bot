@@ -88,6 +88,31 @@ QR содержит только случайный opaque card token, не Tele
 Отмена — новая compensating operation со ссылкой на исходную. Исходный журнал не удаляется и
 не переписывается.
 
+Phase 2 расширяет эти инварианты на wallet/lot уровень; до закрытия её gate-ов
+это контракт разрабатываемой ветки, а не deployable claim:
+
+- backend разрешает venue по trusted location/context; в separate mode операция
+  без venue отклоняется, а баланс одного venue не доступен другому;
+- spend и expiry блокируют wallet/lots и пишут immutable allocations; прямой
+  массовый `UPDATE` остатка не является допустимым expiry;
+- смена shared/separate mode — только owner через preview hash, reason,
+  `Idempotency-Key` и повторную проверку под блокировкой;
+- для origin-less/archived-origin lots owner явно выбирает active fallback venue;
+  выбор входит в preview/request hash;
+- immutable lot routes сохраняют назначение в том числе для нулевого,
+  ранее израсходованного lot, чтобы reversal не перенаправлял баллы задним числом;
+- expiry/reminder пишут domain state и outbox в транзакции; Telegram не
+  вызывается внутри неё.
+
+## Birthday privacy
+
+Birthday не является аутентификатором. Хранятся только month/day, без года;
+дата не входит в staff lookup, courier DTO, публичные списки и логи. Customer
+читает и один раз сохраняет только свою дату; дальнейшее изменение доступно
+admin/owner, требует reason и audit с актором. Birthday offer проверяется backend
+по timezone организации и configured eligible venues; frontend-флаг не является
+доказательством скидки.
+
 ## Uploads and media
 
 Backend проверяет фактическую сигнатуру/MIME и размер, а не только extension. Разрешены JPEG,
@@ -173,7 +198,8 @@ Owner/admin перевыпускает карту; старая становит
 - Telegram availability и delivery не транзакционны: outbox/retry сохраняет результат после
   commit, но не гарантирует мгновенную доставку;
 - сложная компенсация уже погашенной награды требует admin review;
-- корректное частичное expiry баллов требует FIFO-партий и может быть отключено в MVP.
+- Loyalty V2 с FIFO-партиями и частичным expiry ещё не прошла release gate;
+  deployable Phase 1 не должна имитировать это массовым списанием.
 
 ## Production checklist
 

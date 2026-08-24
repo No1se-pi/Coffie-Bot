@@ -25,6 +25,12 @@ Coffie Bot — автономный шаблон Telegram-бота и web-при
 Публичный API расположен под `/api/v1`. Подробности находятся в
 [`ARCHITECTURE.md`](ARCHITECTURE.md) и [`docs/API.md`](docs/API.md).
 
+Loyalty V2 сейчас реализуется в Phase 2: additive-контракт добавляет
+shared/separate кошельки, point lots, строгое FIFO, календарное сгорание и
+birthday month/day. Пока не закрыты её migration/test/release gates, deployable-базой
+остаётся Phase 1. Нормативные инварианты описаны в
+[`docs/LOYALTY_V2.md`](docs/LOYALTY_V2.md).
+
 ## Требования
 
 - Docker Engine или Docker Desktop;
@@ -183,8 +189,8 @@ Telegram API.
 - [CUSTOMIZATION.md](CUSTOMIZATION.md) — подготовка отдельного экземпляра для кофейни;
 - [DEPLOYMENT.md](DEPLOYMENT.md) — production Compose, HTTPS, обновления и backup/restore;
 - [MIGRATION_V2.md](MIGRATION_V2.md) — forward-only V2 revisions, preflight и проверки;
-- [docs/LOYALTY_V2.md](docs/LOYALTY_V2.md) — design отложенной Phase 2, а не описание
-  текущего release;
+- [docs/LOYALTY_V2.md](docs/LOYALTY_V2.md) — нормативный design и additive API contract
+  реализуемой Phase 2; до закрытия gate-ов это не описание deployable release;
 - [SECURITY.md](SECURITY.md) — модель доверия, секреты и incident response;
 - [docs/PRODUCT_DECISIONS.md](docs/PRODUCT_DECISIONS.md) — demo-значения, которые владелец
   обязан подтвердить до production;

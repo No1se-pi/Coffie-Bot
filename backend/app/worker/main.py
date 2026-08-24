@@ -22,6 +22,7 @@ from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import create_database
 from app.repositories.delivery import DeliveryRepository
+from app.repositories.loyalty_v2 import PointLedgerRepository
 from app.services.broadcasts import BroadcastService
 from app.services.notifications import (
     DeliveryError,
@@ -30,6 +31,7 @@ from app.services.notifications import (
     OutboundMessage,
     RetryPolicy,
 )
+from app.services.point_expiry import PointExpiryService
 
 logger = get_logger(__name__)
 
@@ -42,6 +44,7 @@ class WorkerOptions:
     max_attempts: int = 7
     base_backoff_seconds: int = 10
     max_backoff_seconds: int = 3600
+    maintenance_interval_seconds: float = 60.0
 
     @classmethod
     def from_environment(cls) -> WorkerOptions:
@@ -60,6 +63,12 @@ class WorkerOptions:
             ),
             max_backoff_seconds=_environment_int(
                 "WORKER_MAX_BACKOFF_SECONDS", 3600, minimum=1, maximum=86_400
+            ),
+            maintenance_interval_seconds=_environment_float(
+                "WORKER_MAINTENANCE_INTERVAL_SECONDS",
+                60.0,
+                minimum=1.0,
+                maximum=86_400.0,
             ),
         )
 
@@ -128,6 +137,8 @@ async def run_worker(
         _install_signal_handlers(stop)
     retry_policy = resolved_options.retry_policy()
     lease_for = timedelta(seconds=resolved_options.lease_seconds)
+    loop = asyncio.get_running_loop()
+    next_maintenance_at = 0.0
 
     logger.info(
         "worker_started",
@@ -139,6 +150,22 @@ async def run_worker(
             processed = 0
             try:
                 async with database.session_factory() as session:
+                    if loop.time() >= next_maintenance_at:
+                        expiry_result = await PointExpiryService(
+                            PointLedgerRepository(session)
+                        ).process_batch(limit=resolved_options.batch_size)
+                        processed += expiry_result.expired + expiry_result.reminders_scheduled
+                        next_maintenance_at = (
+                            loop.time() + resolved_options.maintenance_interval_seconds
+                        )
+                        if expiry_result.candidates:
+                            logger.info(
+                                "worker_expiry_maintenance",
+                                candidates=expiry_result.candidates,
+                                expired=expiry_result.expired,
+                                reminders=expiry_result.reminders_scheduled,
+                                skipped=expiry_result.skipped,
+                            )
                     repository = DeliveryRepository(session)
                     notifications = NotificationService(
                         repository=repository,
@@ -161,7 +188,7 @@ async def run_worker(
                         limit=resolved_options.batch_size,
                         lease_for=lease_for,
                     )
-                processed = notification_result.claimed + broadcast_result.claimed
+                processed += notification_result.claimed + broadcast_result.claimed
                 if processed:
                     logger.info(
                         "worker_batch_processed",

@@ -18,12 +18,14 @@ from app.core.errors import AppError, ErrorCode
 from app.models.access import User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.content import Venue
 from app.models.customers import CustomerIdentity
 from app.models.enums import (
     AuditSeverity,
     IdentityProvider,
     PermissionCode,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import LoyaltySettings
 from app.repositories.customers import CustomerCreationReceipt
@@ -51,6 +53,8 @@ class CustomerRepositoryPort(Protocol):
 
     async def get_user(self, user_id: UUID, *, for_update: bool) -> User | None: ...
 
+    async def get_venue(self, venue_id: UUID) -> Venue | None: ...
+
     async def get_card(self, card_id: UUID) -> UserCard | None: ...
 
     def add(self, value: object) -> None: ...
@@ -75,6 +79,10 @@ class CustomerRepositoryPort(Protocol):
         qr_token: str,
         short_code: str,
         welcome_bonus_points: int,
+        wallet_mode: WalletMode = WalletMode.SHARED,
+        points_expiry_months: int = 6,
+        points_validity_days: int | None = None,
+        bonus_venue_id: UUID | None = None,
         now: datetime,
         ip_address: str | None,
         user_agent: str | None,
@@ -135,6 +143,7 @@ class CustomerService:
         *,
         phone: str,
         display_name: str | None,
+        venue_id: UUID | None = None,
         idempotency_key: str,
         metadata: CustomerRequestMetadata | None = None,
         now: datetime | None = None,
@@ -153,6 +162,7 @@ class CustomerService:
             actor,
             phone=normalized_phone,
             display_name=normalized_name,
+            venue_id=venue_id,
         )
 
         async with self._repository.transaction():
@@ -189,6 +199,32 @@ class CustomerService:
                 if settings is not None and settings.points_enabled
                 else 0
             )
+            bonus_venue_id = venue_id or (
+                settings.default_bonus_venue_id if settings is not None else None
+            )
+            # An explicitly selected venue is part of the trusted operation
+            # context even when the welcome bonus is zero.  Validate it before
+            # staging the user so a stale/forged id cannot surface as a foreign
+            # key error (HTTP 500) or become misleading provenance later.
+            venue_to_validate = venue_id or (bonus_venue_id if welcome_bonus > 0 else None)
+            if venue_to_validate is not None:
+                bonus_venue = await self._repository.get_venue(venue_to_validate)
+                if (
+                    bonus_venue is None
+                    or not bonus_venue.is_active
+                    or bonus_venue.archived_at is not None
+                ):
+                    _validation("bonus_venue_unavailable", "Заведение для бонуса недоступно")
+            if (
+                welcome_bonus > 0
+                and settings is not None
+                and settings.wallet_mode is WalletMode.SEPARATE
+                and bonus_venue_id is None
+            ):
+                _validation(
+                    "bonus_venue_required",
+                    "Для стартового бонуса в раздельном режиме нужно заведение",
+                )
             user = self._repository.create_phone_profile(
                 phone=normalized_phone,
                 display_name=normalized_name,
@@ -202,6 +238,12 @@ class CustomerService:
                     secrets.choice(SHORT_CODE_ALPHABET) for _ in range(SHORT_CODE_LENGTH)
                 ),
                 welcome_bonus_points=welcome_bonus,
+                wallet_mode=(settings.wallet_mode if settings is not None else WalletMode.SHARED),
+                points_expiry_months=(settings.points_expiry_months if settings is not None else 6),
+                points_validity_days=(
+                    settings.points_validity_days if settings is not None else None
+                ),
+                bonus_venue_id=bonus_venue_id,
                 now=current_time,
                 ip_address=_truncate(request_metadata.ip_address, 45),
                 user_agent=_truncate(request_metadata.user_agent, 512),
@@ -433,12 +475,19 @@ def mask_phone(value: str) -> str:
     return f"{value[:2]}{'*' * max(0, len(value) - 6)}{visible}"
 
 
-def _request_hash(actor: Actor, *, phone: str, display_name: str) -> str:
+def _request_hash(
+    actor: Actor,
+    *,
+    phone: str,
+    display_name: str,
+    venue_id: UUID | None = None,
+) -> str:
     payload = json.dumps(
         {
             "actor_user_id": str(actor.user_id),
             "phone": phone,
             "display_name": display_name,
+            "venue_id": str(venue_id) if venue_id is not None else None,
         },
         ensure_ascii=False,
         sort_keys=True,

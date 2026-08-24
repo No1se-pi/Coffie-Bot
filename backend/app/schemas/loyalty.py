@@ -200,6 +200,7 @@ class ReasonRequest(ApiSchema):
 
 class AdjustmentRequest(ReasonRequest):
     delta_points: int
+    venue_id: UUID | None = None
 
     @field_validator("delta_points")
     @classmethod
@@ -212,6 +213,7 @@ class AdjustmentRequest(ReasonRequest):
 class RewardIssueRequest(ReasonRequest):
     template_id: UUID
     validity_days: int | None = Field(default=None, gt=0, le=3_650)
+    venue_id: UUID | None = None
 
 
 class RewardCancelRequest(ReasonRequest):
@@ -315,6 +317,11 @@ class AdminUserListResponse(ApiSchema):
     total: int
 
 
+class AdminUserBirthdayResponse(ApiSchema):
+    month: int = Field(ge=1, le=12)
+    day: int = Field(ge=1, le=31)
+
+
 class AdminUserResponse(AdminUserListItemResponse):
     card_id: UUID
     short_code: str
@@ -322,6 +329,8 @@ class AdminUserResponse(AdminUserListItemResponse):
     visit_streak: int
     stamp_count: int
     active_card: bool
+    birthday: AdminUserBirthdayResponse | None
+    birthday_locked: bool
 
 
 class AuditEventResponse(ApiSchema):
@@ -576,6 +585,14 @@ def user_page_response(
 
 
 def admin_user_response(value: LoyaltyContext) -> AdminUserResponse:
+    birthday = (
+        AdminUserBirthdayResponse(
+            month=value.user.birthday_month,
+            day=value.user.birthday_day,
+        )
+        if value.user.birthday_month is not None and value.user.birthday_day is not None
+        else None
+    )
     return AdminUserResponse(
         id=value.user.id,
         telegram_id=value.user.telegram_id,
@@ -590,6 +607,8 @@ def admin_user_response(value: LoyaltyContext) -> AdminUserResponse:
         visit_streak=value.state.visit_streak,
         stamp_count=value.state.stamp_count,
         active_card=value.card.status.value == "active",
+        birthday=birthday,
+        birthday_locked=birthday is not None,
     )
 
 

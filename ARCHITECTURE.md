@@ -46,7 +46,12 @@ Transport не выполняет расчёты и не меняет модел
 
 - Identity/access: `users`, `staff_members`, `staff_permissions`, `sessions`, `staff_invites`.
 - Карты: `user_cards`; один active QR на пользователя, старые записи отозваны и остаются для аудита.
-- Loyalty: `loyalty_settings`, `user_loyalty_states`, `loyalty_operations`, `point_transactions`, `visits`, `stamp_transactions`.
+- Loyalty compatibility journal: `loyalty_settings`, `user_loyalty_states`,
+  `loyalty_operations`, `point_transactions`, `visits`, `stamp_transactions`.
+- Loyalty V2 (Phase 2 в работе): `loyalty_wallets`, `point_lots`,
+  `point_allocations`, `wallet_mode_switches`, `wallet_transfers`, неизменяемые
+  routes партий и birthday policy. `user_loyalty_states.points_balance` остаётся
+  compatibility snapshot и равен сумме wallet balances.
 - Rewards: `reward_templates`, `rewards`; статусная машина `active -> redeemed|expired|cancelled`, обратный переход запрещён.
 - Content: `promotions`, `menu_categories`, `menu_items`, `locations`, `app_settings`.
 - Staff/community: `staff_tip_profiles`, `feedback_items`.
@@ -82,11 +87,33 @@ Development bypass разрешён только при явных `APP_ENV=deve
 ## Начисление и списание
 
 - Preview и confirm используют одну функцию расчёта, но confirm всегда пересчитывает данные под блокировкой.
-- Purchase amount > 0 и не выше configured maximum. Начисление = сумма / «рублей на балл» с заданным округлением, затем применяются min/daily/per-operation limits.
+- Purchase amount > 0 и не выше configured maximum. Phase 2 определяет
+  начисление по venue: `round(amount_minor * accrual_bps / 1_000_000)` для RUB,
+  где rounding mode также задан на venue. Demo-ставки — 1000/700/500 bps
+  (10%/7%/5%). Денежная ценность балла в эту формулу не входит.
 - Уникальный `(operation_type, idempotency_key)` предотвращает повтор. При повторе с тем же payload возвращается прежний результат; несовпадающий payload — conflict.
 - Списание ограничено доступным балансом, минимумом и процентом заказа; frontend не передаёт итоговый баланс.
+  По умолчанию 1 балл покрывает 1 RUB, а лимит равен 50% соответствующей
+  venue-части заказа.
 - Admin adjustment и reversal требуют непустую нормализованную причину.
 - Reversal ссылается на original operation, разрешён только один раз и не удаляет original.
+
+### Кошельки, FIFO и сгорание (Phase 2)
+
+- Shared mode имеет master wallet; separate mode — кошелёк venue. Любая
+  point mutation в separate mode требует trusted active venue/location.
+- Spend и expiry блокируют wallet и lots. После отсева уже истёкших
+  партий spend идёт строго по `earned_at, id`; `expires_at` не превращает FIFO в FEFO.
+- Новые lots по умолчанию живут шесть календарных месяцев с clamp
+  на последний день целевого месяца. Opening lot migration не получает
+  ретроактивного expiry.
+- Expiry/reversal создают immutable operations и allocations. Worker обрабатывает
+  expiry/reminder ограниченными партиями, а Telegram-доставку выполняет
+  только через outbox после commit.
+- Смена mode — owner-only preview/confirm. При shared → separate для origin-less
+  или archived-origin lots owner выбирает active fallback venue. Route фиксируется
+  даже для уже полностью израсходованного lot, чтобы поздний reversal оставался
+  однозначным.
 
 ## Посещения, штампы и награды
 

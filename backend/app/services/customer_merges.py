@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from typing import Any, NoReturn
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Literal, NoReturn
 from uuid import UUID, uuid4
 
 from fastapi import status
@@ -22,14 +22,23 @@ from app.models.enums import (
     LoyaltyOperationType,
     OperationStatus,
     PermissionCode,
+    PointAllocationType,
+    PointLotSourceType,
     Role,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import (
     LoyaltyOperation,
     PointTransaction,
     StampTransaction,
     UserLoyaltyState,
+)
+from app.models.loyalty_v2 import (
+    AccountMergeLotRoute,
+    LoyaltyWallet,
+    PointAllocation,
+    PointLot,
 )
 from app.repositories.customer_merges import (
     CustomerMergeRepository,
@@ -46,6 +55,7 @@ class MergeRequestMetadata:
 
 
 EMPTY_METADATA = MergeRequestMetadata()
+BirthdayResolution = Literal["keep_canonical", "use_source"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +69,7 @@ class MergeProfilePreview:
     visit_streak: int
     last_visit_business_date: date | None
     staff_role: Role | None
+    birthday_set: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +84,10 @@ class CustomerMergePreview:
     rewards_to_move: int
     sessions_to_revoke: int
     cards_to_revoke: int
+    feedback_to_move: int
     source_staff_rebound: bool
+    birthday_conflict: bool
+    birthday_resolution_required: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +130,7 @@ class CustomerMergeService:
         preview_hash: str,
         reason: str,
         idempotency_key: str,
+        birthday_resolution: BirthdayResolution | None = None,
         metadata: MergeRequestMetadata = EMPTY_METADATA,
         now: datetime | None = None,
     ) -> CustomerMergeResult:
@@ -136,9 +151,13 @@ class CustomerMergeService:
             canonical_user_id=canonical_user_id,
             preview_hash=preview_hash,
             reason=normalized_reason,
+            birthday_resolution=birthday_resolution,
         )
 
         async with self._repository.transaction():
+            # Configuration is always the first database lock.  The advisory
+            # key then serializes creation of the immutable merge receipt.
+            await self._repository.lock_settings_shared()
             await self._repository.acquire_idempotency_lock(idempotency_key)
             existing = await self._repository.get_by_idempotency_key(idempotency_key)
             if existing is not None:
@@ -164,6 +183,10 @@ class CustomerMergeService:
                     status_code=status.HTTP_409_CONFLICT,
                     details={"current_preview_hash": locked_preview.preview_hash},
                 )
+            effective_birthday_resolution = _birthday_resolution(
+                context,
+                birthday_resolution,
+            )
 
             source_state = _ensure_loyalty_state(
                 self._repository,
@@ -288,48 +311,7 @@ class CustomerMergeService:
             self._repository.add_all(point_transactions)
             await self._repository.flush()
 
-            source_state.points_balance = 0
-            canonical_state.points_balance = canonical_points_after
-            source_state.stamp_count = 0
-            canonical_state.stamp_count = canonical_stamps_after
             visit_winner_id = locked_preview.visit_snapshot_from_user_id
-            if visit_winner_id == source_user_id:
-                _copy_visit_snapshot(source_state, canonical_state)
-            source_state.version += 1
-            canonical_state.version += 1
-            source_state.updated_at = current_time
-            canonical_state.updated_at = current_time
-
-            for identity in context.source.identities:
-                identity.user_id = canonical_user_id
-                identity.updated_at = current_time
-            for customer_session in context.source_sessions:
-                customer_session.revoked_at = current_time
-                customer_session.revoke_reason = "customer_merged"
-            for card in context.source_cards:
-                card.status = CardStatus.REVOKED
-                card.revoked_at = current_time
-                card.revoked_by_staff_id = actor_staff_id
-                card.revoke_reason = "Аккаунт объединён с основным профилем"
-                card.updated_at = current_time
-            for reward in context.source_rewards:
-                reward.user_id = canonical_user_id
-                reward.updated_at = current_time
-
-            source_staff_rebound = context.source.staff is not None
-            if context.source.staff is not None:
-                # The rules guarantee the canonical profile has no StaffMember,
-                # so the one-to-one staff identity can be moved without deleting
-                # its permissions, tips, audit references, or employment history.
-                context.source.staff.user_id = canonical_user_id
-                context.source.staff.updated_at = current_time
-
-            context.source.user.status = UserStatus.MERGED
-            context.source.user.merged_into_user_id = canonical_user_id
-            context.source.user.merged_at = current_time
-            context.source.user.updated_at = current_time
-            context.canonical.user.updated_at = current_time
-
             merge = CustomerMerge(
                 id=merge_id,
                 source_user_id=source_user_id,
@@ -355,10 +337,80 @@ class CustomerMergeService:
                 rewards_moved=len(context.source_rewards),
                 sessions_revoked=len(context.source_sessions),
                 cards_revoked=len(context.source_cards),
-                source_staff_rebound=source_staff_rebound,
+                feedback_moved=len(context.source_feedback),
+                birthday_resolution=effective_birthday_resolution,
+                source_staff_rebound=context.source.staff is not None,
                 created_at=current_time,
                 completed_at=current_time,
             )
+            self._repository.add(merge)
+            await self._repository.flush()
+
+            await _move_wallet_lots(
+                self._repository,
+                context,
+                merge_id=merge_id,
+                source_operation_id=source_operation_id,
+                canonical_operation_id=canonical_operation_id,
+                expected_points=points_transferred,
+                now=current_time,
+            )
+
+            source_state.points_balance = 0
+            canonical_state.points_balance = canonical_points_after
+            source_state.stamp_count = 0
+            canonical_state.stamp_count = canonical_stamps_after
+            if visit_winner_id == source_user_id:
+                _copy_visit_snapshot(source_state, canonical_state)
+            source_state.version += 1
+            canonical_state.version += 1
+            source_state.updated_at = current_time
+            canonical_state.updated_at = current_time
+
+            for identity in context.source.identities:
+                identity.user_id = canonical_user_id
+                identity.updated_at = current_time
+            for customer_session in context.source_sessions:
+                customer_session.revoked_at = current_time
+                customer_session.revoke_reason = "customer_merged"
+            for card in context.source_cards:
+                card.status = CardStatus.REVOKED
+                card.revoked_at = current_time
+                card.revoked_by_staff_id = actor_staff_id
+                card.revoke_reason = "Аккаунт объединён с основным профилем"
+                card.updated_at = current_time
+            for reward in context.source_rewards:
+                reward.user_id = canonical_user_id
+                reward.updated_at = current_time
+            for feedback in context.source_feedback:
+                feedback.user_id = canonical_user_id
+                feedback.updated_at = current_time
+            _apply_birthday_resolution(
+                context,
+                effective_birthday_resolution,
+                actor_staff_id=actor_staff_id,
+                now=current_time,
+            )
+
+            source_staff_rebound = context.source.staff is not None
+            if context.source.staff is not None:
+                # The rules guarantee the canonical profile has no StaffMember,
+                # so the one-to-one staff identity can be moved without deleting
+                # its permissions, tips, audit references, or employment history.
+                context.source.staff.user_id = canonical_user_id
+                context.source.staff.updated_at = current_time
+
+            context.source.user.status = UserStatus.MERGED
+            context.source.user.merged_into_user_id = canonical_user_id
+            context.source.user.merged_at = current_time
+            context.source.user.updated_at = current_time
+            context.canonical.user.updated_at = current_time
+            _assert_merge_wallet_invariants(
+                context,
+                source_state=source_state,
+                canonical_state=canonical_state,
+            )
+
             audit = AuditEvent(
                 id=uuid4(),
                 event_type="customer.merged",
@@ -380,7 +432,12 @@ class CustomerMergeService:
                     "rewards_moved": len(context.source_rewards),
                     "sessions_revoked": len(context.source_sessions),
                     "cards_revoked": len(context.source_cards),
+                    "feedback_moved": len(context.source_feedback),
                     "source_staff_rebound": source_staff_rebound,
+                    "birthday_source_was_set": locked_preview.source.birthday_set,
+                    "birthday_canonical_was_set": locked_preview.canonical.birthday_set,
+                    "birthday_conflict": locked_preview.birthday_conflict,
+                    "birthday_resolution": effective_birthday_resolution,
                     "visit_snapshot_from_user_id": (
                         str(visit_winner_id) if visit_winner_id is not None else None
                     ),
@@ -390,14 +447,18 @@ class CustomerMergeService:
                 ip_address=_truncate(metadata.ip_address, 45),
                 user_agent=_truncate(metadata.user_agent, 512),
             )
-            self._repository.add_all([merge, audit])
+            self._repository.add(audit)
             await self._repository.flush()
             return CustomerMergeResult(merge=merge, idempotent_replay=False)
 
 
 def _preview(context: LockedMergeContext) -> CustomerMergePreview:
+    _assert_merge_wallet_invariants(context)
     visit_winner_id = _visit_snapshot_winner(context)
+    birthday_conflict = _birthday_conflict(context)
     snapshot = {
+        "wallet_mode": context.settings.wallet_mode.value,
+        "settings_updated_at": context.settings.updated_at,
         "source": _hashable_profile(context.source),
         "canonical": _hashable_profile(context.canonical),
         "source_session_ids": sorted(str(item.id) for item in context.source_sessions),
@@ -406,6 +467,20 @@ def _preview(context: LockedMergeContext) -> CustomerMergePreview:
             str(context.canonical_card.id) if context.canonical_card is not None else None
         ),
         "source_reward_ids": sorted(str(item.id) for item in context.source_rewards),
+        "source_feedback": [
+            {
+                "id": str(item.id),
+                "status": item.status.value,
+                "assigned_to_staff_id": (
+                    str(item.assigned_to_staff_id)
+                    if item.assigned_to_staff_id is not None
+                    else None
+                ),
+                "updated_at": item.updated_at,
+            }
+            for item in context.source_feedback
+        ],
+        "terminal_routes": [_hashable_route(context, lot) for lot in context.source_route_lots],
         "visit_snapshot_from_user_id": (
             str(visit_winner_id) if visit_winner_id is not None else None
         ),
@@ -431,7 +506,10 @@ def _preview(context: LockedMergeContext) -> CustomerMergePreview:
         rewards_to_move=len(context.source_rewards),
         sessions_to_revoke=len(context.source_sessions),
         cards_to_revoke=len(context.source_cards),
+        feedback_to_move=len(context.source_feedback),
         source_staff_rebound=context.source.staff is not None,
+        birthday_conflict=birthday_conflict,
+        birthday_resolution_required=birthday_conflict,
     )
 
 
@@ -453,6 +531,7 @@ def _profile_preview(profile: LockedMergeProfile) -> MergeProfilePreview:
         visit_streak=state.visit_streak if state is not None else 0,
         last_visit_business_date=(state.last_visit_business_date if state is not None else None),
         staff_role=profile.staff.role if profile.staff is not None else None,
+        birthday_set=_birthday_is_set(profile.user),
     )
 
 
@@ -467,6 +546,11 @@ def _hashable_profile(profile: LockedMergeProfile) -> dict[str, Any]:
             else None
         ),
         "telegram_id": profile.user.telegram_id,
+        "birthday": (
+            [profile.user.birthday_month, profile.user.birthday_day]
+            if _birthday_is_set(profile.user)
+            else None
+        ),
         "staff": (
             {
                 "id": str(profile.staff.id),
@@ -510,7 +594,281 @@ def _hashable_profile(profile: LockedMergeProfile) -> dict[str, Any]:
             if profile.latest_visit is not None
             else None
         ),
+        "wallets": [
+            {
+                "id": str(wallet.id),
+                "venue_id": str(wallet.venue_id) if wallet.venue_id is not None else None,
+                "balance_points": wallet.balance_points,
+                "version": wallet.version,
+            }
+            for wallet in profile.wallets
+        ],
+        "lots": [
+            {
+                "id": str(lot.id),
+                "wallet_id": str(lot.wallet_id),
+                "remaining_points": lot.remaining_points,
+                "earned_at": lot.earned_at,
+                "expires_at": lot.expires_at,
+                "expired_at": lot.expired_at,
+            }
+            for lot in profile.lots
+        ],
     }
+
+
+def _hashable_route(context: LockedMergeContext, lot: PointLot) -> dict[str, Any]:
+    route = context.terminal_routes.get(lot.id)
+    return {
+        "source_lot_id": str(lot.id),
+        "wallet_id": str(route.wallet_id) if route is not None else None,
+        "lot_id": (str(route.lot_id) if route is not None and route.lot_id is not None else None),
+        "routed_at": route.routed_at if route is not None else None,
+    }
+
+
+def _assert_merge_wallet_invariants(
+    context: LockedMergeContext,
+    *,
+    source_state: UserLoyaltyState | None = None,
+    canonical_state: UserLoyaltyState | None = None,
+) -> None:
+    states = (
+        source_state or context.source.loyalty_state,
+        canonical_state or context.canonical.loyalty_state,
+    )
+    for profile, state in zip((context.source, context.canonical), states, strict=True):
+        expected = state.points_balance if state else 0
+        if sum(wallet.balance_points for wallet in profile.wallets) != expected:
+            _conflict(
+                "customer_merge_wallet_inconsistent",
+                "Loyalty wallet totals do not match the customer snapshot",
+            )
+        lots_by_wallet: dict[UUID, int] = {}
+        for lot in profile.lots:
+            lots_by_wallet[lot.wallet_id] = (
+                lots_by_wallet.get(lot.wallet_id, 0) + lot.remaining_points
+            )
+        for wallet in profile.wallets:
+            if lots_by_wallet.get(wallet.id, 0) != wallet.balance_points:
+                _conflict(
+                    "customer_merge_lot_inconsistent",
+                    "Loyalty lots do not match their wallet snapshot",
+                )
+            inactive_scope = (
+                context.settings.wallet_mode is WalletMode.SHARED and wallet.venue_id is not None
+            ) or (context.settings.wallet_mode is WalletMode.SEPARATE and wallet.venue_id is None)
+            if inactive_scope and wallet.balance_points != 0:
+                _conflict(
+                    "customer_merge_wallet_mode_inconsistent",
+                    "An inactive loyalty wallet scope still has a balance",
+                )
+
+
+async def _move_wallet_lots(
+    repository: CustomerMergeRepository,
+    context: LockedMergeContext,
+    *,
+    merge_id: UUID,
+    source_operation_id: UUID,
+    canonical_operation_id: UUID,
+    expected_points: int,
+    now: datetime,
+) -> None:
+    source_wallets = {wallet.id: wallet for wallet in context.source.wallets}
+    canonical_by_scope = {wallet.venue_id: wallet for wallet in context.canonical.wallets}
+    moved = 0
+    new_wallets: list[LoyaltyWallet] = []
+    destination_lots: list[PointLot] = []
+    allocations: list[PointAllocation] = []
+    routes: list[AccountMergeLotRoute] = []
+    source_debits: dict[UUID, int] = {}
+    target_credits: dict[UUID, int] = {}
+    route_time = now
+    if context.route_timestamp_floor is not None and context.route_timestamp_floor >= route_time:
+        route_time = context.route_timestamp_floor + timedelta(microseconds=1)
+
+    for lot in context.source_route_lots:
+        prior_route = context.terminal_routes.get(lot.id)
+        terminal_wallet_id = prior_route.wallet_id if prior_route is not None else lot.wallet_id
+        terminal_wallet = source_wallets.get(terminal_wallet_id)
+        if terminal_wallet is None:
+            _conflict(
+                "customer_merge_route_inconsistent",
+                "A historical point lot no longer resolves to the source profile",
+            )
+        if lot.remaining_points > 0 and prior_route is not None:
+            _conflict(
+                "customer_merge_route_inconsistent",
+                "A routed historical lot unexpectedly retains points",
+            )
+        if (
+            context.settings.wallet_mode is WalletMode.SHARED
+            and terminal_wallet.venue_id is not None
+        ) or (
+            context.settings.wallet_mode is WalletMode.SEPARATE and terminal_wallet.venue_id is None
+        ):
+            _conflict(
+                "customer_merge_route_missing",
+                "A historical point lot has no route to the current wallet mode",
+            )
+
+        target_wallet = canonical_by_scope.get(terminal_wallet.venue_id)
+        if target_wallet is None:
+            target_wallet = LoyaltyWallet(
+                id=uuid4(),
+                user_id=context.canonical.user.id,
+                venue_id=terminal_wallet.venue_id,
+                balance_points=0,
+                version=1,
+                created_at=now,
+                updated_at=now,
+            )
+            canonical_by_scope[terminal_wallet.venue_id] = target_wallet
+            context.canonical.wallets.append(target_wallet)
+            new_wallets.append(target_wallet)
+
+        amount = lot.remaining_points
+        destination_lot: PointLot | None = None
+        if amount > 0:
+            actual_source_wallet = source_wallets.get(lot.wallet_id)
+            if actual_source_wallet is None:
+                raise RuntimeError("A positive merge lot is not owned by the source profile")
+            source_debits[actual_source_wallet.id] = (
+                source_debits.get(actual_source_wallet.id, 0) + amount
+            )
+            target_credits[target_wallet.id] = target_credits.get(target_wallet.id, 0) + amount
+            lot.remaining_points = 0
+            destination_lot = PointLot(
+                id=uuid4(),
+                wallet_id=target_wallet.id,
+                source_operation_id=canonical_operation_id,
+                source_venue_id=lot.source_venue_id,
+                transferred_from_lot_id=lot.id,
+                source_type=PointLotSourceType.ACCOUNT_MERGE,
+                initial_points=amount,
+                remaining_points=amount,
+                earned_at=lot.earned_at,
+                expires_at=lot.expires_at,
+                expired_at=None,
+                expiry_reminder_scheduled_at=lot.expiry_reminder_scheduled_at,
+                created_at=now,
+                updated_at=now,
+            )
+            context.canonical.lots.append(destination_lot)
+            destination_lots.append(destination_lot)
+            allocations.append(
+                PointAllocation(
+                    id=uuid4(),
+                    operation_id=source_operation_id,
+                    lot_id=lot.id,
+                    allocation_type=PointAllocationType.ACCOUNT_MERGE_DEBIT,
+                    points=amount,
+                    created_at=now,
+                )
+            )
+            moved += amount
+
+        if prior_route is not None and prior_route.routed_at >= route_time:
+            raise RuntimeError("Global point-lot route timestamp is inconsistent")
+        routes.append(
+            AccountMergeLotRoute(
+                id=uuid4(),
+                customer_merge_id=merge_id,
+                source_lot_id=lot.id,
+                destination_wallet_id=target_wallet.id,
+                destination_lot_id=(destination_lot.id if destination_lot is not None else None),
+                created_at=route_time,
+            )
+        )
+
+    if moved != expected_points:
+        _conflict(
+            "customer_merge_point_lineage_incomplete",
+            "Point lots do not explain the transferable balance",
+        )
+    targets_by_id = {wallet.id: wallet for wallet in canonical_by_scope.values()}
+    for wallet_id in sorted(source_debits, key=lambda value: value.int):
+        wallet = source_wallets[wallet_id]
+        wallet.balance_points -= source_debits[wallet_id]
+        wallet.version += 1
+    for wallet_id in sorted(target_credits, key=lambda value: value.int):
+        wallet = targets_by_id[wallet_id]
+        wallet.balance_points += target_credits[wallet_id]
+        wallet.version += 1
+    # These append-only models intentionally carry FK ids without mutable ORM
+    # relationships. Stage the flushes so PostgreSQL never observes a route
+    # before its newly created destination wallet/lot exists.
+    stages: tuple[list[object], ...] = (
+        list(new_wallets),
+        list(destination_lots),
+        list(allocations),
+        list(routes),
+    )
+    for objects in stages:
+        if objects:
+            repository.add_all(objects)
+            await repository.flush()
+
+
+def _birthday_is_set(user: User) -> bool:
+    return user.birthday_month is not None and user.birthday_day is not None
+
+
+def _birthday_conflict(context: LockedMergeContext) -> bool:
+    if not (_birthday_is_set(context.source.user) and _birthday_is_set(context.canonical.user)):
+        return False
+    return (
+        context.source.user.birthday_month,
+        context.source.user.birthday_day,
+    ) != (
+        context.canonical.user.birthday_month,
+        context.canonical.user.birthday_day,
+    )
+
+
+def _birthday_resolution(
+    context: LockedMergeContext,
+    requested: BirthdayResolution | None,
+) -> BirthdayResolution:
+    conflict = _birthday_conflict(context)
+    if conflict and requested is None:
+        raise AppError(
+            code="customer_merge_birthday_resolution_required",
+            message="Choose which confirmed birthday the canonical profile keeps",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+    if not conflict and requested is not None:
+        raise AppError(
+            code="customer_merge_birthday_resolution_not_applicable",
+            message="Birthday resolution is only accepted for conflicting values",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+    if requested is not None:
+        return requested
+    if _birthday_is_set(context.source.user) and not _birthday_is_set(context.canonical.user):
+        return "use_source"
+    return "keep_canonical"
+
+
+def _apply_birthday_resolution(
+    context: LockedMergeContext,
+    resolution: BirthdayResolution,
+    *,
+    actor_staff_id: UUID,
+    now: datetime,
+) -> None:
+    if resolution != "use_source":
+        return
+    source = context.source.user
+    canonical = context.canonical.user
+    if not _birthday_is_set(source):
+        raise RuntimeError("Source birthday is unavailable for the selected resolution")
+    canonical.birthday_month = source.birthday_month
+    canonical.birthday_day = source.birthday_day
+    canonical.birthday_set_at = source.birthday_set_at or now
+    canonical.birthday_updated_at = now
+    canonical.birthday_updated_by_staff_id = actor_staff_id
 
 
 def _visit_snapshot_winner(context: LockedMergeContext) -> UUID | None:
@@ -614,6 +972,7 @@ def _request_hash(
     canonical_user_id: UUID,
     preview_hash: str,
     reason: str,
+    birthday_resolution: BirthdayResolution | None,
 ) -> str:
     payload = {
         "action": "customer_merge",
@@ -623,6 +982,7 @@ def _request_hash(
         "canonical_user_id": str(canonical_user_id),
         "preview_hash": preview_hash,
         "reason": reason,
+        "birthday_resolution": birthday_resolution,
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()

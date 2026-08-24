@@ -12,6 +12,8 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.customer_merges import router as customer_merges_router
 from app.api.routes.customers import router as customers_router
 from app.api.routes.health import router as health_router
+from app.api.routes.loyalty_v2 import admin_router as loyalty_v2_admin_router
+from app.api.routes.loyalty_v2 import me_router as loyalty_v2_me_router
 from app.api.routes.me import router as me_router
 from app.api.routes.media import router as media_router
 from app.api.routes.public import router as public_router
@@ -24,6 +26,7 @@ api_v1_router.include_router(health_router)
 api_v1_router.include_router(auth_router)
 api_v1_router.include_router(customers_router)
 api_v1_router.include_router(me_router)
+api_v1_router.include_router(loyalty_v2_me_router)
 api_v1_router.include_router(public_router)
 api_v1_router.include_router(venues_router)
 api_v1_router.include_router(staff_router)
@@ -34,5 +37,6 @@ api_v1_router.include_router(admin_broadcasts_router)
 api_v1_router.include_router(admin_content_router)
 api_v1_router.include_router(admin_staff_router)
 api_v1_router.include_router(admin_venues_router)
+api_v1_router.include_router(loyalty_v2_admin_router)
 api_v1_router.include_router(customer_merges_router)
 api_v1_router.include_router(media_router)

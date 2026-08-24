@@ -5,16 +5,20 @@ import { describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
 import type {
   AdminFeedback,
+  AdminLoyaltyV2Settings,
   AdminStaffMember,
   AdminUserListItem,
   AdminUser,
   CardData,
+  ContactLocation,
+  ContactsData,
   CustomerMergePreview,
   CustomerMergeResult,
   LoyaltySettings,
   MenuCategory,
   OperationResult,
   PurchasePreview,
+  RedemptionPreview,
   StaffClient,
   Venue,
 } from "../api/types";
@@ -28,8 +32,10 @@ import {
 } from "../pages/customer";
 import {
   AccrualPanel,
+  ClientPreviewPage,
   QuickOperationsPanel,
   ScannerPage,
+  STAFF_LOCATION_STORAGE_KEY,
   StaffWorkspaceProvider,
 } from "../pages/staff";
 import {
@@ -126,6 +132,70 @@ const grillVenue: Venue = {
 
 const venues = [coffeeVenue, foodVenue, grillVenue];
 
+const staffLocations: ContactLocation[] = [
+  {
+    id: "location-coffee",
+    venue_id: coffeeVenue.id,
+    name: "Кофейня на Ленина",
+    address: "ул. Ленина, 1",
+    hours: "08:00–22:00",
+  },
+  {
+    id: "location-food",
+    venue_id: foodVenue.id,
+    name: "ФудДворик в парке",
+    address: "Парковая ул., 7",
+    hours: "10:00–23:00",
+  },
+];
+
+const staffContacts: ContactsData = {
+  coffee_shop_name: "Coffie Bot",
+  description: "",
+  privacy_policy: "",
+  locations: staffLocations,
+};
+
+function adminLoyaltySettings(
+  walletMode: AdminLoyaltyV2Settings["wallet_mode"],
+): AdminLoyaltyV2Settings {
+  return {
+    wallet_mode: walletMode,
+    point_value_minor: 100,
+    max_redemption_percent: 50,
+    expiry_months: 6,
+    expiry_days_override: null,
+    expiry_reminder_days: 14,
+    default_bonus_venue_id: coffeeVenue.id,
+    rounding: "floor",
+    venue_rates: [
+      {
+        venue_id: coffeeVenue.id,
+        venue_name: coffeeVenue.name,
+        available: true,
+        loyalty_points_enabled: true,
+        accrual_basis_points: 1_000,
+        rounding_mode: "floor",
+      },
+      {
+        venue_id: foodVenue.id,
+        venue_name: foodVenue.name,
+        available: true,
+        loyalty_points_enabled: true,
+        accrual_basis_points: 700,
+        rounding_mode: "half_up",
+      },
+    ],
+    birthday: {
+      enabled: true,
+      discount_percent: 10,
+      window_days: 7,
+      eligible_venue_ids: [],
+      stackable: false,
+    },
+  };
+}
+
 function VenueSelectionHarness({ items }: { items: Venue[] }) {
   const selection = useVenueSelection(items);
   return (
@@ -188,6 +258,7 @@ describe("critical Mini App flows", () => {
 
   it("falls back to manual code and opens the scanned client", async () => {
     const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getContacts").mockResolvedValue(staffContacts);
     const lookup = vi
       .spyOn(coffeeApi, "lookupStaffClient")
       .mockResolvedValue(client);
@@ -218,6 +289,7 @@ describe("critical Mini App flows", () => {
 
   it("passes a formatted phone to the backend customer lookup", async () => {
     const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getContacts").mockResolvedValue(staffContacts);
     const lookup = vi
       .spyOn(coffeeApi, "lookupStaffClient")
       .mockResolvedValue(client);
@@ -249,6 +321,8 @@ describe("critical Mini App flows", () => {
 
   it("reuses one idempotency key when phone customer creation is retried", async () => {
     const user = userEvent.setup();
+    window.sessionStorage.removeItem(STAFF_LOCATION_STORAGE_KEY);
+    vi.spyOn(coffeeApi, "getContacts").mockResolvedValue(staffContacts);
     const phoneClient: StaffClient = {
       ...client,
       user_id: "user-phone",
@@ -279,13 +353,20 @@ describe("critical Mini App flows", () => {
             <Route path="/staff/scan" element={<ScannerPage />} />
             <Route
               path="/staff/client/:userId"
-              element={<div>Карточка создана</div>}
+              element={<ClientPreviewPage />}
             />
           </Routes>
         </StaffWorkspaceProvider>
       </MemoryRouter>,
     );
 
+    const locationSelector = await screen.findByLabelText(
+      "Активная физическая точка",
+    );
+    await user.selectOptions(locationSelector, staffLocations[1]!.id);
+    expect(screen.getByText(/Сейчас:/)).toHaveTextContent(
+      staffLocations[1]!.name,
+    );
     await user.click(
       screen.getByRole("button", { name: "Создать нового клиента" }),
     );
@@ -299,11 +380,17 @@ describe("critical Mini App flows", () => {
     expect(await screen.findByText("Соединение потеряно")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Создать карту" }));
 
-    expect(await screen.findByText("Карточка создана")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Мария" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Активная физическая точка")).toHaveValue(
+      staffLocations[1]!.id,
+    );
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[0]?.[0]).toEqual({
       phone: "+7 999 123-45-67",
       display_name: "Мария",
+      venue_id: foodVenue.id,
     });
     const firstKey = create.mock.calls[0]?.[1];
     const retryKey = create.mock.calls[1]?.[1];
@@ -312,6 +399,10 @@ describe("critical Mini App flows", () => {
     );
     expect(retryKey).toBe(firstKey);
     expect(lookup).toHaveBeenCalledWith({ phone: "+7 999 123-45-67" });
+    expect(window.sessionStorage.getItem(STAFF_LOCATION_STORAGE_KEY)).toBe(
+      staffLocations[1]!.id,
+    );
+    window.sessionStorage.removeItem(STAFF_LOCATION_STORAGE_KEY);
   });
 
   it("previews and confirms a purchase with stamps and automatic visit", async () => {
@@ -332,6 +423,7 @@ describe("critical Mini App flows", () => {
       visit_already_counted: false,
       visit_streak_after: 4,
       requires_approval: false,
+      location_id: staffLocations[0]!.id,
     };
     const operation: OperationResult = {
       operation_id: "operation-1",
@@ -349,7 +441,13 @@ describe("critical Mini App flows", () => {
       .spyOn(coffeeApi, "confirmPurchase")
       .mockResolvedValue(operation);
     const newPurchase = vi.fn();
-    render(<AccrualPanel client={client} onNewPurchase={newPurchase} />);
+    render(
+      <AccrualPanel
+        client={client}
+        location={staffLocations[0]!}
+        onNewPurchase={newPurchase}
+      />,
+    );
 
     await user.type(screen.getByLabelText(/сумма покупки/i), "460");
     await user.clear(screen.getByLabelText(/штампы за покупку/i));
@@ -370,11 +468,13 @@ describe("critical Mini App flows", () => {
       user_id: "user-1",
       purchase_amount_minor: 46000,
       stamps_to_add: 2,
+      location_id: staffLocations[0]!.id,
     });
     expect(confirmCall).toHaveBeenCalledWith({
       user_id: "user-1",
       purchase_amount_minor: 46000,
       stamps_to_add: 2,
+      location_id: staffLocations[0]!.id,
     });
     await user.click(screen.getByRole("button", { name: "Новая покупка" }));
     expect(newPurchase).toHaveBeenCalledOnce();
@@ -473,7 +573,13 @@ describe("critical Mini App flows", () => {
   });
 
   it("keeps manual visits and stamps out of secondary actions", () => {
-    render(<QuickOperationsPanel client={client} onCompleted={vi.fn()} />);
+    render(
+      <QuickOperationsPanel
+        client={client}
+        location={staffLocations[0]!}
+        onCompleted={vi.fn()}
+      />,
+    );
 
     expect(
       screen.queryByRole("button", { name: "Посещение" }),
@@ -482,6 +588,99 @@ describe("critical Mini App flows", () => {
       screen.queryByRole("button", { name: "Штамп" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Списать" })).toBeInTheDocument();
+  });
+
+  it("uses the preview location again when confirming a redemption", async () => {
+    const user = userEvent.setup();
+    const preview: RedemptionPreview = {
+      user_id: client.user_id,
+      customer_name: client.display_name,
+      purchase_amount_minor: 10_000,
+      requested_points: 40,
+      discount_minor: 4_000,
+      maximum_points_for_purchase: 50,
+      balance_before: 284,
+      balance_after: 244,
+      location_id: staffLocations[1]!.id,
+    };
+    const previewCall = vi
+      .spyOn(coffeeApi, "previewRedemption")
+      .mockResolvedValue(preview);
+    const confirmCall = vi
+      .spyOn(coffeeApi, "confirmRedemption")
+      .mockResolvedValue({
+        operation_id: "redemption-1",
+        status: "completed",
+        delta_points: -40,
+        balance_after: 244,
+        created_at: "2026-08-24T10:00:00Z",
+      });
+
+    render(
+      <QuickOperationsPanel
+        client={client}
+        location={staffLocations[1]!}
+        onCompleted={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Списать" }));
+    await user.type(screen.getByLabelText("Сумма покупки, ₽"), "100");
+    await user.type(screen.getByLabelText("Сколько баллов списать"), "40");
+    await user.click(screen.getByRole("button", { name: "Рассчитать" }));
+    expect(
+      await screen.findByLabelText("Предпросмотр списания"),
+    ).toHaveTextContent(staffLocations[1]!.name);
+    await user.click(
+      screen.getByRole("button", { name: "Подтвердить списание" }),
+    );
+
+    const expectedPayload = {
+      user_id: client.user_id,
+      purchase_amount_minor: 10_000,
+      requested_points: 40,
+      location_id: staffLocations[1]!.id,
+    };
+    expect(previewCall).toHaveBeenCalledWith(expectedPayload);
+    expect(confirmCall).toHaveBeenCalledWith(expectedPayload);
+  });
+
+  it("keeps simple reward redemption independent from location payloads", async () => {
+    const user = userEvent.setup();
+    const redeem = vi.spyOn(coffeeApi, "redeemReward").mockResolvedValue({
+      operation_id: "reward-redemption-1",
+      status: "completed",
+      delta_points: 0,
+      balance_after: client.balance_points,
+      created_at: "2026-08-24T10:00:00Z",
+    });
+    render(
+      <QuickOperationsPanel
+        client={{
+          ...client,
+          available_rewards: [
+            {
+              id: "reward-1",
+              title: "Бесплатный кофе",
+              description: "Любой напиток 300 мл",
+              type: "free_product",
+              status: "active",
+              created_at: "2026-08-24T09:00:00Z",
+            },
+          ],
+        }}
+        location={staffLocations[0]!}
+        onCompleted={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Погасить награду" }));
+    await user.click(screen.getByLabelText(/Бесплатный кофе/));
+    await user.click(
+      screen.getByRole("button", { name: "Подтвердить погашение" }),
+    );
+
+    expect(redeem).toHaveBeenCalledWith("reward-1");
   });
 
   it("shows a safe retryable error state", async () => {
@@ -703,6 +902,9 @@ describe("critical Mini App flows", () => {
       created_at: "2026-07-01T10:00:00Z",
     };
     vi.spyOn(coffeeApi, "getAdminUser").mockResolvedValue(adminUser);
+    vi.spyOn(coffeeApi, "getAdminLoyaltyV2").mockResolvedValue(
+      adminLoyaltySettings("shared"),
+    );
     const confirm = vi.spyOn(coffeeApi, "confirmAdjustment").mockResolvedValue({
       operation_id: "adjustment-1",
       status: "completed",
@@ -731,11 +933,18 @@ describe("critical Mini App flows", () => {
     expect(amountInput).toHaveAttribute("inputmode", "numeric");
     expect(amountInput).toHaveAttribute("min", "1");
     await user.type(amountInput, "50");
+    await user.selectOptions(
+      await screen.findByLabelText("Заведение корректировки"),
+      coffeeVenue.id,
+    );
     await user.type(screen.getByLabelText("Причина"), "Компенсация за ошибку");
     await user.click(screen.getByRole("button", { name: "Показать итог" }));
     expect(
       screen.getByLabelText("Предпросмотр корректировки"),
     ).toHaveTextContent("334");
+    expect(
+      screen.getByLabelText("Предпросмотр корректировки"),
+    ).toHaveTextContent(`источник «${coffeeVenue.name}»`);
     await user.click(
       screen.getByRole("button", { name: /подтвердить корректировку/i }),
     );
@@ -747,6 +956,7 @@ describe("critical Mini App flows", () => {
       user_id: "user-1",
       delta_points: 50,
       reason: "Компенсация за ошибку",
+      venue_id: coffeeVenue.id,
     });
   });
 
@@ -765,6 +975,9 @@ describe("critical Mini App flows", () => {
       created_at: "2026-07-01T10:00:00Z",
     };
     vi.spyOn(coffeeApi, "getAdminUser").mockResolvedValue(adminUser);
+    vi.spyOn(coffeeApi, "getAdminLoyaltyV2").mockResolvedValue(
+      adminLoyaltySettings("shared"),
+    );
     const confirm = vi.spyOn(coffeeApi, "confirmAdjustment").mockResolvedValue({
       operation_id: "adjustment-2",
       status: "completed",
@@ -799,6 +1012,9 @@ describe("critical Mini App flows", () => {
     expect(
       screen.getByLabelText("Предпросмотр корректировки"),
     ).toHaveTextContent("264");
+    expect(
+      screen.getByLabelText("Предпросмотр корректировки"),
+    ).toHaveTextContent("Общий кошелёк (master wallet)");
     await user.click(
       screen.getByRole("button", { name: /подтвердить корректировку/i }),
     );
@@ -810,6 +1026,66 @@ describe("critical Mini App flows", () => {
       user_id: "user-1",
       delta_points: -20,
       reason: "Исправление начисления",
+      venue_id: null,
+    });
+  });
+
+  it("requires and sends a venue for a separate-wallet adjustment", async () => {
+    const user = userEvent.setup();
+    const adminUser: AdminUser = {
+      id: "user-1",
+      telegram_id: null,
+      display_name: "Гость",
+      short_code: "PHONE123",
+      balance_points: 120,
+      status: "active",
+      visit_streak: 0,
+      stamps: 0,
+      active_rewards: 0,
+      created_at: "2026-08-24T10:00:00Z",
+    };
+    vi.spyOn(coffeeApi, "getAdminUser").mockResolvedValue(adminUser);
+    vi.spyOn(coffeeApi, "getAdminLoyaltyV2").mockResolvedValue(
+      adminLoyaltySettings("separate"),
+    );
+    const confirm = vi.spyOn(coffeeApi, "confirmAdjustment").mockResolvedValue({
+      operation_id: "adjustment-venue",
+      status: "completed",
+      delta_points: 15,
+      balance_after: 135,
+      created_at: "2026-08-24T10:10:00Z",
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/admin/users/user-1/adjust"]}>
+        <Routes>
+          <Route
+            path="/admin/users/:userId/adjust"
+            element={<AdminAdjustmentPage />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Гость")).toBeInTheDocument();
+    const venue = await screen.findByLabelText("Заведение корректировки");
+    expect(venue).toBeRequired();
+    await user.selectOptions(venue, foodVenue.id);
+    await user.type(screen.getByLabelText("Количество баллов"), "15");
+    await user.type(screen.getByLabelText("Причина"), "Welcome-компенсация");
+    await user.click(screen.getByRole("button", { name: "Показать итог" }));
+
+    expect(
+      screen.getByLabelText("Предпросмотр корректировки"),
+    ).toHaveTextContent(`Кошелёк «${foodVenue.name}»`);
+    await user.click(
+      screen.getByRole("button", { name: "Подтвердить корректировку" }),
+    );
+    expect(confirm).toHaveBeenCalledWith({
+      user_id: adminUser.id,
+      delta_points: 15,
+      reason: "Welcome-компенсация",
+      venue_id: foodVenue.id,
     });
   });
 

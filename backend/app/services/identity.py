@@ -15,12 +15,14 @@ from fastapi import status
 from app.core.config import AppEnvironment, Settings
 from app.core.errors import AppError, ErrorCode
 from app.models.access import StaffMember, User
+from app.models.content import Venue
 from app.models.enums import (
     LoyaltyOperationType,
     PermissionCode,
     RewardStatus,
     Role,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import LoyaltySettings
 from app.repositories.identity import (
@@ -62,6 +64,8 @@ class IdentityRepositoryPort(Protocol):
 
     async def get_loyalty_settings(self) -> LoyaltySettings | None: ...
 
+    async def get_active_venue(self, venue_id: UUID) -> Venue | None: ...
+
     def initialize_customer(
         self,
         *,
@@ -69,6 +73,10 @@ class IdentityRepositoryPort(Protocol):
         qr_token: str,
         short_code: str,
         welcome_bonus_points: int,
+        wallet_mode: WalletMode = WalletMode.SHARED,
+        points_expiry_months: int = 6,
+        points_validity_days: int | None = None,
+        bonus_venue_id: UUID | None = None,
         now: datetime,
         ip_address: str | None,
         user_agent: str | None,
@@ -284,6 +292,10 @@ class IdentityService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
 
+        # Settings is the first row lock for every loyalty-capable writer.
+        # Taking it before the Telegram user upsert prevents an inversion with
+        # owner mode changes that lock settings and then customer aggregates.
+        loyalty_settings = await self._repository.get_loyalty_settings()
         user, created = await self._repository.upsert_telegram_user(
             telegram_user,
             now=now,
@@ -303,12 +315,34 @@ class IdentityService:
             created or await self._repository.get_card_view(user.id) is None
         )
         if customer_aggregate_missing:
-            loyalty_settings = await self._repository.get_loyalty_settings()
             welcome_bonus = (
                 loyalty_settings.welcome_bonus_points
                 if loyalty_settings is not None and loyalty_settings.points_enabled
                 else 0
             )
+            bonus_venue_id = (
+                loyalty_settings.default_bonus_venue_id if loyalty_settings is not None else None
+            )
+            if welcome_bonus > 0:
+                if (
+                    bonus_venue_id is None
+                    and loyalty_settings is not None
+                    and loyalty_settings.wallet_mode is WalletMode.SEPARATE
+                ):
+                    raise AppError(
+                        code="welcome_bonus_venue_required",
+                        message="Welcome bonus venue is not configured",
+                        status_code=status.HTTP_409_CONFLICT,
+                    )
+                if (
+                    bonus_venue_id is not None
+                    and await self._repository.get_active_venue(bonus_venue_id) is None
+                ):
+                    raise AppError(
+                        code="welcome_bonus_venue_unavailable",
+                        message="Welcome bonus venue is unavailable",
+                        status_code=status.HTTP_409_CONFLICT,
+                    )
             self._repository.initialize_customer(
                 user_id=user.id,
                 qr_token=secrets.token_urlsafe(32),
@@ -316,6 +350,18 @@ class IdentityService:
                     secrets.choice(SHORT_CODE_ALPHABET) for _ in range(SHORT_CODE_LENGTH)
                 ),
                 welcome_bonus_points=welcome_bonus,
+                wallet_mode=(
+                    loyalty_settings.wallet_mode
+                    if loyalty_settings is not None
+                    else WalletMode.SHARED
+                ),
+                points_expiry_months=(
+                    loyalty_settings.points_expiry_months if loyalty_settings is not None else 6
+                ),
+                points_validity_days=(
+                    loyalty_settings.points_validity_days if loyalty_settings is not None else None
+                ),
+                bonus_venue_id=bonus_venue_id,
                 now=now,
                 ip_address=ip_address,
                 user_agent=user_agent,

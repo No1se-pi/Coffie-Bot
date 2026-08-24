@@ -22,19 +22,23 @@ from app.models.enums import (
     LoyaltyOperationType,
     OperationStatus,
     PermissionCode,
+    PointLotSourceType,
     RewardStatus,
     RewardType,
     Role,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import (
     LoyaltyOperation,
+    LoyaltySettings,
     PointTransaction,
     Reward,
     StampTransaction,
     UserLoyaltyState,
     Visit,
 )
+from app.models.loyalty_v2 import LoyaltyWallet, PointLot
 from app.repositories.customer_merges import (
     CustomerMergeRepository,
     LockedMergeContext,
@@ -73,6 +77,8 @@ class RecordingMergeRepository:
 
     def add(self, value: object) -> None:
         self.added.append(value)
+        if isinstance(value, CustomerMerge):
+            self.existing = value
 
     def add_all(self, values: list[object]) -> None:
         self.added.extend(values)
@@ -85,6 +91,9 @@ class RecordingMergeRepository:
 
     async def acquire_idempotency_lock(self, key: str) -> None:
         self.idempotency_locks.append(key)
+
+    async def lock_settings_shared(self) -> LoyaltySettings:
+        return self.context.settings
 
     async def get_by_idempotency_key(self, key: str) -> CustomerMerge | None:
         if self.existing is not None and self.existing.idempotency_key == key:
@@ -236,13 +245,58 @@ def _context(
         visited_at=NOW - timedelta(days=4),
         streak_after=4,
     )
+    settings = LoyaltySettings(
+        id=uuid4(),
+        singleton_key="default",
+        wallet_mode=WalletMode.SHARED,
+        updated_at=NOW,
+    )
+    source_wallet = LoyaltyWallet(
+        id=uuid4(),
+        user_id=source.id,
+        venue_id=None,
+        balance_points=70,
+        version=1,
+    )
+    canonical_wallet = LoyaltyWallet(
+        id=uuid4(),
+        user_id=canonical.id,
+        venue_id=None,
+        balance_points=30,
+        version=1,
+    )
+    source_lot = PointLot(
+        id=uuid4(),
+        wallet_id=source_wallet.id,
+        source_operation_id=None,
+        source_venue_id=None,
+        source_type=PointLotSourceType.OPENING_BALANCE,
+        initial_points=70,
+        remaining_points=70,
+        earned_at=NOW - timedelta(days=30),
+        expires_at=None,
+    )
+    canonical_lot = PointLot(
+        id=uuid4(),
+        wallet_id=canonical_wallet.id,
+        source_operation_id=None,
+        source_venue_id=None,
+        source_type=PointLotSourceType.OPENING_BALANCE,
+        initial_points=30,
+        remaining_points=30,
+        earned_at=NOW - timedelta(days=20),
+        expires_at=None,
+    )
     return LockedMergeContext(
+        settings=settings,
         source=LockedMergeProfile(
             user=source,
             staff=source_staff,
             loyalty_state=source_state,
             identities=[identity],
             latest_visit=visit,
+            wallets=[source_wallet],
+            lots=[source_lot],
         ),
         canonical=LockedMergeProfile(
             user=canonical,
@@ -250,11 +304,17 @@ def _context(
             loyalty_state=canonical_state,
             identities=[],
             latest_visit=canonical_visit,
+            wallets=[canonical_wallet],
+            lots=[canonical_lot],
         ),
         source_sessions=[customer_session],
         source_cards=[card],
         canonical_card=canonical_card,
         source_rewards=[reward],
+        source_feedback=[],
+        source_route_lots=[source_lot],
+        terminal_routes={source_lot.id: None},
+        route_timestamp_floor=None,
     )
 
 
@@ -372,7 +432,7 @@ async def test_confirm_moves_mutable_ownership_and_writes_paired_journals() -> N
     assert audit.event_type == "customer.merged"
     assert audit.idempotency_key == f"customer-merge:{key}"
     assert audit.event_metadata["canonical_user_id"] == str(context.canonical.user.id)
-    assert repository.flushes == 4
+    assert repository.flushes == 8
 
 
 @pytest.mark.asyncio
@@ -508,12 +568,17 @@ async def test_canonical_profile_must_be_available_and_keep_an_active_card() -> 
 
     missing_card = _context()
     missing_card = LockedMergeContext(
+        settings=missing_card.settings,
         source=missing_card.source,
         canonical=missing_card.canonical,
         source_sessions=missing_card.source_sessions,
         source_cards=missing_card.source_cards,
         canonical_card=None,
         source_rewards=missing_card.source_rewards,
+        source_feedback=missing_card.source_feedback,
+        source_route_lots=missing_card.source_route_lots,
+        terminal_routes=missing_card.terminal_routes,
+        route_timestamp_floor=missing_card.route_timestamp_floor,
     )
     with pytest.raises(AppError) as card_error:
         await CustomerMergeService(

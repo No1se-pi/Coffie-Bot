@@ -1,7 +1,7 @@
 # План реализации Coffie Bot V2
 
-Статус: Phase 0 и Phase 1 завершены; Phase 2 спроектирована и отложена до
-следующего этапа; deployable-граница — Phase 1.
+Статус: Phase 0 и Phase 1 завершены; Phase 2 (Loyalty V2) в работе в отдельной
+ветке поверх deployable Phase 1.
 
 Baseline: `main` / `7e2d1157e328ba9564417e05161c77b0d5d6401a`, 2026-08-24.
 
@@ -104,7 +104,13 @@ consolidation location может обслуживать mixed order орган�
   не создавая баллы из воздуха и не воскрешая уже истёкший срок без явной политики.
 - Wallet mode switch — owner-only preview/confirm с reason, idempotency, transfer operations и
   audit; прямое переключение поля при ненулевых балансах запрещено.
-- Venue accrual хранится в basis points (`1000 = 10%`), деньги — minor units, баллы — integer.
+- Shared → separate требует active fallback venue для origin-less/archived-origin lots;
+  immutable route пишется и для нулевого lot, чтобы reversal после switch/merge
+  оставался однозначным.
+- Venue accrual хранит enabled, basis points (`1000 = 10%`) и rounding mode.
+  100 ₽ при 10% дают 10 баллов независимо от redemption value.
+- Shared V1 request без location использует trusted default active Location/Venue и
+  его policy; separate mode требует explicit validated location.
 
 ### Pricing и orders
 
@@ -148,7 +154,8 @@ consolidation location может обслуживать mixed order орган�
    - lineage indexes без переписывания immutable history.
 4. `0011_v2_loyalty_wallets_and_point_lots`
    - wallet mode/config, venue loyalty policy;
-   - wallets, point lots, allocations и wallet transfer journal;
+   - wallets, point lots, allocations, wallet transfer journal и immutable switch/merge routes;
+   - birthday month/day, offer policy и eligible venues;
    - opening wallet/lot из каждого существующего `points_balance` без изменения суммы.
 5. `0012_v2_menu_modifiers_and_pricing`
    - venue ownership menu/category/promotion;
@@ -183,11 +190,13 @@ Legacy responses получают только additive nullable поля. Compa
 canonical wallet/customer representation, но сохраняют старые `balance_points`, `user_id` и
 историю. Любое неизбежное несовместимое изменение фиксируется в `MIGRATION_V2.md` до merge.
 
-Новые группы планируются в стиле текущего router:
+Новые группы планируются в стиле текущего router. Контракты Phase 2
+аддитивны, но до закрытия gate-ов остаются implementation-in-progress:
 
 - `/venues`, `/customer-identities`, `/me/birthday`, `/me/wallets`;
 - `/staff/customers`, `/staff/receipts`, `/staff/subscriptions`, `/staff/orders`;
-- `/admin/customer-merge`, `/admin/venues`, `/admin/loyalty`, `/admin/pricing`;
+- `/admin/customer-merge`, `/admin/venues`, `/admin/loyalty`,
+  `/admin/loyalty/wallet-mode/preview|confirm`, `/admin/users/{id}/birthday`, `/admin/pricing`;
 - `/cart/price`, `/orders`, `/delivery`, `/courier`;
 - `/reviews`, `/subscriptions`, `/admin/analytics`, `/admin/help`.
 
@@ -221,6 +230,9 @@ canonical wallet/customer representation, но сохраняют старые `
 - [ ] 1 point = 1 RUB default, 50% per-venue redemption in mixed order.
 - [ ] Birthday capture/lock/admin change и birthday promotion.
 - [ ] Wallet/expiry/birthday Mini App UI и tests.
+
+Checkbox этапа не закрываются до фактического backend/frontend/migration/Compose
+gate и фазового отчёта.
 
 ### Phase 3 — Menu / Pricing
 
@@ -315,4 +327,5 @@ canonical wallet/customer representation, но сохраняют старые `
   выполнил migrations и прошёл frontend `200` и backend readiness `ok`; containers/volumes удалены.
 - Deploy guard теперь отклоняет и untracked build-context files, чтобы в image не попала
   миграция или Python-модуль вне release commit.
-- Следующий шаг после выкладки и bugfix-паузы: Phase 2 Loyalty V2.
+- После release-паузы работа над Phase 2 Loyalty V2 возобновлена; её gates
+  на момент этой записи не закрыты.

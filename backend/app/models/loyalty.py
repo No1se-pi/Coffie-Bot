@@ -31,6 +31,7 @@ from app.models.enums import (
     RewardStatus,
     RewardType,
     RoundingMode,
+    WalletMode,
 )
 
 if TYPE_CHECKING:
@@ -103,6 +104,13 @@ class LoyaltySettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "business_day_boundary_minutes >= 0 AND business_day_boundary_minutes < 1440",
             name="valid_business_day_boundary",
         ),
+        CheckConstraint("points_expiry_months > 0", name="positive_points_expiry_months"),
+        CheckConstraint("expiry_reminder_days >= 0", name="non_negative_expiry_reminder_days"),
+        CheckConstraint(
+            "birthday_discount_basis_points BETWEEN 0 AND 10000",
+            name="valid_birthday_discount_basis_points",
+        ),
+        CheckConstraint("birthday_window_days > 0", name="positive_birthday_window_days"),
     )
 
     singleton_key: Mapped[str] = mapped_column(
@@ -143,6 +151,33 @@ class LoyaltySettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     minimum_redemption_points: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
     welcome_bonus_points: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     points_validity_days: Mapped[int | None] = mapped_column(Integer)
+    wallet_mode: Mapped[WalletMode] = mapped_column(
+        enum_type(WalletMode, name="wallet_mode", length=16),
+        nullable=False,
+        default=WalletMode.SHARED,
+        server_default=WalletMode.SHARED.value,
+    )
+    points_expiry_months: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=6, server_default="6"
+    )
+    expiry_reminder_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=14, server_default="14"
+    )
+    default_bonus_venue_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("venues.id", ondelete="SET NULL")
+    )
+    birthday_promotion_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    birthday_discount_basis_points: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1_000, server_default="1000"
+    )
+    birthday_window_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    birthday_stackable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     daily_accrual_limit_points: Mapped[int | None] = mapped_column(BigInteger)
     operation_accrual_limit_points: Mapped[int | None] = mapped_column(BigInteger)
     large_operation_threshold_minor: Mapped[int | None] = mapped_column(BigInteger)

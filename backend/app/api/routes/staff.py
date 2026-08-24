@@ -75,6 +75,7 @@ async def preview_accrual(
         actor,
         user_id=payload.user_id,
         purchase_amount_minor=payload.purchase_amount_minor,
+        location_id=payload.location_id,
     )
     return accrual_preview_response(value)
 
@@ -115,6 +116,7 @@ async def preview_purchase(
         user_id=payload.user_id,
         purchase_amount_minor=payload.purchase_amount_minor,
         stamps_to_add=payload.stamps_to_add,
+        location_id=payload.location_id,
     )
     return purchase_preview_response(value)
 
@@ -156,6 +158,7 @@ async def preview_redemption(
         user_id=payload.user_id,
         purchase_amount_minor=payload.purchase_amount_minor,
         requested_points=payload.requested_points,
+        location_id=payload.location_id,
     )
     return redemption_preview_response(value)
 

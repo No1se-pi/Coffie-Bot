@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from app.models.access import User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.content import Venue
 from app.models.customers import CustomerIdentity
 from app.models.enums import IdentityProvider, UserStatus
 from app.repositories.identity import IdentityRepository
@@ -68,6 +69,20 @@ class CustomerRepository(IdentityRepository):
         if for_update:
             statement = statement.with_for_update()
         return cast(User | None, await self._session.scalar(statement))
+
+    async def get_venue(self, venue_id: UUID) -> Venue | None:
+        return cast(
+            Venue | None,
+            await self._session.scalar(
+                select(Venue)
+                .where(
+                    Venue.id == venue_id,
+                    Venue.is_active.is_(True),
+                    Venue.archived_at.is_(None),
+                )
+                .with_for_update(read=True)
+            ),
+        )
 
     async def get_card(self, card_id: UUID) -> UserCard | None:
         return cast(UserCard | None, await self._session.get(UserCard, card_id))

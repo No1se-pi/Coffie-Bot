@@ -71,6 +71,7 @@ async def confirm_customer_merge(
         preview_hash=payload.preview_hash,
         reason=payload.reason,
         idempotency_key=str(idempotency_key),
+        birthday_resolution=payload.birthday_resolution,
         metadata=_metadata(request),
     )
     return customer_merge_confirm_response(result)

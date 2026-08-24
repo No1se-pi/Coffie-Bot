@@ -49,6 +49,7 @@ async def create_phone_customer(
         actor,
         phone=payload.phone,
         display_name=payload.display_name,
+        venue_id=payload.venue_id,
         idempotency_key=str(idempotency_key),
         metadata=CustomerRequestMetadata(
             ip_address=request.client.host if request.client else None,

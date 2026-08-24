@@ -26,7 +26,9 @@ class FakeSeedRepository:
         self.settings: dict[str, Any] = {}
         self.venue_ids: dict[str, UUID] = {}
         self.location_venue_ids: dict[str, UUID | None] = {}
+        self.birthday_venue_ids: tuple[UUID, ...] = ()
         self.development_staff_calls: list[int] = []
+        self.lock_order: list[str] = []
         self.commits = 0
         self.rollbacks = 0
 
@@ -42,6 +44,9 @@ class FakeSeedRepository:
 
     async def acquire_lock(self) -> None:
         return None
+
+    async def lock_existing_loyalty_settings(self) -> None:
+        self.lock_order.append("settings")
 
     async def load_seed_entity_ids(self) -> dict[str, UUID]:
         return dict(self.entity_ids)
@@ -59,6 +64,7 @@ class FakeSeedRepository:
         slug: str,
         values: dict[str, Any],
     ) -> UUID:
+        self.lock_order.append("venue")
         assert values["name"]
         persisted_id = self.venue_ids.setdefault(slug, entity_id)
         self.entity_id_calls.append(persisted_id)
@@ -86,6 +92,14 @@ class FakeSeedRepository:
     async def upsert_loyalty_settings(self, values: dict[str, Any]) -> UUID:
         assert values["minor_units_per_point"] == 1000
         return uuid4()
+
+    async def replace_birthday_promotion_venues(
+        self,
+        settings_id: UUID,
+        venue_ids: list[UUID],
+    ) -> None:
+        assert settings_id
+        self.birthday_venue_ids = tuple(venue_ids)
 
     async def upsert_menu_category(
         self,
@@ -199,6 +213,7 @@ async def test_development_seed_is_repeatable_with_stable_entity_ids() -> None:
     assert repository.commits == 2
     assert len(repository.entity_ids) == len(first_call_ids)
     assert set(repository.location_venue_ids.values()) == set(repository.venue_ids.values())
+    assert repository.lock_order.index("settings") < repository.lock_order.index("venue")
 
 
 @pytest.mark.asyncio

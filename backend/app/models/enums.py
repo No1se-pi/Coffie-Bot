@@ -77,6 +77,37 @@ class LoyaltyOperationType(StrEnum):
     REWARD_CANCELLED = "reward_cancelled"
     ACCOUNT_MERGE_DEBIT = "account_merge_debit"
     ACCOUNT_MERGE_CREDIT = "account_merge_credit"
+    WALLET_TRANSFER_DEBIT = "wallet_transfer_debit"
+    WALLET_TRANSFER_CREDIT = "wallet_transfer_credit"
+
+
+class WalletMode(StrEnum):
+    SHARED = "shared"
+    SEPARATE = "separate"
+
+
+class PointLotSourceType(StrEnum):
+    """Stable reasons why a point lot was minted."""
+
+    OPENING_BALANCE = "opening_balance"
+    ACCRUAL = "accrual"
+    WELCOME_BONUS = "welcome_bonus"
+    REWARD_BONUS = "reward_bonus"
+    ADMIN_ADJUSTMENT = "admin_adjustment"
+    REVERSAL = "reversal"
+    WALLET_TRANSFER = "wallet_transfer"
+    ACCOUNT_MERGE = "account_merge"
+
+
+class PointAllocationType(StrEnum):
+    """Append-only reasons why a lot's remaining amount changed."""
+
+    SPEND = "spend"
+    EXPIRY = "expiry"
+    REVERSAL_DEBIT = "reversal_debit"
+    REVERSAL_RESTORE = "reversal_restore"
+    WALLET_TRANSFER_DEBIT = "wallet_transfer_debit"
+    ACCOUNT_MERGE_DEBIT = "account_merge_debit"
 
 
 class RoundingMode(StrEnum):

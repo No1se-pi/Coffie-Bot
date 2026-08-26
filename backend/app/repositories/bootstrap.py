@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import case, select, text, update
+from sqlalchemy import case, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ from app.models.enums import (
     UserStatus,
 )
 from app.models.loyalty import LoyaltySettings, RewardTemplate
+from app.models.loyalty_v2 import BirthdayPromotionVenue
 from app.models.media import MediaFile
 
 BOOTSTRAP_LOCK_KEY = 4_349_346_470_191
@@ -57,6 +58,15 @@ class BootstrapRepository:
         await self._session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"),
             {"lock_key": BOOTSTRAP_LOCK_KEY},
+        )
+
+    async def lock_existing_loyalty_settings(self) -> None:
+        """Lock singleton settings before the seed starts locking venues."""
+
+        await self._session.scalar(
+            select(LoyaltySettings.id)
+            .where(LoyaltySettings.singleton_key == "default")
+            .with_for_update()
         )
 
     async def load_seed_entity_ids(self) -> dict[str, UUID]:
@@ -167,9 +177,32 @@ class BootstrapRepository:
             settings = LoyaltySettings(id=uuid4(), singleton_key="default", **values)
             self._session.add(settings)
         else:
-            _assign(settings, values)
+            # Seed reruns may refresh ordinary demo/configuration values, but
+            # changing wallet mode is a journaled owner-only migration.  Never
+            # bypass that transfer workflow by assigning the seed default over
+            # an existing installation.
+            _assign(settings, {key: value for key, value in values.items() if key != "wallet_mode"})
         await self._session.flush()
         return settings.id
+
+    async def replace_birthday_promotion_venues(
+        self,
+        settings_id: UUID,
+        venue_ids: list[UUID],
+    ) -> None:
+        await self._session.execute(
+            delete(BirthdayPromotionVenue).where(BirthdayPromotionVenue.settings_id == settings_id)
+        )
+        self._session.add_all(
+            [
+                BirthdayPromotionVenue(
+                    id=uuid4(),
+                    settings_id=settings_id,
+                    venue_id=venue_id,
+                )
+                for venue_id in sorted(set(venue_ids), key=lambda value: value.int)
+            ]
+        )
 
     async def upsert_menu_category(
         self,
@@ -498,6 +531,9 @@ def _venue_export(item: Venue) -> dict[str, Any]:
         "website": item.website,
         "telegram": item.telegram,
         "logo_media_id": str(item.logo_media_id) if item.logo_media_id is not None else None,
+        "loyalty_points_enabled": item.loyalty_points_enabled,
+        "accrual_basis_points": item.loyalty_accrual_basis_points,
+        "loyalty_rounding_mode": item.loyalty_rounding_mode.value,
         "is_active": item.is_active,
         "sort_order": item.sort_order,
         "archived_at": _json_value(item.archived_at),

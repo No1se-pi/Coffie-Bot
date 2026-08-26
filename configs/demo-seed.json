@@ -31,6 +31,9 @@
       "description": "Синтетическое демонстрационное заведение с кофейным меню.",
       "phone": "+7 900 000-00-01",
       "website": "https://example.com/coffee-point",
+      "loyalty_points_enabled": true,
+      "accrual_basis_points": 1000,
+      "loyalty_rounding_mode": "floor",
       "is_active": true,
       "sort_order": 10
     },
@@ -40,6 +43,9 @@
       "description": "Синтетическое демонстрационное заведение с блюдами на каждый день.",
       "phone": "+7 900 000-00-02",
       "website": "https://example.com/food-court",
+      "loyalty_points_enabled": true,
+      "accrual_basis_points": 700,
+      "loyalty_rounding_mode": "floor",
       "is_active": true,
       "sort_order": 20
     },
@@ -49,6 +55,9 @@
       "description": "Синтетическое демонстрационное заведение с блюдами на гриле.",
       "phone": "+7 900 000-00-03",
       "website": "https://example.com/shashlik-dzhan",
+      "loyalty_points_enabled": true,
+      "accrual_basis_points": 500,
+      "loyalty_rounding_mode": "floor",
       "is_active": true,
       "sort_order": 30
     }
@@ -119,12 +128,17 @@
     "points": {
       "enabled": true,
       "minor_units_per_point": 1000,
+      "redemption_minor_units_per_point": 100,
       "minimum_purchase_minor": 10000,
       "rounding": "floor",
-      "maximum_redemption_percent": 30,
+      "maximum_redemption_percent": 50,
       "minimum_redemption_points": 50,
-      "welcome_bonus_points": 10,
+      "welcome_bonus_points": 0,
       "expiry_days": null,
+      "expiry_months": 6,
+      "expiry_reminder_days": 14,
+      "wallet_mode": "shared",
+      "default_bonus_venue_slug": "coffee-point",
       "daily_accrual_limit_points": 500,
       "per_operation_limit_points": 200,
       "approval_threshold_minor": null
@@ -149,6 +163,13 @@
       "reward_template_slug": "tenth-drink-free",
       "reward_validity_days": 30,
       "reset_after_reward": true
+    },
+    "birthday": {
+      "enabled": true,
+      "discount_percent": 10,
+      "window_days": 1,
+      "stackable": false,
+      "eligible_venue_slugs": []
     }
   },
   "reward_templates": [

@@ -323,5 +323,7 @@ def _operation_description(operation_type: LoyaltyOperationType) -> str:
         LoyaltyOperationType.REWARD_CANCELLED: "Награда отменена",
         LoyaltyOperationType.ACCOUNT_MERGE_DEBIT: "Перенос баллов при объединении аккаунтов",
         LoyaltyOperationType.ACCOUNT_MERGE_CREDIT: "Получение баллов при объединении аккаунтов",
+        LoyaltyOperationType.WALLET_TRANSFER_DEBIT: "Перенос баллов из кошелька",
+        LoyaltyOperationType.WALLET_TRANSFER_CREDIT: "Перенос баллов в кошелёк",
     }
     return descriptions[operation_type]

@@ -1,7 +1,8 @@
 # План реализации Coffie Bot V2
 
-Статус: Phase 0 и Phase 1 завершены; Phase 2 спроектирована и отложена до
-следующего этапа; deployable-граница — Phase 1.
+Статус: Phase 0, Phase 1 и Phase 2 завершены; Phase 3 (Menu / Pricing) — следующий
+этап. Loyalty V2 готова к merge, но становится deployable release только после
+успешного CI целевой ветки.
 
 Baseline: `main` / `7e2d1157e328ba9564417e05161c77b0d5d6401a`, 2026-08-24.
 
@@ -104,7 +105,13 @@ consolidation location может обслуживать mixed order орган�
   не создавая баллы из воздуха и не воскрешая уже истёкший срок без явной политики.
 - Wallet mode switch — owner-only preview/confirm с reason, idempotency, transfer operations и
   audit; прямое переключение поля при ненулевых балансах запрещено.
-- Venue accrual хранится в basis points (`1000 = 10%`), деньги — minor units, баллы — integer.
+- Shared → separate требует active fallback venue для origin-less/archived-origin lots;
+  immutable route пишется и для нулевого lot, чтобы reversal после switch/merge
+  оставался однозначным.
+- Venue accrual хранит enabled, basis points (`1000 = 10%`) и rounding mode.
+  100 ₽ при 10% дают 10 баллов независимо от redemption value.
+- Shared V1 request без location использует trusted default active Location/Venue и
+  его policy; separate mode требует explicit validated location.
 
 ### Pricing и orders
 
@@ -148,7 +155,8 @@ consolidation location может обслуживать mixed order орган�
    - lineage indexes без переписывания immutable history.
 4. `0011_v2_loyalty_wallets_and_point_lots`
    - wallet mode/config, venue loyalty policy;
-   - wallets, point lots, allocations и wallet transfer journal;
+   - wallets, point lots, allocations, wallet transfer journal и immutable switch/merge routes;
+   - birthday month/day, offer policy и eligible venues;
    - opening wallet/lot из каждого существующего `points_balance` без изменения суммы.
 5. `0012_v2_menu_modifiers_and_pricing`
    - venue ownership menu/category/promotion;
@@ -183,11 +191,13 @@ Legacy responses получают только additive nullable поля. Compa
 canonical wallet/customer representation, но сохраняют старые `balance_points`, `user_id` и
 историю. Любое неизбежное несовместимое изменение фиксируется в `MIGRATION_V2.md` до merge.
 
-Новые группы планируются в стиле текущего router:
+Новые группы планируются в стиле текущего router. Контракты Phase 2
+аддитивны, но до закрытия gate-ов остаются implementation-in-progress:
 
 - `/venues`, `/customer-identities`, `/me/birthday`, `/me/wallets`;
 - `/staff/customers`, `/staff/receipts`, `/staff/subscriptions`, `/staff/orders`;
-- `/admin/customer-merge`, `/admin/venues`, `/admin/loyalty`, `/admin/pricing`;
+- `/admin/customer-merge`, `/admin/venues`, `/admin/loyalty`,
+  `/admin/loyalty/wallet-mode/preview|confirm`, `/admin/users/{id}/birthday`, `/admin/pricing`;
 - `/cart/price`, `/orders`, `/delivery`, `/courier`;
 - `/reviews`, `/subscriptions`, `/admin/analytics`, `/admin/help`.
 
@@ -215,12 +225,15 @@ canonical wallet/customer representation, но сохраняют старые `
 
 ### Phase 2 — Loyalty V2
 
-- [ ] Venue percentage accrual 10%/7%/5% и configurable rounding.
-- [ ] Shared/separate wallets, owner-only mode transition.
-- [ ] Opening lots, FIFO spend, 6-month expiry, notifications и reversals.
-- [ ] 1 point = 1 RUB default, 50% per-venue redemption in mixed order.
-- [ ] Birthday capture/lock/admin change и birthday promotion.
-- [ ] Wallet/expiry/birthday Mini App UI и tests.
+- [x] Venue percentage accrual 10%/7%/5% и configurable rounding.
+- [x] Shared/separate wallets, owner-only mode transition.
+- [x] Opening lots, FIFO spend, 6-month expiry, notifications и reversals.
+- [x] 1 point = 1 RUB default и 50% per-venue redemption primitive для mixed order.
+- [x] Birthday capture/lock/admin change и birthday promotion.
+- [x] Wallet/expiry/birthday Mini App UI и tests.
+
+Checkbox этапа не закрываются до фактического backend/frontend/migration/Compose
+gate и фазового отчёта.
 
 ### Phase 3 — Menu / Pricing
 
@@ -315,4 +328,27 @@ canonical wallet/customer representation, но сохраняют старые `
   выполнил migrations и прошёл frontend `200` и backend readiness `ok`; containers/volumes удалены.
 - Deploy guard теперь отклоняет и untracked build-context files, чтобы в image не попала
   миграция или Python-модуль вне release commit.
-- Следующий шаг после выкладки и bugfix-паузы: Phase 2 Loyalty V2.
+- После release-паузы работа над Phase 2 Loyalty V2 возобновлена; её gates
+  на момент этой записи не закрыты.
+
+### 2026-08-26 — Phase 2 Loyalty V2
+
+- Reversal переведён на point-lot ledger: credit reversal списывает точную routed
+  lineage, spend reversal создаёт связанную restore-партию, а legacy operation без
+  lot/allocation fail-closed и требует отдельной admin correction.
+- Reversal исторической операции после customer merge следует до terminal canonical
+  profile; immutable исходная операция сохраняет прежний `user_id`.
+- Исправлен PostgreSQL FK order при восстановлении нескольких FIFO allocations и
+  version увеличивается один раз на затронутый wallet за атомарную операцию.
+- Customer merge UI и DTO обрабатывают privacy-safe birthday conflict resolution и
+  показывают перенос feedback без раскрытия точных дат.
+- Backend gates: Ruff check/format, mypy и `229 passed` на PostgreSQL 17; clean
+  `0001 -> 0011`, Alembic parity, lock/concurrency и reversal regressions прошли.
+- Frontend gates: Prettier, ESLint, TypeScript, `39 passed` и production Vite build
+  прошли. Development/production Compose config и production images прошли build.
+- Seed выполнен повторно после смены wallet mode на `separate`: режим сохранился.
+  Изолированный production Compose smoke применил все migrations и вернул frontend
+  `200` и backend readiness `ok`; его containers и volumes удалены.
+- Phase 2 предоставляет per-venue redemption calculation/validation. Оркестрация
+  нескольких suborders будет подключена в Phase 4 поверх server-side pricing snapshot;
+  она не считается готовой системой заказов на этом этапе.

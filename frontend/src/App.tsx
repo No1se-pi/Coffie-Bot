@@ -10,6 +10,7 @@ import {
   PostPurchasePage,
   RewardsPage,
 } from "./pages/customer";
+import { LoyaltyPage } from "./pages/loyalty";
 import {
   AccrualPanel,
   ClientPreviewPage,
@@ -56,6 +57,7 @@ export default function App() {
                 <Route path="card" element={<CardPage />} />
                 <Route path="rewards" element={<RewardsPage />} />
                 <Route path="history" element={<HistoryPage />} />
+                <Route path="loyalty" element={<LoyaltyPage />} />
                 <Route path="menu" element={<MenuPage />} />
                 <Route path="more" element={<MorePage />} />
               </Route>

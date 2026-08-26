@@ -37,6 +37,133 @@ export interface Venue {
   sort_order: number;
 }
 
+export type LoyaltyWalletMode = "shared" | "separate";
+
+export interface LoyaltyVenueRef {
+  id: string;
+  name: string;
+  available: boolean;
+}
+
+export interface CustomerWalletEntry {
+  id: string;
+  venue: LoyaltyVenueRef | null;
+  balance_points: number;
+  expiring_points: number;
+  expires_at: string | null;
+}
+
+export interface CustomerWalletSummary {
+  mode: LoyaltyWalletMode;
+  total_balance_points: number;
+  point_value_minor: number;
+  max_redemption_percent: number;
+  entries: CustomerWalletEntry[];
+}
+
+export interface BirthdayValue {
+  month: number;
+  day: number;
+}
+
+export interface BirthdayOfferSummary {
+  enabled: boolean;
+  discount_percent: number;
+  window_days: number;
+  eligible_venues: LoyaltyVenueRef[];
+  stackable: boolean;
+}
+
+export interface CustomerBirthday {
+  birthday: BirthdayValue | null;
+  locked: boolean;
+  offer: BirthdayOfferSummary | null;
+}
+
+export interface VenueLoyaltyRate {
+  venue_id: string;
+  venue_name: string;
+  available: boolean;
+  loyalty_points_enabled: boolean;
+  accrual_basis_points: number;
+  rounding_mode: "floor" | "half_up" | "ceiling";
+}
+
+export type VenueLoyaltyRateUpdate = Omit<
+  VenueLoyaltyRate,
+  "venue_name" | "available"
+>;
+
+export interface AdminBirthdaySettings {
+  enabled: boolean;
+  discount_percent: number;
+  window_days: number;
+  eligible_venue_ids: string[];
+  stackable: boolean;
+}
+
+export interface AdminLoyaltyV2Settings {
+  wallet_mode: LoyaltyWalletMode;
+  point_value_minor: number;
+  max_redemption_percent: number;
+  expiry_months: number;
+  expiry_days_override: number | null;
+  expiry_reminder_days: number;
+  default_bonus_venue_id: string | null;
+  rounding: "floor" | "half_up" | "ceiling";
+  venue_rates: VenueLoyaltyRate[];
+  birthday: AdminBirthdaySettings;
+}
+
+export type AdminLoyaltyV2Update = Omit<
+  AdminLoyaltyV2Settings,
+  "wallet_mode" | "venue_rates"
+> & { venue_rates: VenueLoyaltyRateUpdate[] };
+
+export interface WalletModePreview {
+  current_mode: LoyaltyWalletMode;
+  target_mode: LoyaltyWalletMode;
+  preview_hash: string;
+  customers_affected: number;
+  wallets_affected: number;
+  total_balance_points: number;
+  transfer_operations: number;
+  fallback_required: boolean;
+  fallback_venue_id: string | null;
+  unresolved_points: number;
+  eligible_fallback_venues: LoyaltyVenueRef[];
+  warnings: string[];
+}
+
+export interface WalletModePreviewRequest {
+  target_mode: LoyaltyWalletMode;
+  fallback_venue_id?: string | null;
+}
+
+export interface WalletModeConfirmRequest {
+  target_mode: LoyaltyWalletMode;
+  preview_hash: string;
+  fallback_venue_id?: string | null;
+  reason: string;
+  confirm: true;
+}
+
+export interface WalletModeChangeResult {
+  wallet_mode: LoyaltyWalletMode;
+  wallets_created: number;
+  transfer_operations: number;
+  total_balance_points: number;
+  completed_at: string;
+  idempotent_replay: boolean;
+}
+
+export interface AdminCustomerBirthday {
+  user_id: string;
+  birthday: BirthdayValue;
+  locked: boolean;
+  updated_at: string;
+}
+
 export interface CardData {
   user_id: string;
   display_name: string;
@@ -178,6 +305,7 @@ export interface MenuItemDraft {
 
 export interface ContactLocation {
   id: string;
+  venue_id: string | null;
   name: string;
   address: string;
   hours: string;
@@ -241,6 +369,7 @@ export type StaffClientLookup =
 export interface PhoneCustomerCreate {
   phone: string;
   display_name?: string | null;
+  venue_id: string;
 }
 
 export interface PhoneCustomer {
@@ -264,6 +393,7 @@ export interface AccrualPreview {
 }
 
 export interface PurchasePreview extends AccrualPreview {
+  location_id: string;
   stamps_to_add: number;
   stamps_before: number;
   stamps_after: number;
@@ -283,6 +413,7 @@ export interface RedemptionPreview {
   maximum_points_for_purchase: number;
   balance_before: number;
   balance_after: number;
+  location_id: string;
 }
 
 export interface OperationResult {
@@ -376,6 +507,8 @@ export interface AdminUser extends AdminUserListItem {
   stamps: number;
   active_rewards: number;
   active_card?: boolean;
+  birthday?: BirthdayValue | null;
+  birthday_locked?: boolean;
 }
 
 export interface AuditEvent {
@@ -453,6 +586,7 @@ export interface CustomerMergeProfile {
   visit_streak: number;
   last_visit_business_date: string | null;
   staff_role: Role | null;
+  birthday_set: boolean;
 }
 
 export interface CustomerMergePreviewRequest {
@@ -471,13 +605,17 @@ export interface CustomerMergePreview {
   rewards_to_move: number;
   sessions_to_revoke: number;
   cards_to_revoke: number;
+  feedback_to_move: number;
   source_staff_rebound: boolean;
+  birthday_conflict: boolean;
+  birthday_resolution_required: boolean;
 }
 
 export interface CustomerMergeConfirmRequest extends CustomerMergePreviewRequest {
   preview_hash: string;
   reason: string;
   confirm: true;
+  birthday_resolution?: "keep_canonical" | "use_source" | null;
 }
 
 export interface CustomerMergeResult {
@@ -495,6 +633,8 @@ export interface CustomerMergeResult {
   rewards_moved: number;
   sessions_revoked: number;
   cards_revoked: number;
+  feedback_moved: number;
+  birthday_resolution: "keep_canonical" | "use_source" | null;
   source_staff_rebound: boolean;
   idempotent_replay: boolean;
 }
@@ -563,4 +703,6 @@ export interface AdjustmentPreview {
   balance_before: number;
   balance_after: number;
   reason: string;
+  venue_id: string | null;
+  scope_label: string;
 }

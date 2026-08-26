@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, literal, select, update
@@ -19,6 +19,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.models.access import Session, StaffMember, User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
+from app.models.content import Venue
 from app.models.customers import CustomerIdentity, CustomerMerge
 from app.models.delivery import NotificationOutbox
 from app.models.enums import (
@@ -28,8 +29,10 @@ from app.models.enums import (
     LoyaltyOperationType,
     OperationStatus,
     OutboxStatus,
+    PointLotSourceType,
     RewardStatus,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import (
     LoyaltyOperation,
@@ -38,8 +41,10 @@ from app.models.loyalty import (
     Reward,
     UserLoyaltyState,
 )
+from app.models.loyalty_v2 import LoyaltyWallet, PointLot
 from app.security.sessions import IssuedSessionToken
 from app.security.telegram import TelegramUserData
+from app.services.loyalty_v2_calculations import calculate_point_expiry
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,9 +191,25 @@ class IdentityRepository:
 
     async def get_loyalty_settings(self) -> LoyaltySettings | None:
         settings: LoyaltySettings | None = await self._session.scalar(
-            select(LoyaltySettings).where(LoyaltySettings.singleton_key == "default")
+            select(LoyaltySettings)
+            .where(LoyaltySettings.singleton_key == "default")
+            .with_for_update(read=True)
         )
         return settings
+
+    async def get_active_venue(self, venue_id: UUID) -> Venue | None:
+        return cast(
+            Venue | None,
+            await self._session.scalar(
+                select(Venue)
+                .where(
+                    Venue.id == venue_id,
+                    Venue.is_active.is_(True),
+                    Venue.archived_at.is_(None),
+                )
+                .with_for_update(read=True)
+            ),
+        )
 
     def initialize_customer(
         self,
@@ -197,6 +218,10 @@ class IdentityRepository:
         qr_token: str,
         short_code: str,
         welcome_bonus_points: int,
+        wallet_mode: WalletMode = WalletMode.SHARED,
+        points_expiry_months: int = 6,
+        points_validity_days: int | None = None,
+        bonus_venue_id: UUID | None = None,
         now: datetime,
         ip_address: str | None,
         user_agent: str | None,
@@ -231,9 +256,33 @@ class IdentityRepository:
             short_code=short_code,
             status=CardStatus.ACTIVE,
         )
+        if (
+            welcome_bonus_points > 0
+            and wallet_mode is WalletMode.SEPARATE
+            and bonus_venue_id is None
+        ):
+            raise ValueError("A separate welcome bonus requires an explicit venue")
+        # A separate zero-balance profile starts without a wallet and creates
+        # its first venue wallet lazily on a trusted mutation.  A NULL-venue
+        # wallet would violate the meaning of separate mode.
+        wallet = (
+            LoyaltyWallet(
+                id=uuid4(),
+                user_id=user_id,
+                venue_id=(bonus_venue_id if wallet_mode is WalletMode.SEPARATE else None),
+                balance_points=welcome_bonus_points,
+                version=1,
+            )
+            if wallet_mode is WalletMode.SHARED or welcome_bonus_points > 0
+            else None
+        )
         staged: list[object] = [loyalty_state, card]
+        if wallet is not None:
+            staged.append(wallet)
 
         if welcome_bonus_points > 0:
+            if wallet is None:
+                raise RuntimeError("Positive welcome balance has no wallet")
             operation_id = uuid4()
             request_hash = hashlib.sha256(
                 f"welcome:{user_id}:{welcome_bonus_points}".encode()
@@ -261,7 +310,23 @@ class IdentityRepository:
                 balance_after=welcome_bonus_points,
                 created_at=now,
             )
-            staged.extend([operation, transaction])
+            lot = PointLot(
+                id=uuid4(),
+                wallet_id=wallet.id,
+                source_operation_id=operation_id,
+                source_venue_id=bonus_venue_id,
+                transferred_from_lot_id=None,
+                source_type=PointLotSourceType.WELCOME_BONUS,
+                initial_points=welcome_bonus_points,
+                remaining_points=welcome_bonus_points,
+                earned_at=now,
+                expires_at=calculate_point_expiry(
+                    now,
+                    validity_months=points_expiry_months,
+                    legacy_validity_days=points_validity_days,
+                ),
+            )
+            staged.extend([operation, transaction, lot])
 
         audit = AuditEvent(
             id=uuid4(),

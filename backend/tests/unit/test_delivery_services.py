@@ -254,6 +254,32 @@ async def test_generic_notification_opens_the_main_mini_app() -> None:
     assert button.url is None
 
 
+@pytest.mark.parametrize(
+    ("event_type", "payload", "expected"),
+    [
+        ("points.expiring", {"points": 15, "expires_at": "2026-09-01"}, "Скоро сгорят"),
+        ("points.expired", {"points": 15}, "Сгорело баллов: 15"),
+    ],
+)
+async def test_point_expiry_notifications_have_explicit_russian_copy(
+    event_type: str,
+    payload: dict[str, object],
+    expected: str,
+) -> None:
+    job = NotificationJob(
+        id=uuid4(),
+        telegram_id=101,
+        event_type=event_type,
+        payload=payload,
+        attempts=1,
+        lease_until=LEASE,
+    )
+
+    message = render_notification(job, webapp_url=None)
+
+    assert expected in message.text
+
+
 async def test_broadcast_isolates_failures_and_skips_inactive_users(tmp_path: Path) -> None:
     broadcast_id = uuid4()
     failed = _broadcast_job(broadcast_id, telegram_id=101)

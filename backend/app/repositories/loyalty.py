@@ -41,6 +41,7 @@ from app.models.loyalty import (
     Visit,
 )
 from app.models.staff import StaffTipProfile
+from app.repositories.loyalty_v2 import PointLedgerRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,7 @@ class LoyaltyRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self.point_ledger_repository = PointLedgerRepository(session)
 
     def transaction(self) -> AbstractAsyncContextManager[None]:
         return self._transaction()
@@ -166,6 +168,29 @@ class LoyaltyRepository:
         *,
         for_update: bool,
     ) -> LoyaltyContext | None:
+        if for_update:
+            # Loyalty V2's global lock order begins with configuration.  The
+            # second query then locks user/card/state before wallet/lot writers
+            # are invoked by the service.
+            settings = await self.point_ledger_repository.get_settings(lock_mode="share")
+            if settings is None:
+                return None
+            row = (
+                await self._session.execute(
+                    select(User, UserCard, UserLoyaltyState)
+                    .join(UserCard, UserCard.user_id == User.id)
+                    .join(UserLoyaltyState, UserLoyaltyState.user_id == User.id)
+                    .where(
+                        User.id == user_id,
+                        UserCard.status == CardStatus.ACTIVE,
+                    )
+                    .with_for_update(of=[User, UserCard, UserLoyaltyState])
+                )
+            ).one_or_none()
+            if row is None:
+                return None
+            return LoyaltyContext(user=row[0], card=row[1], state=row[2], settings=settings)
+
         statement = (
             select(User, UserCard, UserLoyaltyState, LoyaltySettings)
             .join(UserCard, UserCard.user_id == User.id)
@@ -176,9 +201,28 @@ class LoyaltyRepository:
                 UserCard.status == CardStatus.ACTIVE,
             )
         )
-        if for_update:
-            statement = statement.with_for_update(of=[User, UserCard, UserLoyaltyState])
         return await self._context_from_statement(statement)
+
+    async def resolve_terminal_user_id(self, user_id: UUID) -> UUID | None:
+        """Follow immutable merge lineage to the current writable profile."""
+
+        current_id = user_id
+        visited: set[UUID] = set()
+        for _ in range(64):
+            if current_id in visited:
+                raise RuntimeError("Customer merge lineage contains a cycle")
+            visited.add(current_id)
+            row = (
+                await self._session.execute(
+                    select(User.id, User.merged_into_user_id).where(User.id == current_id)
+                )
+            ).one_or_none()
+            if row is None:
+                return None
+            if row[1] is None:
+                return current_id
+            current_id = row[1]
+        raise RuntimeError("Customer merge lineage exceeds the safety limit")
 
     async def _context_from_statement(
         self,

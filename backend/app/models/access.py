@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    SmallInteger,
     String,
     Text,
 )
@@ -40,6 +41,19 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "merged_into_user_id IS NULL OR merged_into_user_id <> id",
             name="not_self_merged",
         ),
+        CheckConstraint(
+            "(birthday_month IS NULL AND birthday_day IS NULL) OR "
+            "(birthday_month BETWEEN 1 AND 12 AND birthday_day BETWEEN 1 AND "
+            "CASE birthday_month WHEN 2 THEN 29 WHEN 4 THEN 30 WHEN 6 THEN 30 "
+            "WHEN 9 THEN 30 WHEN 11 THEN 30 ELSE 31 END)",
+            name="valid_birthday_month_day",
+        ),
+        CheckConstraint(
+            "(birthday_month IS NULL AND birthday_day IS NULL AND birthday_set_at IS NULL) OR "
+            "(birthday_month IS NOT NULL AND birthday_day IS NOT NULL "
+            "AND birthday_set_at IS NOT NULL)",
+            name="consistent_birthday_set_state",
+        ),
         Index("ix_users_username", "username"),
         Index("ix_users_status", "status"),
         Index("ix_users_merged_into", "merged_into_user_id", "merged_at"),
@@ -65,9 +79,18 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("users.id", ondelete="RESTRICT")
     )
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Year is unnecessary PII: the promotion only needs an annual month/day.
+    birthday_month: Mapped[int | None] = mapped_column(SmallInteger)
+    birthday_day: Mapped[int | None] = mapped_column(SmallInteger)
+    birthday_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    birthday_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    birthday_updated_by_staff_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("staff_members.id", ondelete="SET NULL")
+    )
 
     staff_member: Mapped[StaffMember | None] = relationship(
         back_populates="user",
+        foreign_keys="StaffMember.user_id",
         uselist=False,
     )
     sessions: Mapped[list[Session]] = relationship(back_populates="user")
@@ -121,7 +144,10 @@ class StaffMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
-    user: Mapped[User] = relationship(back_populates="staff_member")
+    user: Mapped[User] = relationship(
+        back_populates="staff_member",
+        foreign_keys=[user_id],
+    )
     permissions: Mapped[list[StaffPermission]] = relationship(
         back_populates="staff_member",
         cascade="all, delete-orphan",

@@ -43,30 +43,46 @@
 5. Параллельно погасить одну награду — успешен один запрос; повтор не меняет состояние.
 6. Попробовать погасить expired/cancelled reward.
 
-## Loyalty V2 и birthday (следующая фаза)
+## Loyalty V2 и birthday (Phase 2, gate в работе)
 
-Этот раздел — acceptance plan для Phase 2; в текущий deployable Phase 1 функции ещё не входят.
+Этот раздел — acceptance plan для реализуемой Phase 2. Пункты не считаются
+пройденными до фактического запуска автотестов, migration и release gates;
+deployable-базой пока остаётся Phase 1.
 
 1. В shared mode провести покупку на 100 ₽ в каждом demo venue: backend должен начислить
    10, 7 и 5 баллов в один master wallet.
 2. Проверить floor, half-up и ceiling на сумме с дробным результатом; frontend
-   не должен мочь передать готовое начисление.
-3. Начислить две партии с разным expiry, списать баллы и сверить FIFO allocations:
+   не должен мочь передать готовое начисление. Изменить redemption value балла:
+   accrual 10/7/5% не должен измениться.
+3. В shared mode отправить V1 accrual без location: backend должен выбрать
+   только trusted default active Location/Venue и его policy. В separate mode тот же
+   request отклоняется, пока не передан и не проверен active location.
+4. Начислить две партии с разным expiry, списать баллы и сверить FIFO allocations:
    сначала уменьшается самая старая ещё доступная партия, даже если у новой expiry ближе.
-4. Запустить spend и expiry одного lot параллельно: остаток не уходит ниже нуля,
+5. Запустить spend и expiry одного lot параллельно: остаток не уходит ниже нуля,
    wallet и compatibility balance совпадают, сумма allocations равна debit.
-5. Дождаться expiry reminder и expiration: каждое событие и outbox создаются один раз,
-   а Telegram failure не откатывает сгорание.
-6. Owner делает preview `shared -> separate`: origin-less opening lot должен потребовать
-   explicit fallback venue. Изменить balance после preview — confirm отклоняет stale hash.
-7. Повторить wallet-mode confirm с одним `Idempotency-Key`; mode меняется один раз,
+6. Дождаться expiry reminder и expiration: каждое событие и outbox создаются один раз,
+   Telegram failure не откатывает сгорание, а phone-only profile не попадает в retry loop.
+7. Owner делает preview `shared -> separate`: origin-less opening lot и lot с archived
+   origin должны потребовать explicit active fallback venue. Изменить balance или
+   заархивировать fallback после preview — confirm отклоняет stale hash.
+8. Повторить wallet-mode confirm с одним `Idempotency-Key`; mode меняется один раз,
    а сумма всех balances/lots до и после совпадает.
-8. В separate mode начислить и списать баллы двух venues. Операция без trusted venue/location
+9. Полностью израсходовать lot, переключить mode, затем отменить его исходный
+   spend. Reversal должен восстановить баллы в wallet из immutable route; то же
+   проверить после account merge.
+10. В separate mode начислить и списать баллы двух venues. Операция без trusted venue/location
    отклоняется; баланс одного venue не оплачивает часть другого.
-9. Сохранить birthday month/day, повторить self-service update и получить отказ. Admin
-   меняет дату только с reason; старое/новое значения и актор видны в audit.
-10. Проверить birthday window на границе local day/timezone, а также 29 февраля в
-    високосный и невисокосный год.
+11. Заархивировать venue с ненулевым wallet: `/me/wallets` показывает его и
+    остаток с unavailable flag, но новые mutations отклоняются.
+12. Сохранить birthday month/day, повторить self-service update и получить отказ. Admin
+   меняет дату только с reason; факт изменения, reason и actor видны в audit,
+   а точные month/day в audit metadata отсутствуют.
+13. Проверить birthday window на границе local day/timezone, eligible/ineligible
+    venues и 29 февраля: пустой eligible-список даёт все active venues,
+    а в невисокосном году окно для 29 февраля наблюдается 28 февраля.
+14. Убедиться, что staff lookup, courier DTO и логи не раскрывают birthday;
+    customer видит только свои month/day.
 
 ## Администрирование и контент
 

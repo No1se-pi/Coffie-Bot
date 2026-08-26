@@ -24,6 +24,7 @@ import type {
 import { useAuth } from "../auth/AuthContext";
 import { useResource } from "../hooks/useResource";
 import { formatDateTime, formatMoney } from "../utils/format";
+import { AdminBirthdayEditor, AdminLoyaltyV2Controls } from "./admin-loyalty";
 import {
   Avatar,
   Badge,
@@ -298,6 +299,9 @@ export function AdminCustomerMergePage() {
   const [canonicalUserId, setCanonicalUserId] = useState("");
   const [preview, setPreview] = useState<CustomerMergePreview | null>(null);
   const [reason, setReason] = useState("");
+  const [birthdayResolution, setBirthdayResolution] = useState<
+    "" | "keep_canonical" | "use_source"
+  >("");
   const [confirmed, setConfirmed] = useState(false);
   const [result, setResult] = useState<CustomerMergeResult | null>(null);
   const [busy, setBusy] = useState<"preview" | "confirm" | null>(null);
@@ -350,6 +354,7 @@ export function AdminCustomerMergePage() {
       setCanonicalUserId(canonical);
       setPreview(nextPreview);
       setReason("");
+      setBirthdayResolution("");
       setConfirmed(false);
       idempotencyKey.current = createIdempotencyKey();
     } catch (reasonValue) {
@@ -380,6 +385,10 @@ export function AdminCustomerMergePage() {
       setError("Подтвердите необратимые последствия объединения");
       return;
     }
+    if (preview.birthday_resolution_required && !birthdayResolution) {
+      setError("Выберите, какую дату рождения сохранить");
+      return;
+    }
 
     setBusy("confirm");
     setError(null);
@@ -391,6 +400,7 @@ export function AdminCustomerMergePage() {
           preview_hash: preview.preview_hash,
           reason: normalizedReason,
           confirm: true,
+          birthday_resolution: birthdayResolution || null,
         },
         idempotencyKey.current,
       );
@@ -409,6 +419,7 @@ export function AdminCustomerMergePage() {
   const editProfiles = () => {
     setPreview(null);
     setReason("");
+    setBirthdayResolution("");
     rotateConfirmation();
   };
 
@@ -461,6 +472,10 @@ export function AdminCustomerMergePage() {
                 label="сеансов отозвано"
               />
               <Metric value={result.cards_revoked} label="карт отозвано" />
+              <Metric
+                value={result.feedback_moved}
+                label="отзывов перенесено"
+              />
             </div>
             <div className="action-row">
               <Button type="button" variant="secondary" onClick={reset}>
@@ -496,6 +511,7 @@ export function AdminCustomerMergePage() {
                 label="сеансов к отзыву"
               />
               <Metric value={preview.cards_to_revoke} label="карт к отзыву" />
+              <Metric value={preview.feedback_to_move} label="отзывов" />
             </div>
             <p className="muted">
               Серия посещений будет взята из профиля:{" "}
@@ -514,11 +530,43 @@ export function AdminCustomerMergePage() {
               основному профилю.
             </div>
           )}
+          {preview.birthday_conflict && (
+            <div className="inline-warning">
+              В обоих профилях указаны разные дни рождения. Точные даты не
+              показываются в этом опасном сценарии.
+            </div>
+          )}
           <Panel className="operation-panel">
             <form
               className="form"
               onSubmit={(event) => void confirmMerge(event)}
             >
+              {preview.birthday_resolution_required && (
+                <Field
+                  label="Дата рождения"
+                  hint="Выбор попадёт в аудит без самой даты"
+                >
+                  <select
+                    required
+                    value={birthdayResolution}
+                    disabled={busy !== null}
+                    onChange={(event) => {
+                      setBirthdayResolution(
+                        event.target.value as typeof birthdayResolution,
+                      );
+                      rotateConfirmation();
+                    }}
+                  >
+                    <option value="">Выберите профиль</option>
+                    <option value="keep_canonical">
+                      Оставить дату основного профиля
+                    </option>
+                    <option value="use_source">
+                      Взять дату исходного профиля
+                    </option>
+                  </select>
+                </Field>
+              )}
               <Field label="Причина объединения" hint="Причина попадёт в аудит">
                 <textarea
                   required
@@ -564,7 +612,11 @@ export function AdminCustomerMergePage() {
                   type="submit"
                   variant="danger"
                   disabled={
-                    busy !== null || !confirmed || reason.trim().length < 3
+                    busy !== null ||
+                    !confirmed ||
+                    reason.trim().length < 3 ||
+                    (preview.birthday_resolution_required &&
+                      !birthdayResolution)
                   }
                 >
                   {busy === "confirm" ? "Объединяем…" : "Объединить профили"}
@@ -1471,7 +1523,9 @@ export function AdminFeedbackPage() {
 export function AdminAdjustmentPage() {
   const { userId = "" } = useParams();
   const resource = useResource(() => coffeeApi.getAdminUser(userId), [userId]);
+  const loyaltyResource = useResource(coffeeApi.getAdminLoyaltyV2);
   const [direction, setDirection] = useState<"credit" | "debit">("credit");
+  const [venueId, setVenueId] = useState("");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<AdjustmentPreview | null>(null);
@@ -1496,11 +1550,37 @@ export function AdminAdjustmentPage() {
       setError("Укажите понятную причину корректировки");
       return;
     }
-    if (!resource.data) return;
+    if (!resource.data || !loyaltyResource.data) {
+      setError("Настройки Loyalty V2 ещё не загружены");
+      return;
+    }
+    const selectedVenue = loyaltyResource.data.venue_rates.find(
+      (venue) => venue.venue_id === venueId,
+    );
+    if (loyaltyResource.data.wallet_mode === "separate" && !selectedVenue) {
+      setError("Выберите заведение для отдельного кошелька");
+      return;
+    }
+    const effectiveVenueId =
+      loyaltyResource.data.wallet_mode === "separate"
+        ? selectedVenue!.venue_id
+        : direction === "credit"
+          ? (selectedVenue?.venue_id ?? null)
+          : null;
+    const scopeLabel =
+      loyaltyResource.data.wallet_mode === "separate"
+        ? `Кошелёк «${selectedVenue!.venue_name}»`
+        : direction === "debit"
+          ? "Общий кошелёк (master wallet)"
+          : selectedVenue
+            ? `Общий кошелёк · источник «${selectedVenue.venue_name}»`
+            : "Общий кошелёк · без привязки к заведению";
     const next = coffeeApi.previewAdjustment(
       resource.data,
       value,
       reason.trim(),
+      effectiveVenueId,
+      scopeLabel,
     );
     if (next.balance_after < 0) {
       setError("Итоговый баланс не может быть отрицательным");
@@ -1518,6 +1598,7 @@ export function AdminAdjustmentPage() {
         user_id: preview.user_id,
         delta_points: preview.delta_points,
         reason: preview.reason,
+        venue_id: preview.venue_id,
       });
       setResult({
         balance_after: operation.balance_after ?? preview.balance_after,
@@ -1541,6 +1622,15 @@ export function AdminAdjustmentPage() {
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
       )}
+      {loyaltyResource.loading && (
+        <Loader label="Загружаем настройки кошельков…" />
+      )}
+      {loyaltyResource.error && (
+        <ErrorState
+          error={loyaltyResource.error}
+          onRetry={loyaltyResource.reload}
+        />
+      )}
       {resource.data && (
         <>
           <Panel className="client-summary">
@@ -1554,6 +1644,10 @@ export function AdminAdjustmentPage() {
               <small>баллов</small>
             </strong>
           </Panel>
+          <AdminBirthdayEditor
+            userId={resource.data.id}
+            initialBirthday={resource.data.birthday ?? null}
+          />
           <div className="inline-warning">
             Корректировка не изменяет исходные операции. Будет создана новая
             запись с вашей причиной.
@@ -1606,6 +1700,10 @@ export function AdminAdjustmentPage() {
                     <dt>Причина</dt>
                     <dd>{preview.reason}</dd>
                   </div>
+                  <div>
+                    <dt>Область баланса</dt>
+                    <dd>{preview.scope_label}</dd>
+                  </div>
                 </dl>
                 <div className="action-row">
                   <Button
@@ -1639,6 +1737,7 @@ export function AdminAdjustmentPage() {
                       aria-pressed={direction === "credit"}
                       onClick={() => {
                         setDirection("credit");
+                        setPreview(null);
                         setError(null);
                       }}
                     >
@@ -1650,6 +1749,7 @@ export function AdminAdjustmentPage() {
                       aria-pressed={direction === "debit"}
                       onClick={() => {
                         setDirection("debit");
+                        setPreview(null);
                         setError(null);
                       }}
                     >
@@ -1657,6 +1757,60 @@ export function AdminAdjustmentPage() {
                     </Button>
                   </div>
                 </div>
+                {loyaltyResource.data && (
+                  <Field
+                    label={
+                      loyaltyResource.data.wallet_mode === "separate"
+                        ? "Кошелёк заведения"
+                        : "Заведение-источник"
+                    }
+                    hint={
+                      loyaltyResource.data.wallet_mode === "separate"
+                        ? "Обязательно: корректировка относится только к выбранному кошельку"
+                        : direction === "credit"
+                          ? "Необязательно: сохранит origin начисления в общем кошельке"
+                          : "Списание всегда выполняется из общего master wallet"
+                    }
+                  >
+                    <select
+                      aria-label="Заведение корректировки"
+                      value={
+                        loyaltyResource.data.wallet_mode === "shared" &&
+                        direction === "debit"
+                          ? ""
+                          : venueId
+                      }
+                      disabled={
+                        loyaltyResource.data.wallet_mode === "shared" &&
+                        direction === "debit"
+                      }
+                      required={loyaltyResource.data.wallet_mode === "separate"}
+                      onChange={(event) => {
+                        setVenueId(event.target.value);
+                        setPreview(null);
+                        setError(null);
+                      }}
+                    >
+                      <option value="">
+                        {loyaltyResource.data.wallet_mode === "separate"
+                          ? "Выберите заведение"
+                          : direction === "debit"
+                            ? "Общий master wallet"
+                            : "Без привязки к заведению"}
+                      </option>
+                      {loyaltyResource.data.venue_rates
+                        .filter(
+                          (venue) =>
+                            venue.available && venue.loyalty_points_enabled,
+                        )
+                        .map((venue) => (
+                          <option key={venue.venue_id} value={venue.venue_id}>
+                            {venue.venue_name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                )}
                 <Field
                   label="Количество баллов"
                   hint="Введите целое число без знака"
@@ -1688,7 +1842,9 @@ export function AdminAdjustmentPage() {
                     {error}
                   </div>
                 )}
-                <Button type="submit">Показать итог</Button>
+                <Button type="submit" disabled={loyaltyResource.loading}>
+                  Показать итог
+                </Button>
               </form>
             )}
             {preview && error && (
@@ -1970,6 +2126,7 @@ export function AdminSettingsPage() {
   };
   return (
     <Page title="Программы" eyebrow="Настройки лояльности">
+      <AdminLoyaltyV2Controls />
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />

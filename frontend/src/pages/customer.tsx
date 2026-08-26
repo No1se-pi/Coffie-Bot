@@ -43,6 +43,11 @@ export function HomePage() {
     <Page
       title={customerName ? `${greeting}, ${customerName}` : greeting}
       eyebrow="Ваша кофейня"
+      action={
+        <Link className="button button--secondary" to="/loyalty">
+          Баллы
+        </Link>
+      }
     >
       {resource.loading && <Loader />}
       {resource.error && (

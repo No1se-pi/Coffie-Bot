@@ -14,6 +14,7 @@ import {
   MEDIA_FILE_ACCEPT,
 } from "../api/client";
 import type {
+  ContactLocation,
   OperationResult,
   PurchasePreview,
   RedemptionPreview,
@@ -41,14 +42,74 @@ import {
 interface StaffWorkspaceValue {
   client: StaffClient | null;
   setClient: (client: StaffClient | null) => void;
+  locations: ContactLocation[];
+  selectedLocation: ContactLocation | null;
+  selectLocation: (locationId: string) => void;
+  locationsLoading: boolean;
+  locationsError: Error | null;
+  reloadLocations: () => Promise<void>;
 }
 
 const StaffWorkspaceContext = createContext<StaffWorkspaceValue | null>(null);
+export const STAFF_LOCATION_STORAGE_KEY = "coffie.staff.active-location-id";
+
+function readStoredLocationId() {
+  try {
+    return sessionStorage.getItem(STAFF_LOCATION_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function persistLocationId(locationId: string) {
+  try {
+    if (locationId)
+      sessionStorage.setItem(STAFF_LOCATION_STORAGE_KEY, locationId);
+    else sessionStorage.removeItem(STAFF_LOCATION_STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable in embedded browsers; in-memory selection still works.
+  }
+}
 
 export function StaffWorkspaceProvider({ children }: { children: ReactNode }) {
   const [client, setClient] = useState<StaffClient | null>(null);
+  const contacts = useResource(coffeeApi.getContacts);
+  const [selectedLocationId, setSelectedLocationId] =
+    useState(readStoredLocationId);
+  const locations = (contacts.data?.locations ?? []).filter(
+    (location) => location.venue_id !== null,
+  );
+  const selectedLocation =
+    locations.find((location) => location.id === selectedLocationId) ?? null;
+
+  useEffect(() => {
+    if (!contacts.data) return;
+    const nextId = selectedLocation?.id ?? locations[0]?.id ?? "";
+    // A removed location must never remain an invisible origin. Reconcile the
+    // stored id with the live public list, then persist the explicit fallback.
+    if (nextId !== selectedLocationId) setSelectedLocationId(nextId);
+    persistLocationId(nextId);
+  }, [contacts.data, locations, selectedLocation, selectedLocationId]);
+
+  const selectLocation = (locationId: string) => {
+    if (!locations.some((location) => location.id === locationId)) return;
+    setSelectedLocationId(locationId);
+    persistLocationId(locationId);
+  };
+
   return (
-    <StaffWorkspaceContext.Provider value={{ client, setClient }}>
+    <StaffWorkspaceContext.Provider
+      value={{
+        client,
+        setClient,
+        locations,
+        selectedLocation,
+        selectLocation,
+        locationsLoading: contacts.loading,
+        locationsError: contacts.error,
+        reloadLocations: contacts.reload,
+      }}
+    >
       {children}
     </StaffWorkspaceContext.Provider>
   );
@@ -60,10 +121,67 @@ function useStaffWorkspace() {
   return value;
 }
 
+export function StaffLocationSelector() {
+  const {
+    locations,
+    selectedLocation,
+    selectLocation,
+    locationsLoading,
+    locationsError,
+    reloadLocations,
+  } = useStaffWorkspace();
+
+  return (
+    <Panel>
+      <div className="section-heading">
+        <div>
+          <h2>Активная физическая точка</h2>
+          <p className="muted">
+            Операции с баллами и новый профиль будут привязаны к этой точке.
+          </p>
+        </div>
+        {selectedLocation && <Badge tone="success">Выбрана</Badge>}
+      </div>
+      {locationsLoading && <Loader label="Загружаем точки…" />}
+      {locationsError && (
+        <ErrorState error={locationsError} onRetry={reloadLocations} compact />
+      )}
+      {!locationsLoading && !locationsError && locations.length === 0 && (
+        <div className="inline-warning" role="alert">
+          Нет доступной физической точки с привязкой к заведению. Операции с
+          баллами и создание клиента временно недоступны.
+        </div>
+      )}
+      {locations.length > 0 && (
+        <Field label="Точка работы">
+          <select
+            aria-label="Активная физическая точка"
+            value={selectedLocation?.id ?? ""}
+            onChange={(event) => selectLocation(event.target.value)}
+          >
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name} — {location.address}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {selectedLocation && (
+        <p className="muted" role="status">
+          Сейчас: <strong>{selectedLocation.name}</strong>,{" "}
+          {selectedLocation.address}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 export function StaffHomePage() {
   const resource = useResource(coffeeApi.getRecentOperations);
   return (
     <Page title="Рабочий экран" eyebrow="Быстрая операция">
+      <StaffLocationSelector />
       <Panel className="scanner-callout">
         <div className="scanner-callout__icon" aria-hidden="true">
           ▦
@@ -123,7 +241,7 @@ export function StaffHomePage() {
 
 export function ScannerPage() {
   const navigate = useNavigate();
-  const { setClient } = useStaffWorkspace();
+  const { setClient, selectedLocation } = useStaffWorkspace();
   const [shortCode, setShortCode] = useState("");
   const [phone, setPhone] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -139,6 +257,10 @@ export function ScannerPage() {
   const codeInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => closeTelegramScanner(), []);
+
+  useEffect(() => {
+    setCreationKey(createIdempotencyKey());
+  }, [selectedLocation?.venue_id]);
 
   const lookup = async (payload: StaffClientLookup) => {
     setLoading(true);
@@ -218,15 +340,20 @@ export function ScannerPage() {
       setError(new Error("Введите корректный номер телефона нового клиента"));
       return;
     }
+    if (!selectedLocation?.venue_id) {
+      setError(new Error("Выберите физическую точку для welcome-баллов"));
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
-      // The key changes with edited business input, but stays stable across a
-      // retry after an ambiguous response so the backend can replay one result.
+      // Phone, name and the trusted venue origin form one business request.
+      // Its key stays stable on retry, but rotates when any of them changes.
       await coffeeApi.createPhoneCustomer(
         {
           phone: value,
           display_name: newCustomerName.trim() || null,
+          venue_id: selectedLocation.venue_id,
         },
         creationKey,
       );
@@ -246,6 +373,7 @@ export function ScannerPage() {
 
   return (
     <Page title="Сканер карты" eyebrow="Поиск клиента">
+      <StaffLocationSelector />
       {reward && (
         <Panel className="reward-highlight">
           <div>
@@ -413,7 +541,10 @@ export function ScannerPage() {
                 placeholder="Например, Мария"
               />
             </Field>
-            <Button type="submit" disabled={creating || loading}>
+            <Button
+              type="submit"
+              disabled={creating || loading || !selectedLocation?.venue_id}
+            >
               {creating ? "Создаём…" : "Создать карту"}
             </Button>
           </form>
@@ -435,7 +566,7 @@ export function ScannerPage() {
 
 export function ClientPreviewPage() {
   const navigate = useNavigate();
-  const { client, setClient } = useStaffWorkspace();
+  const { client, setClient, selectedLocation } = useStaffWorkspace();
   if (!client)
     return (
       <Page title="Карточка клиента">
@@ -465,6 +596,7 @@ export function ClientPreviewPage() {
         </Badge>
       }
     >
+      <StaffLocationSelector />
       <Panel className="client-summary">
         <Avatar
           name={client.display_name}
@@ -493,6 +625,7 @@ export function ClientPreviewPage() {
       ) : (
         <AccrualPanel
           client={client}
+          location={selectedLocation}
           onCompleted={() => void refreshClient()}
           onNewPurchase={() => {
             setClient(null);
@@ -517,6 +650,7 @@ export function ClientPreviewPage() {
       </div>
       <QuickOperationsPanel
         client={client}
+        location={selectedLocation}
         onCompleted={() => void refreshClient()}
       />
       <Panel>
@@ -547,15 +681,18 @@ export function ClientPreviewPage() {
 
 export function QuickOperationsPanel({
   client,
+  location,
   onCompleted,
 }: {
   client: StaffClient;
+  location: ContactLocation | null;
   onCompleted: (operation: OperationResult) => void;
 }) {
   const [mode, setMode] = useState<"redemption" | "rewards" | null>(null);
   const [amount, setAmount] = useState("");
   const [points, setPoints] = useState("");
   const [redemption, setRedemption] = useState<RedemptionPreview | null>(null);
+  const [redemptionLocationName, setRedemptionLocationName] = useState("");
   const [rewardId, setRewardId] = useState<string | null>(null);
   const [result, setResult] = useState<OperationResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -577,6 +714,10 @@ export function QuickOperationsPanel({
       setError("Укажите сумму покупки и целое количество баллов");
       return;
     }
+    if (!location) {
+      setError("Выберите активную физическую точку");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -584,8 +725,10 @@ export function QuickOperationsPanel({
         user_id: client.user_id,
         purchase_amount_minor: purchaseAmount,
         requested_points: requestedPoints,
+        location_id: location.id,
       });
       setRedemption({ ...preview, customer_name: client.display_name });
+      setRedemptionLocationName(location.name);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -606,6 +749,7 @@ export function QuickOperationsPanel({
           user_id: client.user_id,
           purchase_amount_minor: redemption.purchase_amount_minor,
           requested_points: redemption.requested_points,
+          location_id: redemption.location_id,
         }),
       );
       setRedemption(null);
@@ -639,6 +783,7 @@ export function QuickOperationsPanel({
     setAmount("");
     setPoints("");
     setRedemption(null);
+    setRedemptionLocationName("");
     setRewardId(null);
     setResult(null);
     setError(null);
@@ -681,6 +826,10 @@ export function QuickOperationsPanel({
               <div>
                 <dt>Скидка</dt>
                 <dd>{formatMoney(redemption.discount_minor)}</dd>
+              </div>
+              <div>
+                <dt>Физическая точка</dt>
+                <dd>{redemptionLocationName}</dd>
               </div>
               <div className="confirm-card__total">
                 <dt>Новый баланс</dt>
@@ -734,7 +883,7 @@ export function QuickOperationsPanel({
               >
                 Отмена
               </Button>
-              <Button type="submit" disabled={loading}>
+              <Button type="submit" disabled={loading || !location}>
                 {loading ? "Рассчитываем…" : "Рассчитать"}
               </Button>
             </div>
@@ -787,16 +936,19 @@ export function QuickOperationsPanel({
 
 export function AccrualPanel({
   client,
+  location,
   onCompleted,
   onNewPurchase,
 }: {
   client: StaffClient;
+  location: ContactLocation | null;
   onCompleted?: (operation: OperationResult) => void;
   onNewPurchase?: () => void;
 }) {
   const [amount, setAmount] = useState("");
   const [stamps, setStamps] = useState("1");
   const [preview, setPreview] = useState<PurchasePreview | null>(null);
+  const [previewLocationName, setPreviewLocationName] = useState("");
   const [result, setResult] = useState<OperationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -816,14 +968,20 @@ export function AccrualPanel({
       setError("Введите сумму и целое количество штампов от 0 до 100");
       return;
     }
+    if (!location) {
+      setError("Выберите активную физическую точку");
+      return;
+    }
     setLoading(true);
     try {
       const next = await coffeeApi.previewPurchase({
         user_id: client.user_id,
         purchase_amount_minor: purchaseMinor,
         stamps_to_add: stampsToAdd,
+        location_id: location.id,
       });
       setPreview({ ...next, customer_name: client.display_name });
+      setPreviewLocationName(location.name);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -844,6 +1002,7 @@ export function AccrualPanel({
         user_id: client.user_id,
         purchase_amount_minor: preview.purchase_amount_minor,
         stamps_to_add: preview.stamps_to_add,
+        location_id: preview.location_id,
       });
       setResult(operation);
       onCompleted?.(operation);
@@ -862,6 +1021,7 @@ export function AccrualPanel({
     setAmount("");
     setStamps("1");
     setPreview(null);
+    setPreviewLocationName("");
     setResult(null);
     setError(null);
   };
@@ -916,6 +1076,10 @@ export function AccrualPanel({
             <div>
               <dt>Сумма покупки</dt>
               <dd>{formatMoney(preview.purchase_amount_minor)}</dd>
+            </div>
+            <div>
+              <dt>Физическая точка</dt>
+              <dd>{previewLocationName}</dd>
             </div>
             <div>
               <dt>Баллы</dt>
@@ -1004,7 +1168,7 @@ export function AccrualPanel({
             Посещение добавится само, если оно ещё не учитывалось в текущем
             бизнес-дне.
           </p>
-          <Button type="submit" disabled={loading}>
+          <Button type="submit" disabled={loading || !location}>
             {loading ? "Рассчитываем…" : "Рассчитать"}
           </Button>
         </form>

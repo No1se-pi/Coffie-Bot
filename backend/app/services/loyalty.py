@@ -19,7 +19,7 @@ from app.core.errors import AppError, ErrorCode
 from app.models.access import User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
-from app.models.content import MenuItem
+from app.models.content import MenuItem, Venue
 from app.models.delivery import NotificationOutbox
 from app.models.enums import (
     AuditSeverity,
@@ -29,9 +29,11 @@ from app.models.enums import (
     OperationStatus,
     OutboxStatus,
     PermissionCode,
+    PointLotSourceType,
     RewardStatus,
     RewardType,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import (
     LoyaltyOperation,
@@ -52,6 +54,7 @@ from app.repositories.loyalty import (
     RewardQrRecord,
     UserPage,
 )
+from app.repositories.loyalty_v2 import LocationVenue
 from app.security.rbac import Actor
 from app.services.audit_formatter import format_audit_event
 from app.services.loyalty_calculations import (
@@ -68,6 +71,12 @@ from app.services.loyalty_calculations import (
     business_day_bounds_utc,
     calculate_accrual,
     calculate_redemption,
+)
+from app.services.loyalty_v2_calculations import calculate_percentage_accrual
+from app.services.point_ledger import (
+    CreditComponent,
+    PointLedger,
+    PointLedgerRepositoryPort,
 )
 
 SHORT_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -94,6 +103,8 @@ class LoyaltyRepositoryPort(Protocol):
         *,
         for_update: bool,
     ) -> LoyaltyContext | None: ...
+
+    async def resolve_terminal_user_id(self, user_id: UUID) -> UUID | None: ...
 
     async def accrued_points_between(
         self,
@@ -197,6 +208,25 @@ class LoyaltyRepositoryPort(Protocol):
     async def flush(self) -> None: ...
 
 
+class LoyaltyPointRepositoryPort(PointLedgerRepositoryPort, Protocol):
+    """V2 queries used by the compatibility loyalty service."""
+
+    async def get_location_venue(
+        self,
+        location_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> LocationVenue | None: ...
+
+    async def get_default_location_venue(
+        self,
+        *,
+        for_update: bool = False,
+    ) -> LocationVenue | None: ...
+
+    async def get_venue(self, venue_id: UUID, *, for_update: bool = False) -> Venue | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class RequestMetadata:
     ip_address: str | None = None
@@ -204,6 +234,14 @@ class RequestMetadata:
 
 
 EMPTY_REQUEST_METADATA = RequestMetadata()
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedOperationScope:
+    """One trusted Location/Venue snapshot reused through a confirmation."""
+
+    location_id: UUID | None
+    venue: Venue | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,8 +378,18 @@ class PostPurchaseView:
 
 
 class LoyaltyService:
-    def __init__(self, repository: LoyaltyRepositoryPort) -> None:
+    def __init__(
+        self,
+        repository: LoyaltyRepositoryPort,
+        *,
+        point_ledger_repository: LoyaltyPointRepositoryPort | None = None,
+    ) -> None:
         self._repository = repository
+        candidate = point_ledger_repository or getattr(repository, "point_ledger_repository", None)
+        self._v2_repository: LoyaltyPointRepositoryPort | None = candidate
+        self._point_ledger = (
+            PointLedger(self._v2_repository) if self._v2_repository is not None else None
+        )
 
     async def lookup_card(
         self,
@@ -445,17 +493,21 @@ class LoyaltyService:
                 _raise_not_found("Товар за баллы недоступен")
             if not context.settings.points_enabled:
                 _raise_conflict("points_program_disabled", "Программа баллов отключена")
+            if context.settings.wallet_mode is WalletMode.SEPARATE:
+                _raise_conflict(
+                    "points_product_unavailable_in_separate_mode",
+                    "Покупка товара за баллы недоступна в раздельном режиме "
+                    "до привязки меню к заведениям",
+                )
             template = await self._repository.get_reward_template(item.points_reward_template_id)
             if template is None or not template.is_active:
                 _raise_conflict("reward_template_inactive", "Награда для товара не настроена")
 
             points_price = item.points_price
             balance_before = context.state.points_balance
-            if balance_before < points_price:
+            if self._point_ledger is None and balance_before < points_price:
                 _raise_conflict("insufficient_points", "Недостаточно баллов")
             balance_after = balance_before - points_price
-            context.state.points_balance = balance_after
-            context.state.version += 1
             operation = LoyaltyOperation(
                 id=uuid4(),
                 user_id=actor.user_id,
@@ -471,15 +523,34 @@ class LoyaltyService:
                 reason=f"Покупка за баллы: {item.name}",
                 occurred_at=current_time,
             )
-            transaction = PointTransaction(
-                id=uuid4(),
-                operation_id=operation.id,
-                user_id=actor.user_id,
-                delta=-points_price,
-                balance_before=balance_before,
-                balance_after=balance_after,
-                created_at=current_time,
-            )
+            transaction: PointTransaction | None = None
+            if self._point_ledger is not None:
+                try:
+                    mutation = await self._point_ledger.debit_fifo(
+                        state=context.state,
+                        settings=context.settings,
+                        operation=operation,
+                        points=points_price,
+                        venue_id=None,
+                        now=current_time,
+                    )
+                except LoyaltyRuleViolation as exc:
+                    _raise_rule_violation(exc)
+                operation.balance_before = mutation.global_balance_before
+                operation.balance_after = mutation.global_balance_after
+                balance_after = mutation.global_balance_after
+            else:
+                context.state.points_balance = balance_after
+                transaction = PointTransaction(
+                    id=uuid4(),
+                    operation_id=operation.id,
+                    user_id=actor.user_id,
+                    delta=-points_price,
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    created_at=current_time,
+                )
+            context.state.version += 1
             reward = _new_reward(
                 template,
                 user_id=actor.user_id,
@@ -490,7 +561,9 @@ class LoyaltyService:
             reward_qr_payload = reward.qr_payload
             if reward_qr_payload is None:  # Defensive: redeemable rewards always have a QR.
                 raise RuntimeError("Issued reward is missing its QR payload")
-            objects: list[object] = [operation, transaction, reward]
+            objects: list[object] = [operation, reward]
+            if transaction is not None:
+                objects.append(transaction)
             objects.extend(
                 _operation_side_effects(
                     operation,
@@ -508,6 +581,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return PointsMenuPurchaseOutcome(
                 operation_id=operation.id,
                 reward_id=reward.id,
@@ -569,15 +644,22 @@ class LoyaltyService:
         *,
         user_id: UUID,
         purchase_amount_minor: int,
+        location_id: UUID | None = None,
         now: datetime | None = None,
     ) -> AccrualPreviewView:
         _require_permission(actor, PermissionCode.POINTS_ACCRUE)
         current_time = _aware_now(now)
         context = await self._require_context(user_id, for_update=False)
         _require_not_self(actor, user_id)
+        scope = await self._resolve_operation_scope(
+            context.settings,
+            location_id=location_id,
+            for_update=False,
+        )
         result = await self._calculate_accrual(
             context,
             purchase_amount_minor=purchase_amount_minor,
+            venue=scope.venue,
             now=current_time,
         )
         return _accrual_preview(context, result)
@@ -616,9 +698,15 @@ class LoyaltyService:
 
             context = await self._require_context(user_id, for_update=True)
             _require_not_self(actor, user_id)
+            scope = await self._resolve_operation_scope(
+                context.settings,
+                location_id=location_id,
+                for_update=True,
+            )
             result = await self._calculate_accrual(
                 context,
                 purchase_amount_minor=purchase_amount_minor,
+                venue=scope.venue,
                 now=current_time,
             )
             committed = not result.requires_approval
@@ -629,7 +717,7 @@ class LoyaltyService:
                 user_id=user_id,
                 actor_user_id=actor.user_id,
                 actor_staff_id=actor.staff_member_id,
-                location_id=location_id,
+                location_id=scope.location_id,
                 operation_type=operation_type,
                 status=(OperationStatus.COMMITTED if committed else OperationStatus.PENDING),
                 idempotency_key=idempotency_key,
@@ -642,20 +730,36 @@ class LoyaltyService:
             )
             objects: list[object] = [operation]
             if committed:
-                context.state.points_balance = balance_after or 0
-                context.state.version += 1
-                objects.append(
-                    PointTransaction(
-                        id=uuid4(),
-                        operation_id=operation.id,
-                        user_id=user_id,
-                        delta=result.awarded_points,
-                        balance_before=balance_before,
-                        balance_after=context.state.points_balance,
-                        purchase_amount_minor=purchase_amount_minor,
-                        created_at=current_time,
+                if self._point_ledger is not None:
+                    try:
+                        mutation = await self._point_ledger.credit(
+                            state=context.state,
+                            settings=context.settings,
+                            operation=operation,
+                            points=result.awarded_points,
+                            source_type=PointLotSourceType.ACCRUAL,
+                            source_venue_id=(scope.venue.id if scope.venue is not None else None),
+                            now=current_time,
+                        )
+                    except LoyaltyRuleViolation as exc:
+                        _raise_rule_violation(exc)
+                    operation.balance_before = mutation.global_balance_before
+                    operation.balance_after = mutation.global_balance_after
+                else:
+                    context.state.points_balance = balance_after or 0
+                    objects.append(
+                        PointTransaction(
+                            id=uuid4(),
+                            operation_id=operation.id,
+                            user_id=user_id,
+                            delta=result.awarded_points,
+                            balance_before=balance_before,
+                            balance_after=context.state.points_balance,
+                            purchase_amount_minor=purchase_amount_minor,
+                            created_at=current_time,
+                        )
                     )
-                )
+                context.state.version += 1
             event_type = "points.accrued" if committed else "points.accrual_pending"
             event_metadata = {
                 "customer_name": _display_name(context.user),
@@ -675,6 +779,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if committed and self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(operation, replay=False)
 
     async def preview_purchase(
@@ -684,6 +790,7 @@ class LoyaltyService:
         user_id: UUID,
         purchase_amount_minor: int,
         stamps_to_add: int,
+        location_id: UUID | None = None,
         now: datetime | None = None,
     ) -> PurchasePreviewView:
         _require_permission(actor, PermissionCode.POINTS_ACCRUE)
@@ -692,9 +799,15 @@ class LoyaltyService:
         current_time = _aware_now(now)
         context = await self._require_context(user_id, for_update=False)
         _require_not_self(actor, user_id)
+        scope = await self._resolve_operation_scope(
+            context.settings,
+            location_id=location_id,
+            for_update=False,
+        )
         accrual = await self._calculate_accrual(
             context,
             purchase_amount_minor=purchase_amount_minor,
+            venue=scope.venue,
             now=current_time,
         )
         stamp_progress = self._purchase_stamp_progress(
@@ -800,9 +913,15 @@ class LoyaltyService:
 
             context = await self._require_context(user_id, for_update=True)
             _require_not_self(actor, user_id)
+            scope = await self._resolve_operation_scope(
+                context.settings,
+                location_id=location_id,
+                for_update=True,
+            )
             accrual = await self._calculate_accrual(
                 context,
                 purchase_amount_minor=purchase_amount_minor,
+                venue=scope.venue,
                 now=current_time,
             )
             stamp_progress = self._purchase_stamp_progress(
@@ -855,7 +974,7 @@ class LoyaltyService:
                 user_id=user_id,
                 actor_user_id=actor.user_id,
                 actor_staff_id=actor.staff_member_id,
-                location_id=location_id,
+                location_id=scope.location_id,
                 operation_type=operation_type,
                 status=(OperationStatus.COMMITTED if committed else OperationStatus.PENDING),
                 idempotency_key=idempotency_key,
@@ -873,19 +992,48 @@ class LoyaltyService:
             stamp_transaction: StampTransaction | None = None
 
             if committed:
-                context.state.points_balance = balance_after or 0
-                objects.append(
-                    PointTransaction(
-                        id=uuid4(),
-                        operation_id=operation.id,
-                        user_id=user_id,
-                        delta=total_points,
-                        balance_before=balance_before,
-                        balance_after=context.state.points_balance,
-                        purchase_amount_minor=purchase_amount_minor,
-                        created_at=current_time,
+                if self._point_ledger is not None:
+                    try:
+                        mutation = await self._point_ledger.credit_components(
+                            state=context.state,
+                            settings=context.settings,
+                            operation=operation,
+                            components=(
+                                CreditComponent(
+                                    points=accrual.awarded_points,
+                                    source_type=PointLotSourceType.ACCRUAL,
+                                    source_venue_id=(
+                                        scope.venue.id if scope.venue is not None else None
+                                    ),
+                                ),
+                                CreditComponent(
+                                    points=reward_bonus_points,
+                                    source_type=PointLotSourceType.REWARD_BONUS,
+                                    source_venue_id=(
+                                        scope.venue.id if scope.venue is not None else None
+                                    ),
+                                ),
+                            ),
+                            now=current_time,
+                        )
+                    except LoyaltyRuleViolation as exc:
+                        _raise_rule_violation(exc)
+                    operation.balance_before = mutation.global_balance_before
+                    operation.balance_after = mutation.global_balance_after
+                else:
+                    context.state.points_balance = balance_after or 0
+                    objects.append(
+                        PointTransaction(
+                            id=uuid4(),
+                            operation_id=operation.id,
+                            user_id=user_id,
+                            delta=total_points,
+                            balance_before=balance_before,
+                            balance_after=context.state.points_balance,
+                            purchase_amount_minor=purchase_amount_minor,
+                            created_at=current_time,
+                        )
                     )
-                )
 
                 if visit_progress is not None:
                     visit = Visit(
@@ -893,7 +1041,7 @@ class LoyaltyService:
                         operation_id=operation.id,
                         user_id=user_id,
                         staff_member_id=_staff_member_id(actor),
-                        location_id=location_id,
+                        location_id=scope.location_id,
                         business_date=business_date,
                         ordinal=visit_count + 1,
                         visited_at=current_time,
@@ -979,6 +1127,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if committed and self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(operation, replay=False)
 
     async def preview_redemption(
@@ -988,14 +1138,27 @@ class LoyaltyService:
         user_id: UUID,
         purchase_amount_minor: int,
         requested_points: int,
+        location_id: UUID | None = None,
+        now: datetime | None = None,
     ) -> RedemptionPreviewView:
         _require_permission(actor, PermissionCode.POINTS_REDEEM)
         context = await self._require_context(user_id, for_update=False)
         _require_not_self(actor, user_id)
+        scope = await self._resolve_operation_scope(
+            context.settings,
+            location_id=location_id,
+            for_update=False,
+        )
+        available = await self._available_wallet_points(
+            context,
+            venue_id=(scope.venue.id if scope.venue is not None else None),
+            now=_aware_now(now),
+        )
         result = _calculate_redemption(
             context,
             purchase_amount_minor=purchase_amount_minor,
             requested_points=requested_points,
+            current_balance_points=available,
         )
         return _redemption_preview(context, purchase_amount_minor, result)
 
@@ -1035,20 +1198,29 @@ class LoyaltyService:
 
             context = await self._require_context(user_id, for_update=True)
             _require_not_self(actor, user_id)
+            scope = await self._resolve_operation_scope(
+                context.settings,
+                location_id=location_id,
+                for_update=True,
+            )
+            available = await self._available_wallet_points(
+                context,
+                venue_id=(scope.venue.id if scope.venue is not None else None),
+                now=current_time,
+            )
             result = _calculate_redemption(
                 context,
                 purchase_amount_minor=purchase_amount_minor,
                 requested_points=requested_points,
+                current_balance_points=available,
             )
             balance_before = context.state.points_balance
-            context.state.points_balance = result.balance_after
-            context.state.version += 1
             operation = LoyaltyOperation(
                 id=uuid4(),
                 user_id=user_id,
                 actor_user_id=actor.user_id,
                 actor_staff_id=actor.staff_member_id,
-                location_id=location_id,
+                location_id=scope.location_id,
                 operation_type=operation_type,
                 status=OperationStatus.COMMITTED,
                 idempotency_key=idempotency_key,
@@ -1056,26 +1228,46 @@ class LoyaltyService:
                 purchase_amount_minor=purchase_amount_minor,
                 points_delta=-requested_points,
                 balance_before=balance_before,
-                balance_after=result.balance_after,
+                balance_after=balance_before - requested_points,
                 occurred_at=current_time,
             )
-            transaction = PointTransaction(
-                id=uuid4(),
-                operation_id=operation.id,
-                user_id=user_id,
-                delta=-requested_points,
-                balance_before=balance_before,
-                balance_after=result.balance_after,
-                purchase_amount_minor=purchase_amount_minor,
-                created_at=current_time,
-            )
+            transaction: PointTransaction | None = None
+            if self._point_ledger is not None:
+                try:
+                    mutation = await self._point_ledger.debit_fifo(
+                        state=context.state,
+                        settings=context.settings,
+                        operation=operation,
+                        points=requested_points,
+                        venue_id=(scope.venue.id if scope.venue is not None else None),
+                        now=current_time,
+                    )
+                except LoyaltyRuleViolation as exc:
+                    _raise_rule_violation(exc)
+                operation.balance_before = mutation.global_balance_before
+                operation.balance_after = mutation.global_balance_after
+            else:
+                context.state.points_balance = result.balance_after
+                transaction = PointTransaction(
+                    id=uuid4(),
+                    operation_id=operation.id,
+                    user_id=user_id,
+                    delta=-requested_points,
+                    balance_before=balance_before,
+                    balance_after=result.balance_after,
+                    purchase_amount_minor=purchase_amount_minor,
+                    created_at=current_time,
+                )
+            context.state.version += 1
             event_metadata = {
                 "customer_name": _display_name(context.user),
                 "points": requested_points,
                 "purchase_amount_minor": purchase_amount_minor,
                 "discount_minor": result.discount_minor,
             }
-            objects: list[object] = [operation, transaction]
+            objects: list[object] = [operation]
+            if transaction is not None:
+                objects.append(transaction)
             objects.extend(
                 _operation_side_effects(
                     operation,
@@ -1087,6 +1279,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(operation, replay=False)
 
     def _purchase_stamp_progress(
@@ -1140,6 +1334,7 @@ class LoyaltyService:
         context: LoyaltyContext,
         *,
         purchase_amount_minor: int,
+        venue: Venue | None,
         now: datetime,
     ) -> AccrualResult:
         business_date = business_date_for(
@@ -1158,6 +1353,13 @@ class LoyaltyService:
             ended_at=ended_at,
         )
         try:
+            if venue is not None:
+                return _calculate_venue_accrual(
+                    context.settings,
+                    venue,
+                    purchase_amount_minor=purchase_amount_minor,
+                    accrued_today_points=accrued_today,
+                )
             return calculate_accrual(
                 _accrual_policy(context.settings),
                 purchase_amount_minor=purchase_amount_minor,
@@ -1165,6 +1367,108 @@ class LoyaltyService:
             )
         except LoyaltyRuleViolation as exc:
             _raise_rule_violation(exc)
+
+    async def _available_wallet_points(
+        self,
+        context: LoyaltyContext,
+        *,
+        venue_id: UUID | None,
+        now: datetime,
+    ) -> int:
+        """Return currently spendable points in the operation's wallet scope.
+
+        Expired lots are excluded even if the bounded maintenance worker has
+        not yet materialized their immutable expiry operations.  The mutating
+        debit path performs the same check under wallet/lot locks.
+        """
+
+        if self._v2_repository is None:
+            return context.state.points_balance
+        scope_venue_id = None if context.settings.wallet_mode is WalletMode.SHARED else venue_id
+        if context.settings.wallet_mode is WalletMode.SEPARATE and scope_venue_id is None:
+            _raise_validation(
+                "venue_required_for_separate_wallet",
+                "Для операции в раздельном режиме требуется заведение",
+            )
+        wallet = await self._v2_repository.get_wallet(
+            user_id=context.user.id,
+            venue_id=scope_venue_id,
+            for_update=False,
+        )
+        if wallet is None:
+            return 0
+        lots = await self._v2_repository.list_lots(
+            wallet.id,
+            for_update=False,
+            remaining_only=True,
+        )
+        return sum(
+            lot.remaining_points for lot in lots if lot.expires_at is None or lot.expires_at > now
+        )
+
+    async def _resolve_operation_scope(
+        self,
+        settings: LoyaltySettings,
+        *,
+        location_id: UUID | None,
+        for_update: bool,
+    ) -> ResolvedOperationScope:
+        """Resolve calculation and persisted provenance from the same rows."""
+
+        if self._v2_repository is None:
+            return ResolvedOperationScope(location_id=location_id, venue=None)
+        if location_id is None:
+            if settings.wallet_mode is WalletMode.SEPARATE:
+                _raise_validation(
+                    "location_required_for_separate_wallet",
+                    "Для операции в раздельном режиме требуется точка заведения",
+                )
+            record = await self._v2_repository.get_default_location_venue(for_update=for_update)
+            if record is None:
+                _raise_validation(
+                    "default_location_unavailable",
+                    "Для операции не настроена активная точка по умолчанию",
+                )
+        else:
+            record = await self._v2_repository.get_location_venue(
+                location_id,
+                for_update=for_update,
+            )
+        if record is None or not record.location.is_active:
+            _raise_validation("location_unavailable", "Точка недоступна")
+        venue = record.venue
+        if venue is None or not venue.is_active or venue.archived_at is not None:
+            _raise_validation("venue_unavailable", "Заведение недоступно")
+        if record.location.venue_id != venue.id:
+            raise RuntimeError("Locked location and venue provenance do not match")
+        return ResolvedOperationScope(location_id=record.location.id, venue=venue)
+
+    async def _adjustment_venue(
+        self,
+        settings: LoyaltySettings,
+        *,
+        venue_id: UUID | None,
+        for_update: bool,
+    ) -> Venue | None:
+        """Validate an explicit admin/reward wallet scope.
+
+        A shared wallet may retain an origin-less manual lot for V1
+        compatibility.  Separate wallets never guess an admin destination.
+        """
+
+        if self._v2_repository is None:
+            return None
+        if venue_id is None:
+            if settings.wallet_mode is WalletMode.SEPARATE:
+                _raise_validation(
+                    "venue_required_for_separate_wallet",
+                    "Для операции в раздельном режиме требуется заведение",
+                )
+            return None
+        venue = await self._v2_repository.get_venue(venue_id, for_update=for_update)
+        if venue is None or not venue.is_active or venue.archived_at is not None:
+            _raise_validation("venue_unavailable", "Заведение недоступно")
+        return venue
 
     async def _idempotent_operation(
         self,
@@ -1271,6 +1575,11 @@ class LoyaltyService:
             _require_not_self(actor, user_id)
             if not context.settings.visits_enabled:
                 _raise_validation("visits_program_disabled", "Программа посещений отключена")
+            scope = await self._resolve_operation_scope(
+                context.settings,
+                location_id=location_id,
+                for_update=True,
+            )
             business_date = _business_date(context.settings, current_time)
             visit_count = await self._repository.count_visits(
                 user_id=user_id,
@@ -1311,7 +1620,7 @@ class LoyaltyService:
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
                 now=current_time,
-                location_id=location_id,
+                location_id=scope.location_id,
                 balance=context.state.points_balance,
             )
             reward_bonus_points = _template_point_bonus(
@@ -1320,26 +1629,42 @@ class LoyaltyService:
             )
             point_transaction: PointTransaction | None = None
             if reward_bonus_points:
-                balance_before = context.state.points_balance
-                context.state.points_balance += reward_bonus_points
                 operation.points_delta = reward_bonus_points
                 operation.reward_bonus_points = reward_bonus_points
-                operation.balance_after = context.state.points_balance
-                point_transaction = PointTransaction(
-                    id=uuid4(),
-                    operation_id=operation.id,
-                    user_id=user_id,
-                    delta=reward_bonus_points,
-                    balance_before=balance_before,
-                    balance_after=context.state.points_balance,
-                    created_at=current_time,
-                )
+                if self._point_ledger is not None:
+                    try:
+                        mutation = await self._point_ledger.credit(
+                            state=context.state,
+                            settings=context.settings,
+                            operation=operation,
+                            points=reward_bonus_points,
+                            source_type=PointLotSourceType.REWARD_BONUS,
+                            source_venue_id=(scope.venue.id if scope.venue is not None else None),
+                            now=current_time,
+                        )
+                    except LoyaltyRuleViolation as exc:
+                        _raise_rule_violation(exc)
+                    operation.balance_before = mutation.global_balance_before
+                    operation.balance_after = mutation.global_balance_after
+                else:
+                    balance_before = context.state.points_balance
+                    context.state.points_balance += reward_bonus_points
+                    operation.balance_after = context.state.points_balance
+                    point_transaction = PointTransaction(
+                        id=uuid4(),
+                        operation_id=operation.id,
+                        user_id=user_id,
+                        delta=reward_bonus_points,
+                        balance_before=balance_before,
+                        balance_after=context.state.points_balance,
+                        created_at=current_time,
+                    )
             visit = Visit(
                 id=uuid4(),
                 operation_id=operation.id,
                 user_id=user_id,
                 staff_member_id=_staff_member_id(actor),
-                location_id=location_id,
+                location_id=scope.location_id,
                 business_date=business_date,
                 ordinal=visit_count + 1,
                 visited_at=current_time,
@@ -1387,6 +1712,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if reward_bonus_points and self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(operation, replay=False)
 
     async def add_stamps(
@@ -1424,6 +1751,11 @@ class LoyaltyService:
             _require_not_self(actor, user_id)
             if not context.settings.stamps_enabled:
                 _raise_validation("stamps_program_disabled", "Программа штампов отключена")
+            scope = await self._resolve_operation_scope(
+                context.settings,
+                location_id=location_id,
+                for_update=True,
+            )
             try:
                 progress = advance_stamps(
                     current_stamps=context.state.stamp_count,
@@ -1448,7 +1780,7 @@ class LoyaltyService:
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
                 now=current_time,
-                location_id=location_id,
+                location_id=scope.location_id,
                 balance=context.state.points_balance,
             )
             reward_bonus_points = _template_point_bonus(
@@ -1458,20 +1790,36 @@ class LoyaltyService:
             )
             point_transaction: PointTransaction | None = None
             if reward_bonus_points:
-                balance_before = context.state.points_balance
-                context.state.points_balance += reward_bonus_points
                 operation.points_delta = reward_bonus_points
                 operation.reward_bonus_points = reward_bonus_points
-                operation.balance_after = context.state.points_balance
-                point_transaction = PointTransaction(
-                    id=uuid4(),
-                    operation_id=operation.id,
-                    user_id=user_id,
-                    delta=reward_bonus_points,
-                    balance_before=balance_before,
-                    balance_after=context.state.points_balance,
-                    created_at=current_time,
-                )
+                if self._point_ledger is not None:
+                    try:
+                        mutation = await self._point_ledger.credit(
+                            state=context.state,
+                            settings=context.settings,
+                            operation=operation,
+                            points=reward_bonus_points,
+                            source_type=PointLotSourceType.REWARD_BONUS,
+                            source_venue_id=(scope.venue.id if scope.venue is not None else None),
+                            now=current_time,
+                        )
+                    except LoyaltyRuleViolation as exc:
+                        _raise_rule_violation(exc)
+                    operation.balance_before = mutation.global_balance_before
+                    operation.balance_after = mutation.global_balance_after
+                else:
+                    balance_before = context.state.points_balance
+                    context.state.points_balance += reward_bonus_points
+                    operation.balance_after = context.state.points_balance
+                    point_transaction = PointTransaction(
+                        id=uuid4(),
+                        operation_id=operation.id,
+                        user_id=user_id,
+                        delta=reward_bonus_points,
+                        balance_before=balance_before,
+                        balance_after=context.state.points_balance,
+                        created_at=current_time,
+                    )
             rewards = [
                 _new_reward(
                     template,
@@ -1516,6 +1864,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if reward_bonus_points and self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(operation, replay=False)
 
     async def redeem_reward(
@@ -1597,6 +1947,7 @@ class LoyaltyService:
         delta_points: int,
         reason: str,
         idempotency_key: str,
+        venue_id: UUID | None = None,
         metadata: RequestMetadata = EMPTY_REQUEST_METADATA,
         now: datetime | None = None,
     ) -> OperationOutcome:
@@ -1613,6 +1964,7 @@ class LoyaltyService:
                 "user_id": user_id,
                 "delta_points": delta_points,
                 "reason": normalized_reason,
+                "venue_id": venue_id,
             },
         )
         async with self._repository.transaction():
@@ -1625,12 +1977,15 @@ class LoyaltyService:
                 return await self._outcome(existing, replay=True)
             context = await self._require_context(user_id, for_update=True)
             _require_not_self(actor, user_id)
+            venue = await self._adjustment_venue(
+                context.settings,
+                venue_id=venue_id,
+                for_update=True,
+            )
             balance_before = context.state.points_balance
             balance_after = balance_before + delta_points
-            if balance_after < 0:
+            if self._point_ledger is None and balance_after < 0:
                 _raise_conflict("insufficient_points", "Недостаточно баллов для корректировки")
-            context.state.points_balance = balance_after
-            context.state.version += 1
             operation = LoyaltyOperation(
                 id=uuid4(),
                 user_id=user_id,
@@ -1646,21 +2001,54 @@ class LoyaltyService:
                 reason=normalized_reason,
                 occurred_at=current_time,
             )
-            transaction = PointTransaction(
-                id=uuid4(),
-                operation_id=operation.id,
-                user_id=user_id,
-                delta=delta_points,
-                balance_before=balance_before,
-                balance_after=balance_after,
-                created_at=current_time,
-            )
+            transaction: PointTransaction | None = None
+            if self._point_ledger is not None:
+                try:
+                    mutation = (
+                        await self._point_ledger.credit(
+                            state=context.state,
+                            settings=context.settings,
+                            operation=operation,
+                            points=delta_points,
+                            source_type=PointLotSourceType.ADMIN_ADJUSTMENT,
+                            source_venue_id=(venue.id if venue is not None else None),
+                            now=current_time,
+                        )
+                        if delta_points > 0
+                        else await self._point_ledger.debit_fifo(
+                            state=context.state,
+                            settings=context.settings,
+                            operation=operation,
+                            points=-delta_points,
+                            venue_id=(venue.id if venue is not None else None),
+                            now=current_time,
+                        )
+                    )
+                except LoyaltyRuleViolation as exc:
+                    _raise_rule_violation(exc)
+                operation.balance_before = mutation.global_balance_before
+                operation.balance_after = mutation.global_balance_after
+                balance_after = mutation.global_balance_after
+            else:
+                context.state.points_balance = balance_after
+                transaction = PointTransaction(
+                    id=uuid4(),
+                    operation_id=operation.id,
+                    user_id=user_id,
+                    delta=delta_points,
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    created_at=current_time,
+                )
+            context.state.version += 1
             event_metadata = {
                 "customer_name": _display_name(context.user),
                 "delta_points": delta_points,
                 "reason": normalized_reason,
             }
-            objects: list[object] = [operation, transaction]
+            objects: list[object] = [operation]
+            if transaction is not None:
+                objects.append(transaction)
             objects.extend(
                 _operation_side_effects(
                     operation,
@@ -1673,6 +2061,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(operation, replay=False)
 
     async def reverse_operation(
@@ -1704,7 +2094,14 @@ class LoyaltyService:
             initial = await self._repository.get_operation(operation_id, for_update=False)
             if initial is None:
                 _raise_not_found("Операция не найдена")
-            context = await self._require_context(initial.user_id, for_update=True)
+            # Historical operations keep their immutable source profile id.
+            # A merge moves the mutable balance to the terminal canonical
+            # profile, so reversals must follow that lineage before taking the
+            # normal settings -> user/state -> wallet -> lot locks.
+            canonical_user_id = await self._repository.resolve_terminal_user_id(initial.user_id)
+            if canonical_user_id is None:
+                _raise_not_found("Пользователь операции не найден")
+            context = await self._require_context(canonical_user_id, for_update=True)
             _require_not_self(actor, context.user.id)
             original = await self._repository.get_operation(operation_id, for_update=True)
             if original is None:
@@ -1744,17 +2141,14 @@ class LoyaltyService:
             balance_before = context.state.points_balance
             reversal_delta = -original.points_delta
             balance_after = balance_before + reversal_delta
-            if balance_after < 0:
+            if self._point_ledger is None and balance_after < 0:
                 _raise_conflict(
                     "reversal_would_make_balance_negative",
                     "Недостаточно баллов; требуется ручная корректировка администратора",
                 )
-            context.state.points_balance = balance_after
-            context.state.version += 1
-            original.status = OperationStatus.REVERSED
             reversal = LoyaltyOperation(
                 id=uuid4(),
-                user_id=original.user_id,
+                user_id=context.user.id,
                 actor_user_id=actor.user_id,
                 actor_staff_id=actor.staff_member_id,
                 location_id=original.location_id,
@@ -1769,22 +2163,59 @@ class LoyaltyService:
                 reversal_of_id=original.id,
                 occurred_at=current_time,
             )
-            transaction = PointTransaction(
-                id=uuid4(),
-                operation_id=reversal.id,
-                user_id=original.user_id,
-                delta=reversal_delta,
-                balance_before=balance_before,
-                balance_after=balance_after,
-                created_at=current_time,
-            )
+            transaction: PointTransaction | None = None
+            if self._point_ledger is not None:
+                # Reversal lots and allocations reference this operation only
+                # by scalar FK ids. Persist the journal header first so the
+                # staged lineage flush cannot race SQLAlchemy's table ordering.
+                # A later rule failure still rolls the entire transaction back.
+                self._repository.add_all([reversal])
+                await self._repository.flush()
+                try:
+                    mutation = (
+                        await self._point_ledger.reverse_credit(
+                            state=context.state,
+                            original_operation_id=original.id,
+                            reversal=reversal,
+                            points=original.points_delta,
+                            now=current_time,
+                        )
+                        if original.points_delta > 0
+                        else await self._point_ledger.reverse_spend(
+                            state=context.state,
+                            settings=context.settings,
+                            original_operation_id=original.id,
+                            reversal=reversal,
+                            now=current_time,
+                        )
+                    )
+                except LoyaltyRuleViolation as exc:
+                    _raise_conflict(exc.code, exc.message)
+                reversal.points_delta = mutation.points_changed
+                reversal.balance_before = mutation.global_balance_before
+                reversal.balance_after = mutation.global_balance_after
+            else:
+                context.state.points_balance = balance_after
+                transaction = PointTransaction(
+                    id=uuid4(),
+                    operation_id=reversal.id,
+                    user_id=context.user.id,
+                    delta=reversal_delta,
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    created_at=current_time,
+                )
+            context.state.version += 1
+            original.status = OperationStatus.REVERSED
             event_metadata = {
                 "customer_name": _display_name(context.user),
                 "points": original.points_delta,
                 "reason": normalized_reason,
                 "original_operation_id": str(original.id),
             }
-            objects: list[object] = [reversal, transaction]
+            objects: list[object] = [] if self._point_ledger is not None else [reversal]
+            if transaction is not None:
+                objects.append(transaction)
             objects.extend(
                 _operation_side_effects(
                     reversal,
@@ -1799,6 +2230,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(reversal, replay=False)
 
     async def block_user(
@@ -2026,6 +2459,7 @@ class LoyaltyService:
         reason: str,
         idempotency_key: str,
         validity_days: int | None = None,
+        venue_id: UUID | None = None,
         metadata: RequestMetadata = EMPTY_REQUEST_METADATA,
         now: datetime | None = None,
     ) -> OperationOutcome:
@@ -2043,6 +2477,7 @@ class LoyaltyService:
                 "user_id": user_id,
                 "template_id": template_id,
                 "validity_days": validity_days,
+                "venue_id": venue_id,
                 "reason": normalized_reason,
             },
         )
@@ -2069,20 +2504,70 @@ class LoyaltyService:
                 balance=context.state.points_balance,
                 reason=normalized_reason,
             )
-            reward = _new_reward(
+            reward_bonus_points = _template_point_bonus(
                 template,
-                user_id=user_id,
-                source_operation_id=operation.id,
-                validity_days=validity_days,
-                now=current_time,
+                points_enabled=context.settings.points_enabled,
             )
+            reward: Reward | None = None
+            point_transaction: PointTransaction | None = None
+            if reward_bonus_points:
+                operation.points_delta = reward_bonus_points
+                operation.reward_bonus_points = reward_bonus_points
+                venue = await self._adjustment_venue(
+                    context.settings,
+                    venue_id=venue_id,
+                    for_update=True,
+                )
+                if self._point_ledger is not None:
+                    try:
+                        mutation = await self._point_ledger.credit(
+                            state=context.state,
+                            settings=context.settings,
+                            operation=operation,
+                            points=reward_bonus_points,
+                            source_type=PointLotSourceType.REWARD_BONUS,
+                            source_venue_id=(venue.id if venue is not None else None),
+                            now=current_time,
+                        )
+                    except LoyaltyRuleViolation as exc:
+                        _raise_rule_violation(exc)
+                    operation.balance_before = mutation.global_balance_before
+                    operation.balance_after = mutation.global_balance_after
+                else:
+                    balance_before = context.state.points_balance
+                    context.state.points_balance += reward_bonus_points
+                    operation.balance_before = balance_before
+                    operation.balance_after = context.state.points_balance
+                    point_transaction = PointTransaction(
+                        id=uuid4(),
+                        operation_id=operation.id,
+                        user_id=user_id,
+                        delta=reward_bonus_points,
+                        balance_before=balance_before,
+                        balance_after=context.state.points_balance,
+                        created_at=current_time,
+                    )
+                context.state.version += 1
+            else:
+                reward = _new_reward(
+                    template,
+                    user_id=user_id,
+                    source_operation_id=operation.id,
+                    validity_days=validity_days,
+                    now=current_time,
+                )
             event_metadata = {
                 "customer_name": _display_name(context.user),
-                "reward_name": reward.name,
-                "reward_id": str(reward.id),
+                "reward_name": template.name,
+                "reward_id": (str(reward.id) if reward is not None else None),
+                "reward_bonus_points": reward_bonus_points,
                 "reason": normalized_reason,
             }
-            objects: list[object] = [operation, reward]
+            objects: list[object] = [operation]
+            if reward is not None:
+                objects.append(reward)
+            if point_transaction is not None:
+                objects.append(point_transaction)
             objects.extend(
                 _operation_side_effects(
                     operation,
@@ -2094,6 +2579,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if reward_bonus_points and self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(operation, replay=False)
 
     async def cancel_reward(
@@ -2351,6 +2838,65 @@ def _accrual_policy(settings: LoyaltySettings) -> AccrualPolicy:
     )
 
 
+def _calculate_venue_accrual(
+    settings: LoyaltySettings,
+    venue: Venue,
+    *,
+    purchase_amount_minor: int,
+    accrued_today_points: int,
+) -> AccrualResult:
+    """Apply venue bps while retaining V1 limits and approval semantics."""
+
+    if not settings.points_enabled or not venue.loyalty_points_enabled:
+        raise LoyaltyRuleViolation("points_program_disabled", "Балльная программа отключена")
+    if purchase_amount_minor <= 0:
+        raise LoyaltyRuleViolation(
+            "invalid_purchase_amount", "Сумма покупки должна быть больше нуля"
+        )
+    if purchase_amount_minor < settings.minimum_purchase_minor:
+        raise LoyaltyRuleViolation("purchase_below_minimum", "Сумма покупки меньше минимальной")
+    if purchase_amount_minor > settings.maximum_purchase_minor:
+        raise LoyaltyRuleViolation(
+            "purchase_above_maximum", "Сумма покупки превышает допустимый лимит"
+        )
+    raw_points = calculate_percentage_accrual(
+        purchase_amount_minor,
+        venue.loyalty_accrual_basis_points,
+        venue.loyalty_rounding_mode,
+    )
+    if raw_points <= 0:
+        raise LoyaltyRuleViolation("no_points_to_accrue", "Покупка не создаёт ни одного балла")
+    awarded_points = raw_points
+    limited_by_operation = False
+    if settings.operation_accrual_limit_points is not None:
+        if awarded_points > settings.operation_accrual_limit_points:
+            awarded_points = settings.operation_accrual_limit_points
+            limited_by_operation = True
+    limited_by_daily_total = False
+    if settings.daily_accrual_limit_points is not None:
+        remaining = settings.daily_accrual_limit_points - accrued_today_points
+        if remaining <= 0:
+            raise LoyaltyRuleViolation(
+                "daily_accrual_limit_reached", "Дневной лимит начисления исчерпан"
+            )
+        if awarded_points > remaining:
+            awarded_points = remaining
+            limited_by_daily_total = True
+    requires_approval = bool(
+        settings.large_operation_requires_approval
+        and settings.large_operation_threshold_minor is not None
+        and purchase_amount_minor >= settings.large_operation_threshold_minor
+    )
+    return AccrualResult(
+        purchase_amount_minor=purchase_amount_minor,
+        raw_points=raw_points,
+        awarded_points=awarded_points,
+        limited_by_operation=limited_by_operation,
+        limited_by_daily_total=limited_by_daily_total,
+        requires_approval=requires_approval,
+    )
+
+
 def _redemption_policy(settings: LoyaltySettings) -> RedemptionPolicy:
     return RedemptionPolicy(
         enabled=settings.points_enabled,
@@ -2366,13 +2912,18 @@ def _calculate_redemption(
     *,
     purchase_amount_minor: int,
     requested_points: int,
+    current_balance_points: int | None = None,
 ) -> RedemptionResult:
     try:
         return calculate_redemption(
             _redemption_policy(context.settings),
             purchase_amount_minor=purchase_amount_minor,
             requested_points=requested_points,
-            current_balance_points=context.state.points_balance,
+            current_balance_points=(
+                context.state.points_balance
+                if current_balance_points is None
+                else current_balance_points
+            ),
         )
     except LoyaltyRuleViolation as exc:
         _raise_rule_violation(exc)
@@ -2407,7 +2958,9 @@ def _redemption_preview(
         discount_minor=result.discount_minor,
         maximum_points_for_purchase=result.maximum_points_for_purchase,
         balance_before=context.state.points_balance,
-        projected_balance_after=result.balance_after,
+        # ``RedemptionResult.balance_after`` is wallet-local in separate mode;
+        # the V1 response remains the global compatibility snapshot.
+        projected_balance_after=context.state.points_balance - result.requested_points,
     )
 
 

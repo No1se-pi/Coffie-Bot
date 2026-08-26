@@ -11,6 +11,7 @@ import pytest
 from app.core.config import AppEnvironment, Settings
 from app.models.access import User
 from app.models.cards import UserCard
+from app.models.content import Venue
 from app.models.enums import CardStatus, LoyaltyOperationType, RewardStatus, Role, UserStatus
 from app.models.loyalty import LoyaltySettings, UserLoyaltyState
 from app.repositories.identity import (
@@ -90,6 +91,16 @@ class FakeIdentityRepository:
 
     async def get_loyalty_settings(self) -> LoyaltySettings | None:
         return self.settings
+
+    async def get_active_venue(self, venue_id: UUID) -> Venue | None:
+        if venue_id != self.settings.default_bonus_venue_id:
+            return None
+        return Venue(
+            id=venue_id,
+            slug="welcome-venue",
+            name="Welcome venue",
+            is_active=True,
+        )
 
     def initialize_customer(self, **kwargs: Any) -> None:
         self.initialize_calls.append(kwargs)
@@ -204,6 +215,7 @@ def _loyalty_settings(welcome_bonus: int) -> LoyaltySettings:
         currency_code="RUB",
         points_enabled=True,
         welcome_bonus_points=welcome_bonus,
+        default_bonus_venue_id=uuid4(),
         visit_required_count=5,
         stamp_required_count=9,
         created_at=NOW,

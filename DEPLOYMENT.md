@@ -235,6 +235,28 @@ Alembic migrations считаются forward-only. Откат image на ста
 он совместим с уже применённой схемой. Для несовместимой схемы используйте заранее проверенный
 backup целиком; не пытайтесь вручную удалять колонки на рабочей базе.
 
+### Phase 2 Loyalty V2 upgrade smoke
+
+Эти шаги применяются к release с закрытыми gates migration `0011`, backend,
+frontend и Compose. Наличие `0011` только в feature-ветке не является разрешением
+на production upgrade: сначала требуются merge и успешный CI целевой ветки.
+
+1. Перед остановкой writers создайте и проверьте pre-upgrade backup.
+2. После migration выполните wallet/lot/opening-expiry запросы из
+   [`MIGRATION_V2.md`](MIGRATION_V2.md): все три счётчика должны быть `0`.
+3. Повторно запустите seed и убедитесь, что per-venue policy, wallet mode,
+   expiry/reminder и birthday eligible venues не дублируются.
+4. После запуска проверьте readiness, `/api/v1/me/wallets`, `/api/v1/me/birthday`
+   и `/api/v1/admin/loyalty` с разрешёнными roles.
+5. Проведите малое безопасное начисление в shared mode с active location и сверьте
+   wallet, compatibility balance, lot и history. Смену wallet mode на production ради
+   smoke не выполняйте.
+6. Проверьте worker logs/outbox: expiry cadence не сканирует базу на каждом
+   общем tick, а у phone-only profiles нет бесконечных Telegram retry.
+
+Полные shared/separate, FIFO, expiry, reversal/routes и birthday сценарии находятся
+в [`docs/MANUAL_TEST_PLAN.md`](docs/MANUAL_TEST_PLAN.md); production smoke не заменяет их.
+
 ## Диагностика
 
 ```bash

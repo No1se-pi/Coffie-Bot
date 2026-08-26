@@ -107,6 +107,12 @@ class CustomerMerge(UUIDPrimaryKeyMixin, Base):
             "AND sessions_revoked >= 0 AND cards_revoked >= 0",
             name="non_negative_merge_counts",
         ),
+        CheckConstraint("feedback_moved >= 0", name="non_negative_feedback_moved"),
+        CheckConstraint(
+            "birthday_resolution IS NULL OR "
+            "birthday_resolution IN ('keep_canonical', 'use_source')",
+            name="valid_birthday_resolution",
+        ),
         Index("ix_customer_merges_canonical_created", "canonical_user_id", "created_at"),
         Index("ix_customer_merges_actor_created", "actor_staff_id", "created_at"),
     )
@@ -156,6 +162,10 @@ class CustomerMerge(UUIDPrimaryKeyMixin, Base):
     rewards_moved: Mapped[int] = mapped_column(Integer, nullable=False)
     sessions_revoked: Mapped[int] = mapped_column(Integer, nullable=False)
     cards_revoked: Mapped[int] = mapped_column(Integer, nullable=False)
+    feedback_moved: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    birthday_resolution: Mapped[str | None] = mapped_column(String(24))
     source_staff_rebound: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

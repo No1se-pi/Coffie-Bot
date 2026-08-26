@@ -2,6 +2,10 @@
 
 Все endpoints имеют префикс `/api/v1`. JSON использует `snake_case`. Денежные значения передаются как `*_minor` (копейки), timestamps — ISO 8601 UTC. Приватные endpoints принимают `Authorization: Bearer <opaque-session-token>`.
 
+> Контракты Loyalty V2 ниже аддитивны и реализуются в Phase 2. До
+> закрытия migration, backend, frontend и release gates они не являются
+> обещанием deployable Phase 1.
+
 ## Общие ответы
 
 Ошибка:
@@ -39,6 +43,15 @@ Dangerous POST endpoints требуют `Idempotency-Key` (UUID, до 128 сим
 - `GET /me/history?page=&page_size=&type=` — собственные операции.
 - `GET /me/rewards?status=` — собственные награды.
 - `GET /me/identities` — подтверждённые provider identities текущего профиля.
+- `GET /me/wallets` (Phase 2) — wallet mode, суммарный compatibility balance,
+  shared/venue breakdown, ближайшее expiry и доступность venue. Кошелёк
+  archived venue с ненулевым балансом не скрывается, но помечается как
+  недоступный для новых операций.
+- `GET /me/birthday` (Phase 2) — собственные month/day, lock state и краткое
+  описание активного birthday offer без года рождения.
+- `PUT /me/birthday` (Phase 2) — одноразово сохраняет
+  `{ "birthday": { "month": 2, "day": 29 } }`; повторное self-service изменение
+  отклоняется.
 
 ## Публичный контент для авторизованного пользователя
 
@@ -55,9 +68,11 @@ Dangerous POST endpoints требуют `Idempotency-Key` (UUID, до 128 сим
   нормализуется backend, операция остаётся read-only.
 - `POST /staff/customers` — phone-only профиль + карта + loyalty aggregate; требует
   `customers.create` и `Idempotency-Key`, возвращает только маскированный телефон.
-- `POST /staff/operations/accrual/preview` — `{user_id, purchase_amount_minor}`.
+- `POST /staff/operations/accrual/preview` — `{user_id, purchase_amount_minor,
+  location_id?}`; Phase 2 по `location_id` загружает active venue и его policy.
 - `POST /staff/operations/accrual` — confirm с тем же business input; результат всегда пересчитывается.
-- `POST /staff/operations/redemption/preview`, `POST /staff/operations/redemption`.
+- `POST /staff/operations/redemption/preview`, `POST /staff/operations/redemption` — в
+  Phase 2 принимают тот же optional `location_id`.
 - `POST /staff/operations/visits` — business date вычисляет backend.
 - `POST /staff/operations/stamps`.
 - `POST /staff/rewards/{reward_id}/redeem`.
@@ -67,11 +82,19 @@ Dangerous POST endpoints требуют `Idempotency-Key` (UUID, до 128 сим
 
 Preview не принимает и не возвращает секреты; confirm никогда не принимает `new_balance` или готовое количество начисления.
 
+Для compatibility с V1 staff clients в shared mode отсутствующий `location_id`
+разрешается только через server-side trusted default active Location/Venue и его
+venue accrual policy. Это не fallback на старую global formula. В separate mode
+`location_id` обязателен, должен указывать на active Location/Venue и проходит
+проверку backend.
+
 ## Admin users и staff
 
 - `GET /admin/users?query=&status=&page=&page_size=`.
 - `GET /admin/users/{user_id}` и `/history`, `/rewards`.
 - `POST /admin/users/{user_id}/adjustments` — `{delta_points, reason}`.
+- `PUT /admin/users/{user_id}/birthday` (Phase 2) — admin/owner меняет month/day
+  только с непустой `reason`; old/new value и actor фиксируются в audit.
 - `POST /admin/users/{user_id}/block`, `/unblock`, `/cards/reissue`.
 - `POST /admin/users/{user_id}/rewards` и `/rewards/{reward_id}/cancel`.
 - `GET /admin/users/{user_id}/identities` — provider identities для поддержки/merge.
@@ -91,6 +114,15 @@ Preview не принимает и не возвращает секреты; con
 
 - `GET /admin/events` — period/actor/user/type/severity/suspicious/adjustments/reversed filters.
 - `GET|PUT /admin/loyalty-settings` — `visit_reward` и `stamp_reward` принимают один из компактных вариантов: позиция меню (`menu_item`), собственная текстовая награда (`custom`) или автоматическое начисление (`points`).
+- `GET|PUT /admin/loyalty` (Phase 2) — V2 policy: per-venue enabled/bps/rounding,
+  expiry/reminder, value/redemption limit, default bonus venue и birthday offer/eligible
+  venues. `wallet_mode` не меняется этим `PUT`.
+- `POST /admin/loyalty/wallet-mode/preview` (Phase 2, owner-only) — принимает
+  `target_mode` и optional active `fallback_venue_id`; возвращает conservation
+  summary, unresolved lots и `preview_hash`, не меняя state.
+- `POST /admin/loyalty/wallet-mode/confirm` (Phase 2, owner-only) — требует
+  `target_mode`, тот же fallback, `preview_hash`, `reason`, `confirm=true` и
+  `Idempotency-Key`; stale preview и неактивный fallback отклоняются.
 - `GET|POST|PATCH /admin/promotions`; explicit `/publish` and `/archive` actions.
 - `GET|POST|PATCH /admin/menu/categories`, `/admin/menu/items`; архивные позиции доступны владельцу через `include_archived=true`.
 - `POST /admin/menu/items/{id}/archive` (и legacy `/hide`) скрывает позицию, запрещает продажу и деактивирует связанную награду за баллы; `POST /restore` возвращает её как скрытый/недоступный черновик.

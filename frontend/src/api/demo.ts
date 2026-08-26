@@ -1,17 +1,24 @@
 import { ApiError } from "./client";
 import type {
   AccrualPreview,
+  AdminCustomerBirthday,
   AdminFeedback,
+  AdminLoyaltyV2Settings,
+  AdminLoyaltyV2Update,
   AdminOverview,
   AdminStaffMember,
   AdminUser,
   AuditEvent,
   AuthSession,
+  BirthdayValue,
   CardData,
+  ContactsData,
+  CustomerBirthday,
   CustomerMergeConfirmRequest,
   CustomerMergePreview,
   CustomerMergePreviewRequest,
   CustomerMergeResult,
+  CustomerWalletSummary,
   HistoryItem,
   ListResponse,
   LoyaltySettings,
@@ -34,6 +41,10 @@ import type {
   StaffMemberDraft,
   TipProfile,
   Venue,
+  WalletModeChangeResult,
+  WalletModeConfirmRequest,
+  WalletModePreview,
+  WalletModePreviewRequest,
 } from "./types";
 
 const now = () => new Date().toISOString();
@@ -95,6 +106,95 @@ const venues: Venue[] = [
     sort_order: 30,
   },
 ];
+
+const contacts: ContactsData = {
+  coffee_shop_name: "Тёплое зерно",
+  description: "Заведения рядом с домом",
+  support_contact: "@coffee_support",
+  privacy_policy:
+    "Мы используем Telegram ID только для работы карты лояльности и не передаём данные третьим лицам.",
+  locations: [
+    {
+      id: "00000000-0000-4000-8000-000000000201",
+      venue_id: venues[0]!.id,
+      name: "Кофейня · Кофейный переулок",
+      address: "Москва, Кофейный переулок, 8",
+      hours: "Ежедневно 08:00–22:00",
+      phone: "+7 000 000-00-00",
+      map_url: "https://example.com/map/coffee",
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000202",
+      venue_id: venues[1]!.id,
+      name: "ФудДворик · Центр",
+      address: "Москва, Центральная улица, 12",
+      hours: "Ежедневно 10:00–23:00",
+      phone: null,
+      map_url: null,
+    },
+  ],
+};
+
+const separateWalletEntries: CustomerWalletSummary["entries"] = [
+  {
+    id: "wallet-coffee",
+    venue: {
+      id: venues[0]!.id,
+      name: venues[0]!.name,
+      available: true,
+    },
+    balance_points: 145,
+    expiring_points: 40,
+    expires_at: "2027-02-01T00:00:00Z",
+  },
+  {
+    id: "wallet-food",
+    venue: {
+      id: venues[1]!.id,
+      name: venues[1]!.name,
+      available: true,
+    },
+    balance_points: 80,
+    expiring_points: 20,
+    expires_at: "2027-02-10T00:00:00Z",
+  },
+  {
+    id: "wallet-grill",
+    venue: {
+      id: venues[2]!.id,
+      name: venues[2]!.name,
+      available: true,
+    },
+    balance_points: 44,
+    expiring_points: 0,
+    expires_at: null,
+  },
+  {
+    id: "wallet-archived",
+    venue: {
+      id: "00000000-0000-4000-8000-000000000104",
+      name: "Архивная точка",
+      available: false,
+    },
+    balance_points: 15,
+    expiring_points: 0,
+    expires_at: null,
+  },
+];
+
+let customerWallets: CustomerWalletSummary = {
+  mode: "separate",
+  total_balance_points: 284,
+  point_value_minor: 100,
+  max_redemption_percent: 50,
+  entries: separateWalletEntries,
+};
+
+let customerBirthday: CustomerBirthday = {
+  birthday: null,
+  locked: false,
+  offer: null,
+};
 
 let lastAutomaticVisitDate: string | null = null;
 let phoneOnlyStaffClient: StaffClient | null = null;
@@ -270,6 +370,32 @@ let settings: LoyaltySettings = {
   stamp_reward: { kind: "custom", name: "Десятый напиток бесплатно" },
 };
 
+let adminLoyaltyV2: AdminLoyaltyV2Settings = {
+  wallet_mode: "separate",
+  point_value_minor: 100,
+  max_redemption_percent: 50,
+  expiry_months: 6,
+  expiry_days_override: null,
+  expiry_reminder_days: 14,
+  default_bonus_venue_id: venues[0]!.id,
+  rounding: "floor",
+  venue_rates: venues.map((venue, index) => ({
+    venue_id: venue.id,
+    venue_name: venue.name,
+    available: true,
+    loyalty_points_enabled: true,
+    accrual_basis_points: [1000, 700, 500][index] ?? 0,
+    rounding_mode: "floor",
+  })),
+  birthday: {
+    enabled: true,
+    discount_percent: 10,
+    window_days: 1,
+    eligible_venue_ids: venues.map((venue) => venue.id),
+    stackable: false,
+  },
+};
+
 let adminUsers: AdminUser[] = [
   {
     id: "user-demo",
@@ -333,6 +459,11 @@ const demoMergeReceipts = new Map<
   { payload: CustomerMergeConfirmRequest; result: CustomerMergeResult }
 >();
 
+const demoWalletModeReceipts = new Map<
+  string,
+  { payload: WalletModeConfirmRequest; result: WalletModeChangeResult }
+>();
+
 function demoCustomerMergePreview(
   payload: CustomerMergePreviewRequest,
 ): CustomerMergePreview {
@@ -347,6 +478,7 @@ function demoCustomerMergePreview(
       visit_streak: 2,
       last_visit_business_date: "2026-08-23",
       staff_role: null,
+      birthday_set: true,
     },
     canonical: {
       user_id: payload.canonical_user_id,
@@ -358,6 +490,7 @@ function demoCustomerMergePreview(
       visit_streak: 5,
       last_visit_business_date: "2026-08-24",
       staff_role: null,
+      birthday_set: true,
     },
     preview_hash: "d".repeat(64),
     points_to_transfer: 70,
@@ -367,7 +500,10 @@ function demoCustomerMergePreview(
     rewards_to_move: 2,
     sessions_to_revoke: 1,
     cards_to_revoke: 1,
+    feedback_to_move: 1,
     source_staff_rebound: false,
+    birthday_conflict: true,
+    birthday_resolution_required: true,
   };
 }
 
@@ -459,6 +595,90 @@ export const demoApi = {
     await wait();
     return list(venues.map((venue) => ({ ...venue })));
   },
+  async getMyWallets(): Promise<CustomerWalletSummary> {
+    await wait();
+    return {
+      ...customerWallets,
+      entries: customerWallets.entries.map((entry) => ({
+        ...entry,
+        venue: entry.venue ? { ...entry.venue } : null,
+      })),
+    };
+  },
+  async getMyBirthday(): Promise<CustomerBirthday> {
+    await wait();
+    return {
+      ...customerBirthday,
+      birthday: customerBirthday.birthday
+        ? { ...customerBirthday.birthday }
+        : null,
+      offer: customerBirthday.offer
+        ? {
+            ...customerBirthday.offer,
+            eligible_venues: customerBirthday.offer.eligible_venues.map(
+              (venue) => ({ ...venue }),
+            ),
+          }
+        : null,
+    };
+  },
+  async setMyBirthday(birthday: BirthdayValue): Promise<CustomerBirthday> {
+    await wait();
+    if (customerBirthday.locked)
+      throw new ApiError("Дата рождения уже зафиксирована", {
+        status: 409,
+        code: "birthday_locked",
+      });
+    const maxDay = new Date(Date.UTC(2024, birthday.month, 0)).getUTCDate();
+    if (
+      birthday.month < 1 ||
+      birthday.month > 12 ||
+      birthday.day < 1 ||
+      birthday.day > maxDay
+    )
+      throw new ApiError("Проверьте день и месяц рождения", {
+        status: 422,
+        code: "invalid_birthday",
+      });
+    customerBirthday = {
+      birthday: { ...birthday },
+      locked: true,
+      offer: {
+        enabled: adminLoyaltyV2.birthday.enabled,
+        discount_percent: adminLoyaltyV2.birthday.discount_percent,
+        window_days: adminLoyaltyV2.birthday.window_days,
+        eligible_venues: venues
+          .filter(
+            (venue) =>
+              adminLoyaltyV2.birthday.eligible_venue_ids.length === 0 ||
+              adminLoyaltyV2.birthday.eligible_venue_ids.includes(venue.id),
+          )
+          .map((venue) => ({
+            id: venue.id,
+            name: venue.name,
+            available: true,
+          })),
+        stackable: adminLoyaltyV2.birthday.stackable,
+      },
+    };
+    adminUsers = adminUsers.map((user) =>
+      user.id === "user-demo"
+        ? { ...user, birthday: { ...birthday }, birthday_locked: true }
+        : user,
+    );
+    return {
+      ...customerBirthday,
+      birthday: { ...birthday },
+      offer: customerBirthday.offer
+        ? {
+            ...customerBirthday.offer,
+            eligible_venues: customerBirthday.offer.eligible_venues.map(
+              (venue) => ({ ...venue }),
+            ),
+          }
+        : null,
+    };
+  },
   async getCard() {
     await wait();
     return { ...card };
@@ -483,21 +703,8 @@ export const demoApi = {
     await wait();
     return {
       contacts: {
-        coffee_shop_name: "Тёплое зерно",
-        description: "Небольшая кофейня по соседству",
-        support_contact: "@coffee_support",
-        privacy_policy:
-          "Мы используем Telegram ID только для работы карты лояльности и не передаём данные третьим лицам.",
-        locations: [
-          {
-            id: "location-1",
-            name: "Тёплое зерно",
-            address: "Москва, Кофейный переулок, 8",
-            hours: "Ежедневно 08:00–22:00",
-            phone: "+7 000 000-00-00",
-            map_url: "https://example.com/map",
-          },
-        ],
+        ...contacts,
+        locations: contacts.locations.map((location) => ({ ...location })),
       },
       staff: [
         {
@@ -509,6 +716,13 @@ export const demoApi = {
         },
       ],
       promotions: promotions.filter((item) => item.status === "published"),
+    };
+  },
+  async getContacts(): Promise<ContactsData> {
+    await wait();
+    return {
+      ...contacts,
+      locations: contacts.locations.map((location) => ({ ...location })),
     };
   },
   async submitFeedback(payload: unknown) {
@@ -553,6 +767,11 @@ export const demoApi = {
   ): Promise<PhoneCustomer> {
     void idempotencyKey;
     await wait();
+    if (!venues.some((venue) => venue.id === payload.venue_id))
+      throw new ApiError("Заведение физической точки недоступно", {
+        status: 422,
+        code: "venue_unavailable",
+      });
     const userId = `user-phone-${Date.now()}`;
     const displayName = payload.display_name?.trim() || "Гость";
     const shortCode = "PHONE123";
@@ -638,6 +857,7 @@ export const demoApi = {
     user_id: string;
     purchase_amount_minor: number;
     stamps_to_add: number;
+    location_id: string;
   }): Promise<PurchasePreview> {
     const accrual = await this.previewAccrual(payload);
     if (!Number.isInteger(payload.stamps_to_add) || payload.stamps_to_add < 0)
@@ -660,6 +880,7 @@ export const demoApi = {
         : 0);
     return {
       ...accrual,
+      location_id: payload.location_id,
       balance_after: accrual.balance_after + rewardBonusPoints,
       stamps_to_add: payload.stamps_to_add,
       stamps_before: card.stamps,
@@ -677,6 +898,7 @@ export const demoApi = {
     user_id: string;
     purchase_amount_minor: number;
     stamps_to_add: number;
+    location_id: string;
   }): Promise<OperationResult> {
     const preview = await this.previewPurchase(payload);
     if (!preview.requires_approval) {
@@ -719,6 +941,7 @@ export const demoApi = {
     user_id: string;
     purchase_amount_minor: number;
     requested_points: number;
+    location_id: string;
   }): Promise<RedemptionPreview> {
     await wait();
     const maximum = Math.min(
@@ -742,12 +965,14 @@ export const demoApi = {
       maximum_points_for_purchase: maximum,
       balance_before: card.balance_points,
       balance_after: card.balance_points - payload.requested_points,
+      location_id: payload.location_id,
     };
   },
   async confirmRedemption(payload: {
     user_id: string;
     purchase_amount_minor: number;
     requested_points: number;
+    location_id: string;
   }): Promise<OperationResult> {
     const preview = await this.previewRedemption(payload);
     card = {
@@ -948,6 +1173,50 @@ export const demoApi = {
       });
     return { ...user };
   },
+  async changeAdminCustomerBirthday(
+    userId: string,
+    payload: { birthday: BirthdayValue; reason: string },
+  ): Promise<AdminCustomerBirthday> {
+    await wait();
+    if (!adminUsers.some((candidate) => candidate.id === userId))
+      throw new ApiError("Клиент не найден", {
+        status: 404,
+        code: "user_not_found",
+      });
+    if (payload.reason.trim().length < 3)
+      throw new ApiError("Укажите причину изменения", {
+        status: 422,
+        code: "invalid_reason",
+      });
+    const maxDay = new Date(
+      Date.UTC(2024, payload.birthday.month, 0),
+    ).getUTCDate();
+    if (
+      payload.birthday.month < 1 ||
+      payload.birthday.month > 12 ||
+      payload.birthday.day < 1 ||
+      payload.birthday.day > maxDay
+    )
+      throw new ApiError("Проверьте день и месяц рождения", {
+        status: 422,
+        code: "invalid_birthday",
+      });
+    adminUsers = adminUsers.map((candidate) =>
+      candidate.id === userId
+        ? {
+            ...candidate,
+            birthday: { ...payload.birthday },
+            birthday_locked: true,
+          }
+        : candidate,
+    );
+    return {
+      user_id: userId,
+      birthday: { ...payload.birthday },
+      locked: true,
+      updated_at: now(),
+    };
+  },
   async previewCustomerMerge(
     payload: CustomerMergePreviewRequest,
   ): Promise<CustomerMergePreview> {
@@ -970,7 +1239,8 @@ export const demoApi = {
         existing.payload.source_user_id !== payload.source_user_id ||
         existing.payload.canonical_user_id !== payload.canonical_user_id ||
         existing.payload.preview_hash !== payload.preview_hash ||
-        existing.payload.reason !== payload.reason
+        existing.payload.reason !== payload.reason ||
+        existing.payload.birthday_resolution !== payload.birthday_resolution
       ) {
         throw new ApiError("Ключ подтверждения уже использован", {
           status: 409,
@@ -1003,6 +1273,8 @@ export const demoApi = {
       rewards_moved: preview.rewards_to_move,
       sessions_revoked: preview.sessions_to_revoke,
       cards_revoked: preview.cards_to_revoke,
+      feedback_moved: preview.feedback_to_move,
+      birthday_resolution: payload.birthday_resolution ?? null,
       source_staff_rebound: preview.source_staff_rebound,
       idempotent_replay: false,
     };
@@ -1198,6 +1470,161 @@ export const demoApi = {
     settings = { ...value };
     return { ...settings };
   },
+  async getAdminLoyaltyV2(): Promise<AdminLoyaltyV2Settings> {
+    await wait();
+    return {
+      ...adminLoyaltyV2,
+      venue_rates: adminLoyaltyV2.venue_rates.map((rate) => ({ ...rate })),
+      birthday: {
+        ...adminLoyaltyV2.birthday,
+        eligible_venue_ids: [...adminLoyaltyV2.birthday.eligible_venue_ids],
+      },
+    };
+  },
+  async saveAdminLoyaltyV2(
+    value: AdminLoyaltyV2Update,
+  ): Promise<AdminLoyaltyV2Settings> {
+    await wait();
+    adminLoyaltyV2 = {
+      wallet_mode: adminLoyaltyV2.wallet_mode,
+      ...value,
+      venue_rates: value.venue_rates.map((rate) => {
+        const current = adminLoyaltyV2.venue_rates.find(
+          (candidate) => candidate.venue_id === rate.venue_id,
+        );
+        return {
+          ...rate,
+          venue_name: current?.venue_name ?? "Заведение",
+          available: current?.available ?? false,
+        };
+      }),
+      birthday: {
+        ...value.birthday,
+        eligible_venue_ids: [...value.birthday.eligible_venue_ids],
+      },
+    };
+    customerWallets = {
+      ...customerWallets,
+      point_value_minor: value.point_value_minor,
+      max_redemption_percent: value.max_redemption_percent,
+    };
+    return {
+      ...adminLoyaltyV2,
+      venue_rates: adminLoyaltyV2.venue_rates.map((rate) => ({ ...rate })),
+      birthday: {
+        ...adminLoyaltyV2.birthday,
+        eligible_venue_ids: [...adminLoyaltyV2.birthday.eligible_venue_ids],
+      },
+    };
+  },
+  async previewWalletMode(
+    payload: WalletModePreviewRequest,
+  ): Promise<WalletModePreview> {
+    await wait();
+    const targetMode = payload.target_mode;
+    if (targetMode === adminLoyaltyV2.wallet_mode)
+      throw new ApiError("Этот режим уже включён", {
+        status: 409,
+        code: "wallet_mode_unchanged",
+      });
+    return {
+      current_mode: adminLoyaltyV2.wallet_mode,
+      target_mode: targetMode,
+      preview_hash: (targetMode === "shared"
+        ? "e"
+        : payload.fallback_venue_id
+          ? "a"
+          : "f"
+      ).repeat(64),
+      customers_affected: 3,
+      wallets_affected: customerWallets.entries.length,
+      total_balance_points: customerWallets.total_balance_points,
+      transfer_operations: customerWallets.entries.length,
+      fallback_required: targetMode === "separate",
+      fallback_venue_id: payload.fallback_venue_id ?? null,
+      unresolved_points: targetMode === "separate" ? 15 : 0,
+      eligible_fallback_venues:
+        targetMode === "separate"
+          ? venues.map((venue) => ({
+              id: venue.id,
+              name: venue.name,
+              available: true,
+            }))
+          : [],
+      warnings: [
+        "Балансы будут перенесены неизменяемыми transfer-операциями.",
+        "Суммарный баланс клиентов не изменится.",
+      ],
+    };
+  },
+  async confirmWalletMode(
+    payload: WalletModeConfirmRequest,
+    idempotencyKey: string,
+  ): Promise<WalletModeChangeResult> {
+    await wait();
+    const receipt = demoWalletModeReceipts.get(idempotencyKey);
+    if (receipt) {
+      if (JSON.stringify(receipt.payload) !== JSON.stringify(payload))
+        throw new ApiError("Ключ идемпотентности уже использован", {
+          status: 409,
+          code: "idempotency_key_reused",
+        });
+      return { ...receipt.result, idempotent_replay: true };
+    }
+    if (payload.target_mode === "separate" && !payload.fallback_venue_id)
+      throw new ApiError("Выберите активное заведение", {
+        status: 422,
+        code: "fallback_venue_required",
+      });
+    const expectedHash = (
+      payload.target_mode === "shared"
+        ? "e"
+        : payload.fallback_venue_id
+          ? "a"
+          : "f"
+    ).repeat(64);
+    if (payload.preview_hash !== expectedHash)
+      throw new ApiError("Предпросмотр устарел", {
+        status: 409,
+        code: "wallet_mode_preview_stale",
+      });
+    adminLoyaltyV2 = {
+      ...adminLoyaltyV2,
+      wallet_mode: payload.target_mode,
+    };
+    customerWallets = {
+      ...customerWallets,
+      mode: payload.target_mode,
+      entries:
+        payload.target_mode === "shared"
+          ? [
+              {
+                id: "wallet-shared",
+                venue: null,
+                balance_points: customerWallets.total_balance_points,
+                expiring_points: 60,
+                expires_at: "2027-02-01T00:00:00Z",
+              },
+            ]
+          : separateWalletEntries.map((entry) => ({
+              ...entry,
+              venue: entry.venue ? { ...entry.venue } : null,
+            })),
+    };
+    const result: WalletModeChangeResult = {
+      wallet_mode: payload.target_mode,
+      wallets_created: customerWallets.entries.length,
+      transfer_operations: customerWallets.entries.length,
+      total_balance_points: customerWallets.total_balance_points,
+      completed_at: now(),
+      idempotent_replay: false,
+    };
+    demoWalletModeReceipts.set(idempotencyKey, {
+      payload: { ...payload },
+      result,
+    });
+    return { ...result };
+  },
   async getAdminMenu(includeArchived = false) {
     await wait();
     return {
@@ -1348,6 +1775,7 @@ export const demoApi = {
     user_id: string;
     delta_points: number;
     reason: string;
+    venue_id: string | null;
   }): Promise<OperationResult> {
     await wait();
     if (!payload.reason.trim())

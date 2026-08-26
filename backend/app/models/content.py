@@ -24,7 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.types import enum_type
-from app.models.enums import PromotionStatus
+from app.models.enums import PromotionStatus, RoundingMode
 
 
 class Venue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -36,7 +36,13 @@ class Venue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """
 
     __tablename__ = "venues"
-    __table_args__ = (Index("ix_venues_public_sort", "is_active", "archived_at", "sort_order"),)
+    __table_args__ = (
+        CheckConstraint(
+            "loyalty_accrual_basis_points BETWEEN 0 AND 10000",
+            name="valid_loyalty_accrual_basis_points",
+        ),
+        Index("ix_venues_public_sort", "is_active", "archived_at", "sort_order"),
+    )
 
     slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -53,6 +59,18 @@ class Venue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    loyalty_points_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    loyalty_accrual_basis_points: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1_000, server_default="1000"
+    )
+    loyalty_rounding_mode: Mapped[RoundingMode] = mapped_column(
+        enum_type(RoundingMode, name="venue_loyalty_rounding_mode", length=16),
+        nullable=False,
+        default=RoundingMode.FLOOR,
+        server_default=RoundingMode.FLOOR.value,
+    )
 
 
 class Location(UUIDPrimaryKeyMixin, TimestampMixin, Base):

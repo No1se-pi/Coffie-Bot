@@ -16,12 +16,24 @@ from app.models.loyalty import (
     UserLoyaltyState,
     Visit,
 )
+from app.models.loyalty_v2 import (
+    AccountMergeLotRoute,
+    BirthdayPromotionVenue,
+    LoyaltyWallet,
+    PointAllocation,
+    PointLot,
+    PointLotRoute,
+    WalletModeSwitch,
+    WalletTransfer,
+)
 from app.models.media import MediaFile
 from app.models.staff import FeedbackItem, StaffTipProfile
 
 __all__ = [
+    "AccountMergeLotRoute",
     "AppSetting",
     "AuditEvent",
+    "BirthdayPromotionVenue",
     "Broadcast",
     "BroadcastDelivery",
     "CustomerIdentity",
@@ -30,10 +42,14 @@ __all__ = [
     "Location",
     "LoyaltyOperation",
     "LoyaltySettings",
+    "LoyaltyWallet",
     "MediaFile",
     "MenuCategory",
     "MenuItem",
     "NotificationOutbox",
+    "PointAllocation",
+    "PointLot",
+    "PointLotRoute",
     "PointTransaction",
     "Promotion",
     "Reward",
@@ -49,4 +65,6 @@ __all__ = [
     "UserLoyaltyState",
     "Venue",
     "Visit",
+    "WalletModeSwitch",
+    "WalletTransfer",
 ]

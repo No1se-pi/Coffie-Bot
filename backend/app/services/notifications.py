@@ -204,6 +204,15 @@ def render_notification(
     elif event_type in {"points.redeemed", "loyalty.points_redeemed"}:
         amount = abs(_integer(payload.get("points", payload.get("points_delta"))))
         text = f"Списано баллов: {amount}." if amount else "Баллы списаны."
+    elif event_type == "points.expiring":
+        amount = _integer(payload.get("points"))
+        expires_at = _short_text(payload.get("expires_at"))
+        text = f"Скоро сгорят баллы: {amount}." if amount else "Скоро сгорят баллы."
+        if expires_at:
+            text += f" Срок действия: {expires_at}."
+    elif event_type == "points.expired":
+        amount = _integer(payload.get("points"))
+        text = f"Сгорело баллов: {amount}." if amount else "Срок действия баллов истёк."
     elif event_type in {"reward.issued", "loyalty.reward_created"}:
         name = _short_text(payload.get("name"))
         text = f"Вам доступна награда: {name}." if name else "Вам доступна новая награда."

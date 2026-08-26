@@ -12,6 +12,7 @@ from app.models.audit import AuditEvent
 from app.models.cards import UserCard
 from app.models.delivery import NotificationOutbox
 from app.models.loyalty import LoyaltyOperation, PointTransaction, UserLoyaltyState
+from app.models.loyalty_v2 import LoyaltyWallet, PointLot
 from app.repositories.identity import IdentityRepository
 from app.security.sessions import issue_session_token
 
@@ -58,12 +59,16 @@ def test_first_registration_stages_complete_aggregate_in_one_batch() -> None:
         PointTransaction,
         AuditEvent,
         NotificationOutbox,
+        LoyaltyWallet,
+        PointLot,
     }
 
     state = next(item for item in session.added if isinstance(item, UserLoyaltyState))
     card = next(item for item in session.added if isinstance(item, UserCard))
     operation = next(item for item in session.added if isinstance(item, LoyaltyOperation))
     transaction = next(item for item in session.added if isinstance(item, PointTransaction))
+    wallet = next(item for item in session.added if isinstance(item, LoyaltyWallet))
+    lot = next(item for item in session.added if isinstance(item, PointLot))
     audit = next(item for item in session.added if isinstance(item, AuditEvent))
     notification = next(item for item in session.added if isinstance(item, NotificationOutbox))
 
@@ -74,6 +79,12 @@ def test_first_registration_stages_complete_aggregate_in_one_batch() -> None:
     assert operation.balance_before == 0
     assert operation.balance_after == 25
     assert transaction.operation_id == operation.id
+    assert wallet.user_id == user_id
+    assert wallet.venue_id is None
+    assert wallet.balance_points == 25
+    assert lot.wallet_id == wallet.id
+    assert lot.source_operation_id == operation.id
+    assert lot.remaining_points == 25
     assert audit.event_type == "user.registered"
     assert audit.event_metadata == {"welcome_bonus_points": 25}
     assert notification.event_type == "user.registered"

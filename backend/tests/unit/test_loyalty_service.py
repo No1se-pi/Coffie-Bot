@@ -394,7 +394,9 @@ async def test_menu_item_purchase_deducts_points_and_issues_opaque_qr_idempotent
     assert first.reward_id == replay.reward_id
     assert replay.idempotent_replay is True
     assert first.qr_payload.startswith("coffee-reward:v1:")
-    assert str(context.user.telegram_id) not in first.qr_payload
+    opaque_token = first.qr_payload.removeprefix("coffee-reward:v1:")
+    assert len(opaque_token) >= 40
+    assert opaque_token != str(context.user.telegram_id)
     assert len(repository.point_transactions) == 1
 
 

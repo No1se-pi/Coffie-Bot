@@ -203,12 +203,14 @@
     "categories": [
       {
         "slug": "coffee",
+        "venue_slug": "coffee-point",
         "name": "Кофе",
         "sort_order": 10,
         "is_active": true
       },
       {
         "slug": "desserts",
+        "venue_slug": "coffee-point",
         "name": "Десерты",
         "sort_order": 20,
         "is_active": true
@@ -245,18 +247,93 @@
         "sort_order": 10,
         "is_active": true
       }
+    ],
+    "modifier_groups": [
+      {
+        "slug": "milk",
+        "venue_slug": "coffee-point",
+        "name": "Молоко",
+        "description": "Выберите один вариант молока.",
+        "min_selections": 1,
+        "max_selections": 1,
+        "required": true,
+        "sort_order": 10,
+        "applicable_item_slugs": ["cappuccino"],
+        "options": [
+          {"slug": "regular", "name": "Обычное", "price_delta_minor": 0, "sort_order": 10},
+          {"slug": "coconut", "name": "Кокосовое", "price_delta_minor": 6000, "sort_order": 20},
+          {"slug": "almond", "name": "Миндальное", "price_delta_minor": 6000, "sort_order": 30}
+        ]
+      },
+      {
+        "slug": "syrup",
+        "venue_slug": "coffee-point",
+        "name": "Сироп",
+        "min_selections": 0,
+        "max_selections": 2,
+        "sort_order": 20,
+        "applicable_item_slugs": ["cappuccino"],
+        "options": [
+          {"slug": "caramel", "name": "Карамель", "price_delta_minor": 3000, "sort_order": 10},
+          {"slug": "vanilla", "name": "Ваниль", "price_delta_minor": 3000, "sort_order": 20}
+        ]
+      },
+      {
+        "slug": "sugar",
+        "venue_slug": "coffee-point",
+        "name": "Сахар",
+        "min_selections": 0,
+        "max_selections": 5,
+        "sort_order": 30,
+        "applicable_item_slugs": ["filter-coffee", "cappuccino"],
+        "options": [
+          {"slug": "portion", "name": "Порция", "price_delta_minor": 0, "allows_quantity": true, "max_quantity": 5}
+        ]
+      },
+      {
+        "slug": "cinnamon",
+        "venue_slug": "coffee-point",
+        "name": "Корица",
+        "min_selections": 0,
+        "max_selections": 1,
+        "sort_order": 40,
+        "applicable_item_slugs": ["cappuccino"],
+        "options": [
+          {"slug": "add", "name": "Добавить корицу", "price_delta_minor": 0}
+        ]
+      }
     ]
   },
   "promotions": [
     {
       "slug": "demo-welcome",
+      "venue_slug": "coffee-point",
       "title": "Добро пожаловать",
       "summary": "Покажите эту демонстрационную акцию сотруднику.",
       "body": "Условия и сроки акции задаются владельцем кофейни перед публикацией.",
       "image_media_key": null,
       "starts_at": null,
       "ends_at": null,
-      "status": "published"
+      "status": "published",
+      "pricing_enabled": false
+    },
+    {
+      "slug": "desserts-after-19",
+      "venue_slug": "coffee-point",
+      "title": "Десерты −15% после 19:00",
+      "summary": "Вечерняя демонстрационная акция.",
+      "body": "Скидка рассчитывается сервером для десертов после 19:00.",
+      "image_media_key": null,
+      "starts_at": null,
+      "ends_at": null,
+      "status": "published",
+      "pricing_enabled": true,
+      "action_type": "percent_discount",
+      "discount_value": 1500,
+      "priority": 10,
+      "stackable": false,
+      "active_time_from": "19:00:00",
+      "category_slugs": ["desserts"]
     }
   ],
   "development_only": {

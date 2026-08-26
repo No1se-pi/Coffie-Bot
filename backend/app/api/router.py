@@ -16,6 +16,8 @@ from app.api.routes.loyalty_v2 import admin_router as loyalty_v2_admin_router
 from app.api.routes.loyalty_v2 import me_router as loyalty_v2_me_router
 from app.api.routes.me import router as me_router
 from app.api.routes.media import router as media_router
+from app.api.routes.menu_pricing_admin import router as menu_pricing_admin_router
+from app.api.routes.pricing import router as pricing_router
 from app.api.routes.public import router as public_router
 from app.api.routes.staff import router as staff_router
 from app.api.routes.staff_profile import router as staff_profile_router
@@ -28,6 +30,7 @@ api_v1_router.include_router(customers_router)
 api_v1_router.include_router(me_router)
 api_v1_router.include_router(loyalty_v2_me_router)
 api_v1_router.include_router(public_router)
+api_v1_router.include_router(pricing_router)
 api_v1_router.include_router(venues_router)
 api_v1_router.include_router(staff_router)
 api_v1_router.include_router(staff_profile_router)
@@ -37,6 +40,7 @@ api_v1_router.include_router(admin_broadcasts_router)
 api_v1_router.include_router(admin_content_router)
 api_v1_router.include_router(admin_staff_router)
 api_v1_router.include_router(admin_venues_router)
+api_v1_router.include_router(menu_pricing_admin_router)
 api_v1_router.include_router(loyalty_v2_admin_router)
 api_v1_router.include_router(customer_merges_router)
 api_v1_router.include_router(media_router)

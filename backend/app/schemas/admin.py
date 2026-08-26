@@ -145,6 +145,7 @@ class LoyaltySettingsUpdate(LoyaltySettingsResponse):
 
 class MenuCategoryResponse(ApiSchema):
     id: UUID
+    venue_id: UUID
     name: str
     description: str | None
     icon_media_id: UUID | None
@@ -162,6 +163,9 @@ class MenuCategoryListResponse(ApiSchema):
 
 
 class MenuCategoryCreate(ApiSchema):
+    # Kept optional for clients created before venues became explicit.
+    # The service resolves the installation's default active venue.
+    venue_id: UUID | None = None
     name: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4_000)
     icon_media_id: UUID | None = None
@@ -179,6 +183,7 @@ class MenuCategoryUpdate(ApiSchema):
 
 class MenuItemResponse(ApiSchema):
     id: UUID
+    venue_id: UUID
     category_id: UUID
     name: str
     description: str | None
@@ -256,6 +261,7 @@ class MenuItemUpdate(ApiSchema):
 
 class PromotionResponse(ApiSchema):
     id: UUID
+    venue_id: UUID
     title: str
     text: str
     image_media_id: UUID | None
@@ -278,6 +284,7 @@ class PromotionListResponse(ApiSchema):
 
 
 class PromotionCreate(ApiSchema):
+    venue_id: UUID | None = None
     title: str = Field(min_length=1, max_length=200)
     text: str = Field(min_length=1, max_length=20_000)
     image_media_id: UUID | None = None
@@ -547,6 +554,7 @@ def _loyalty_reward_config(template: RewardTemplate | None) -> LoyaltyRewardConf
 def menu_category_response(item: MenuCategory) -> MenuCategoryResponse:
     return MenuCategoryResponse(
         id=item.id,
+        venue_id=item.venue_id,
         name=item.name,
         description=item.description,
         icon_media_id=item.icon_media_id,
@@ -571,6 +579,7 @@ def menu_category_list_response(
 def menu_item_response(item: MenuItem) -> MenuItemResponse:
     return MenuItemResponse(
         id=item.id,
+        venue_id=item.venue_id,
         category_id=item.category_id,
         name=item.name,
         description=item.description,
@@ -603,6 +612,7 @@ def menu_item_list_response(
 def promotion_response(item: Promotion) -> PromotionResponse:
     return PromotionResponse(
         id=item.id,
+        venue_id=item.venue_id,
         title=item.title,
         text=item.body,
         image_media_id=item.image_media_id,

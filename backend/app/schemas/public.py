@@ -9,7 +9,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.content import Location, MenuCategory, MenuItem, Promotion
+from app.models.content import (
+    Location,
+    MenuCategory,
+    MenuItem,
+    ModifierGroup,
+    ModifierOption,
+    Promotion,
+)
 from app.models.enums import FeedbackCategory, FeedbackStatus, PromotionStatus
 from app.models.staff import FeedbackItem
 from app.repositories.public import PublicStaffProfileRecord
@@ -21,6 +28,7 @@ class ApiSchema(BaseModel):
 
 class MenuCategoryResponse(ApiSchema):
     id: UUID
+    venue_id: UUID
     name: str
     description: str | None
     icon_url: str | None = None
@@ -37,6 +45,7 @@ class MenuCategoryListResponse(ApiSchema):
 
 class MenuItemResponse(ApiSchema):
     id: UUID
+    venue_id: UUID
     category_id: UUID
     name: str
     description: str | None
@@ -49,6 +58,25 @@ class MenuItemResponse(ApiSchema):
     labels: list[str]
     available: bool
     visible: bool
+    modifier_groups: list[MenuModifierGroupResponse] = Field(default_factory=list)
+
+
+class MenuModifierOptionResponse(ApiSchema):
+    id: UUID
+    name: str
+    price_delta_minor: int
+    allows_quantity: bool
+    max_quantity: int
+
+
+class MenuModifierGroupResponse(ApiSchema):
+    id: UUID
+    name: str
+    description: str | None
+    min_selections: int
+    max_selections: int
+    required: bool
+    options: list[MenuModifierOptionResponse]
 
 
 class MenuItemListResponse(ApiSchema):
@@ -60,6 +88,7 @@ class MenuItemListResponse(ApiSchema):
 
 class PromotionResponse(ApiSchema):
     id: UUID
+    venue_id: UUID
     title: str
     text: str
     image_url: str | None = None
@@ -147,6 +176,7 @@ def menu_categories_response(
     payload = [
         MenuCategoryResponse(
             id=item.id,
+            venue_id=item.venue_id,
             name=item.name,
             description=item.description,
             icon_url=_media_url(item.icon_media_id),
@@ -162,10 +192,20 @@ def menu_categories_response(
     )
 
 
-def menu_items_response(items: list[MenuItem]) -> MenuItemListResponse:
+def menu_items_response(
+    items: list[MenuItem],
+    modifier_rows: list[tuple[UUID, ModifierGroup, ModifierOption]] | None = None,
+) -> MenuItemListResponse:
+    groups_by_item: dict[UUID, dict[UUID, tuple[ModifierGroup, list[ModifierOption]]]] = {}
+    for item_id, group, option in modifier_rows or []:
+        groups = groups_by_item.setdefault(item_id, {})
+        stored_group, options = groups.setdefault(group.id, (group, []))
+        options.append(option)
+        groups[group.id] = (stored_group, options)
     payload = [
         MenuItemResponse(
             id=item.id,
+            venue_id=item.venue_id,
             category_id=item.category_id,
             name=item.name,
             description=item.description,
@@ -178,6 +218,27 @@ def menu_items_response(items: list[MenuItem]) -> MenuItemListResponse:
             labels=item.labels,
             available=item.is_available,
             visible=item.is_visible,
+            modifier_groups=[
+                MenuModifierGroupResponse(
+                    id=group.id,
+                    name=group.name,
+                    description=group.description,
+                    min_selections=group.min_selections,
+                    max_selections=group.max_selections,
+                    required=group.is_required,
+                    options=[
+                        MenuModifierOptionResponse(
+                            id=option.id,
+                            name=option.name,
+                            price_delta_minor=option.price_delta_minor,
+                            allows_quantity=option.allows_quantity,
+                            max_quantity=option.max_quantity,
+                        )
+                        for option in options
+                    ],
+                )
+                for group, options in groups_by_item.get(item.id, {}).values()
+            ],
         )
         for item in items
     ]
@@ -192,6 +253,7 @@ def promotions_response(items: list[Promotion]) -> PromotionListResponse:
     payload = [
         PromotionResponse(
             id=item.id,
+            venue_id=item.venue_id,
             title=item.title,
             text=item.body,
             image_url=_media_url(item.image_media_id),

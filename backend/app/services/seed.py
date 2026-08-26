@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
@@ -15,6 +15,7 @@ from app.core.config import AppEnvironment
 from app.models.enums import (
     LoyaltyProgram,
     PermissionCode,
+    PromotionActionType,
     PromotionStatus,
     RewardType,
     Role,
@@ -182,6 +183,7 @@ class RewardTemplateSeed(SeedModel):
 
 class MenuCategorySeed(SeedModel):
     slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    venue_slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
     name: str = Field(min_length=1, max_length=160)
     description: str | None = None
     sort_order: int = 0
@@ -203,13 +205,47 @@ class MenuItemSeed(SeedModel):
     is_active: bool = True
 
 
+class ModifierOptionSeed(SeedModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    name: str = Field(min_length=1, max_length=160)
+    price_delta_minor: int = Field(default=0, ge=0)
+    allows_quantity: bool = False
+    max_quantity: int = Field(default=1, ge=1, le=100)
+    is_enabled: bool = True
+    sort_order: int = 0
+
+
+class ModifierGroupSeed(SeedModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    venue_slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    name: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4_000)
+    min_selections: int = Field(default=0, ge=0, le=100)
+    max_selections: int = Field(default=1, ge=0, le=100)
+    required: bool = False
+    sort_order: int = 0
+    is_enabled: bool = True
+    applicable_item_slugs: list[str] = Field(default_factory=list)
+    options: list[ModifierOptionSeed] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> ModifierGroupSeed:
+        if self.max_selections < self.min_selections:
+            raise ValueError("modifier max selections must not be below minimum")
+        if self.required and self.min_selections == 0:
+            raise ValueError("required modifier group must select at least one option")
+        return self
+
+
 class MenuSeed(SeedModel):
     categories: list[MenuCategorySeed] = Field(default_factory=list)
     items: list[MenuItemSeed] = Field(default_factory=list)
+    modifier_groups: list[ModifierGroupSeed] = Field(default_factory=list)
 
 
 class PromotionSeed(SeedModel):
     slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    venue_slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
     title: str = Field(min_length=1, max_length=200)
     summary: str | None = None
     body: str = Field(min_length=1)
@@ -219,12 +255,43 @@ class PromotionSeed(SeedModel):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     status: PromotionStatus = PromotionStatus.DRAFT
+    pricing_enabled: bool = False
+    action_type: PromotionActionType | None = None
+    discount_value: int | None = Field(default=None, gt=0)
+    priority: int = Field(default=0, ge=-100_000, le=100_000)
+    stackable: bool = False
+    active_from_date: date | None = None
+    active_to_date: date | None = None
+    active_weekdays: list[int] = Field(default_factory=list)
+    active_time_from: time | None = None
+    active_time_to: time | None = None
+    fulfillment_modes: list[Literal["pickup", "delivery"]] = Field(default_factory=list)
+    customer_birthday_only: bool = False
+    minimum_order_minor: int = Field(default=0, ge=0)
+    category_slugs: list[str] = Field(default_factory=list)
+    menu_item_slugs: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_window(self) -> PromotionSeed:
         if self.starts_at is not None and self.ends_at is not None:
             if self.ends_at <= self.starts_at:
                 raise ValueError("promotion ends_at must be after starts_at")
+        if self.pricing_enabled and (self.action_type is None or self.discount_value is None):
+            raise ValueError("pricing promotion requires action_type and discount_value")
+        if (
+            self.action_type == PromotionActionType.PERCENT_DISCOUNT
+            and self.discount_value is not None
+            and self.discount_value > 10_000
+        ):
+            raise ValueError("percent discount basis points must not exceed 10000")
+        if any(day < 0 or day > 6 for day in self.active_weekdays):
+            raise ValueError("active weekdays must use 0..6")
+        if (
+            self.active_from_date is not None
+            and self.active_to_date is not None
+            and self.active_to_date < self.active_from_date
+        ):
+            raise ValueError("pricing active_to_date must not precede active_from_date")
         return self
 
 
@@ -294,10 +361,39 @@ class SeedDocument(SeedModel):
         _unique(category_slugs, "menu category slug")
         category_set = set(category_slugs)
         _unique([item.slug for item in self.menu.items], "menu item slug")
+        category_venues = {item.slug: item.venue_slug for item in self.menu.categories}
+        for category in self.menu.categories:
+            if venue_set and category.venue_slug not in venue_set:
+                raise ValueError(f"unknown menu category venue slug: {category.venue_slug}")
         for item in self.menu.items:
             if item.category_slug not in category_set:
                 raise ValueError(f"unknown menu category slug: {item.category_slug}")
+        item_slugs = {item.slug for item in self.menu.items}
+        item_venues = {item.slug: category_venues[item.category_slug] for item in self.menu.items}
+        _unique([group.slug for group in self.menu.modifier_groups], "modifier group slug")
+        for group in self.menu.modifier_groups:
+            if venue_set and group.venue_slug not in venue_set:
+                raise ValueError(f"unknown modifier venue slug: {group.venue_slug}")
+            _unique([option.slug for option in group.options], "modifier option slug")
+            for item_slug in group.applicable_item_slugs:
+                if item_slug not in item_slugs:
+                    raise ValueError(f"unknown modifier menu item slug: {item_slug}")
+                if item_venues[item_slug] != group.venue_slug:
+                    raise ValueError("modifier item belongs to another venue")
         _unique([item.slug for item in self.promotions], "promotion slug")
+        for promotion in self.promotions:
+            if venue_set and promotion.venue_slug not in venue_set:
+                raise ValueError(f"unknown promotion venue slug: {promotion.venue_slug}")
+            for slug in promotion.category_slugs:
+                if slug not in category_set:
+                    raise ValueError(f"unknown promotion category slug: {slug}")
+                if category_venues[slug] != promotion.venue_slug:
+                    raise ValueError("promotion category belongs to another venue")
+            for slug in promotion.menu_item_slugs:
+                if slug not in item_slugs:
+                    raise ValueError(f"unknown promotion menu item slug: {slug}")
+                if item_venues[slug] != promotion.venue_slug:
+                    raise ValueError("promotion menu item belongs to another venue")
         if sum(location.is_default for location in self.locations) > 1:
             raise ValueError("only one location may be the default")
         return self
@@ -345,7 +441,29 @@ class SeedRepositoryPort(Protocol):
 
     async def upsert_menu_item(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
 
+    async def upsert_modifier_group(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
+
+    async def upsert_modifier_option(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
+
+    async def replace_modifier_group_items(
+        self,
+        group_id: UUID,
+        *,
+        venue_id: UUID,
+        item_ids: list[UUID],
+        sort_order: int,
+    ) -> None: ...
+
     async def upsert_promotion(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
+
+    async def replace_promotion_targets(
+        self,
+        promotion_id: UUID,
+        *,
+        venue_id: UUID,
+        category_ids: list[UUID],
+        menu_item_ids: list[UUID],
+    ) -> None: ...
 
     async def find_active_staff_id(self) -> UUID | None: ...
 
@@ -574,18 +692,24 @@ class SeedService:
                     entity_id,
                     {
                         "name": category.name,
+                        "venue_id": venue_ids[category.venue_slug],
                         "description": category.description,
                         "sort_order": category.sort_order,
                         "is_visible": category.is_active,
                         "archived_at": None if category.is_active else current_time,
                     },
                 )
+            item_ids: dict[str, UUID] = {}
             for item in document.menu.items:
                 entity_id = _stable_id(entity_ids, f"menu-item:{item.slug}")
-                await self._repository.upsert_menu_item(
+                category = next(
+                    value for value in document.menu.categories if value.slug == item.category_slug
+                )
+                item_ids[item.slug] = await self._repository.upsert_menu_item(
                     entity_id,
                     {
                         "category_id": category_ids[item.category_slug],
+                        "venue_id": venue_ids[category.venue_slug],
                         "name": item.name,
                         "description": item.description,
                         "image_media_id": await self._repository.find_media_id(
@@ -603,6 +727,44 @@ class SeedService:
                     },
                 )
 
+            for group in document.menu.modifier_groups:
+                group_id = await self._repository.upsert_modifier_group(
+                    _stable_id(entity_ids, f"modifier-group:{group.slug}"),
+                    {
+                        "venue_id": venue_ids[group.venue_slug],
+                        "name": group.name,
+                        "description": group.description,
+                        "min_selections": group.min_selections,
+                        "max_selections": group.max_selections,
+                        "is_required": group.required,
+                        "sort_order": group.sort_order,
+                        "is_enabled": group.is_enabled,
+                        "archived_at": None if group.is_enabled else current_time,
+                    },
+                )
+                for option in group.options:
+                    await self._repository.upsert_modifier_option(
+                        _stable_id(
+                            entity_ids,
+                            f"modifier-option:{group.slug}:{option.slug}",
+                        ),
+                        {
+                            "group_id": group_id,
+                            "name": option.name,
+                            "price_delta_minor": option.price_delta_minor,
+                            "allows_quantity": option.allows_quantity,
+                            "max_quantity": option.max_quantity,
+                            "is_enabled": option.is_enabled,
+                            "sort_order": option.sort_order,
+                        },
+                    )
+                await self._repository.replace_modifier_group_items(
+                    group_id,
+                    venue_id=venue_ids[group.venue_slug],
+                    item_ids=[item_ids[slug] for slug in group.applicable_item_slugs],
+                    sort_order=group.sort_order,
+                )
+
             if document.promotions and creator_id is None:
                 raise SeedConfigurationError(
                     "An active staff member is required before importing promotions; "
@@ -615,9 +777,10 @@ class SeedService:
                     if promotion.summary
                     else promotion.body
                 )
-                await self._repository.upsert_promotion(
+                promotion_id = await self._repository.upsert_promotion(
                     entity_id,
                     {
+                        "venue_id": venue_ids[promotion.venue_slug],
                         "title": promotion.title,
                         "body": body,
                         "image_media_id": await self._repository.find_media_id(
@@ -632,7 +795,26 @@ class SeedService:
                         if promotion.status == PromotionStatus.PUBLISHED
                         else None,
                         "created_by_staff_id": creator_id,
+                        "pricing_enabled": promotion.pricing_enabled,
+                        "action_type": promotion.action_type,
+                        "discount_value": promotion.discount_value,
+                        "priority": promotion.priority,
+                        "stackable": promotion.stackable,
+                        "active_from_date": promotion.active_from_date,
+                        "active_to_date": promotion.active_to_date,
+                        "active_weekdays": promotion.active_weekdays,
+                        "active_time_from": promotion.active_time_from,
+                        "active_time_to": promotion.active_time_to,
+                        "fulfillment_modes": promotion.fulfillment_modes,
+                        "customer_birthday_only": promotion.customer_birthday_only,
+                        "minimum_order_minor": promotion.minimum_order_minor,
                     },
+                )
+                await self._repository.replace_promotion_targets(
+                    promotion_id,
+                    venue_id=venue_ids[promotion.venue_slug],
+                    category_ids=[category_ids[slug] for slug in promotion.category_slugs],
+                    menu_item_ids=[item_ids[slug] for slug in promotion.menu_item_slugs],
                 )
 
             await self._repository.save_seed_entity_ids(entity_ids)

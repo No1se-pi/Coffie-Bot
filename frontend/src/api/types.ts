@@ -227,6 +227,7 @@ export interface Reward {
 
 export interface Promotion {
   id: string;
+  venue_id?: string;
   title: string;
   text: string;
   image_url?: string | null;
@@ -242,6 +243,7 @@ export interface Promotion {
 }
 
 export interface PromotionDraft {
+  venue_id?: string;
   title: string;
   text: string;
   image_media_id?: string | null;
@@ -251,6 +253,7 @@ export interface PromotionDraft {
 
 export interface MenuCategory {
   id: string;
+  venue_id?: string;
   name: string;
   description?: string | null;
   icon_media_id?: string | null;
@@ -261,6 +264,7 @@ export interface MenuCategory {
 }
 
 export interface MenuCategoryDraft {
+  venue_id?: string;
   name: string;
   description?: string | null;
   icon_media_id?: string | null;
@@ -270,6 +274,7 @@ export interface MenuCategoryDraft {
 
 export interface MenuItem {
   id: string;
+  venue_id?: string;
   category_id: string;
   name: string;
   description?: string | null;
@@ -285,6 +290,25 @@ export interface MenuItem {
   visible: boolean;
   sort_order?: number;
   archived_at?: string | null;
+  modifier_groups?: MenuModifierGroup[];
+}
+
+export interface MenuModifierOption {
+  id: string;
+  name: string;
+  price_delta_minor: number;
+  allows_quantity: boolean;
+  max_quantity: number;
+}
+
+export interface MenuModifierGroup {
+  id: string;
+  name: string;
+  description?: string | null;
+  min_selections: number;
+  max_selections: number;
+  required: boolean;
+  options: MenuModifierOption[];
 }
 
 export interface MenuItemDraft {
@@ -301,6 +325,109 @@ export interface MenuItemDraft {
   available: boolean;
   visible: boolean;
   sort_order: number;
+}
+
+export interface AdminModifierOption extends MenuModifierOption {
+  enabled: boolean;
+  sort_order: number;
+}
+
+export interface AdminModifierGroup {
+  id: string;
+  venue_id: string;
+  name: string;
+  description?: string | null;
+  min_selections: number;
+  max_selections: number;
+  required: boolean;
+  enabled: boolean;
+  sort_order: number;
+  archived_at?: string | null;
+  item_ids: string[];
+  options: AdminModifierOption[];
+}
+
+export interface AdminModifierGroupDraft {
+  venue_id: string;
+  name: string;
+  description?: string | null;
+  min_selections: number;
+  max_selections: number;
+  required: boolean;
+  enabled: boolean;
+  sort_order: number;
+  item_ids: string[];
+  options: Array<{
+    id?: string | null;
+    name: string;
+    price_delta_minor: number;
+    allows_quantity: boolean;
+    max_quantity: number;
+    enabled: boolean;
+    sort_order: number;
+  }>;
+}
+
+export interface PromotionPricingRules {
+  promotion_id: string;
+  venue_id: string;
+  pricing_enabled: boolean;
+  action_type: "percent_discount" | "fixed_discount" | null;
+  discount_value: number | null;
+  priority: number;
+  stackable: boolean;
+  active_from_date: string | null;
+  active_to_date: string | null;
+  active_weekdays: number[];
+  active_time_from: string | null;
+  active_time_to: string | null;
+  fulfillment_modes: string[];
+  customer_birthday_only: boolean;
+  minimum_order_minor: number;
+  category_ids: string[];
+  menu_item_ids: string[];
+}
+
+export type PromotionPricingRulesDraft = Omit<
+  PromotionPricingRules,
+  "promotion_id" | "venue_id"
+>;
+
+export interface CartPriceRequest {
+  fulfillment_mode: "pickup" | "delivery";
+  lines: Array<{
+    line_id?: string;
+    menu_item_id: string;
+    quantity: number;
+    modifiers: Array<{ option_id: string; quantity: number }>;
+  }>;
+}
+
+export interface CartPriceResponse {
+  subtotal_minor: number;
+  discount_minor: number;
+  total_minor: number;
+  venues: Array<{
+    venue_id: string;
+    subtotal_minor: number;
+    discount_minor: number;
+    total_minor: number;
+    lines: Array<{
+      line_id: string;
+      menu_item_id: string;
+      item_name: string;
+      quantity: number;
+      subtotal_minor: number;
+      discount_minor: number;
+      total_minor: number;
+    }>;
+    promotions: Array<{
+      promotion_id: string;
+      title: string;
+      priority: number;
+      discount_minor: number;
+    }>;
+  }>;
 }
 
 export interface ContactLocation {

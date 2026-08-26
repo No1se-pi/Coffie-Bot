@@ -2569,6 +2569,8 @@ function MenuCategoryEditor({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const venues = useResource(coffeeApi.getVenues);
+  const [venueId, setVenueId] = useState(category?.venue_id ?? "");
   const [name, setName] = useState(category?.name ?? "");
   const [description, setDescription] = useState(category?.description ?? "");
   const [sortOrder, setSortOrder] = useState(category?.sort_order ?? 0);
@@ -2580,16 +2582,26 @@ function MenuCategoryEditor({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!venueId && venues.data?.items[0]) {
+      setVenueId(venues.data.items[0].id);
+    }
+  }, [venueId, venues.data]);
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) {
       setError("Укажите название категории");
       return;
     }
+    if (!venueId && !category) {
+      setError("Выберите заведение");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await coffeeApi.saveMenuCategory(category, {
+        ...(venueId ? { venue_id: venueId } : {}),
         name: name.trim(),
         description: description.trim() || null,
         icon_media_id: iconMediaId,
@@ -2611,6 +2623,20 @@ function MenuCategoryEditor({
     <Panel>
       <form className="form" onSubmit={(event) => void save(event)}>
         <h2>{category ? "Редактировать категорию" : "Новая категория"}</h2>
+        <Field label="Заведение">
+          <select
+            value={venueId}
+            disabled={Boolean(category)}
+            onChange={(event) => setVenueId(event.target.value)}
+          >
+            <option value="">Выберите заведение</option>
+            {venues.data?.items.map((venue) => (
+              <option key={venue.id} value={venue.id}>
+                {venue.name}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Название категории">
           <input
             value={name}
@@ -3062,6 +3088,7 @@ export function AdminMenuPage() {
           Позиции
         </Link>
         <Link to="/admin/promotions">Акции</Link>
+        <Link to="/admin/pricing">Цены и добавки</Link>
       </div>
       <div className="chip-row" role="group" aria-label="Разделы позиций">
         <button
@@ -3269,6 +3296,8 @@ function PromotionEditor({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const venues = useResource(coffeeApi.getVenues);
+  const [venueId, setVenueId] = useState(promotion?.venue_id ?? "");
   const [title, setTitle] = useState(promotion?.title ?? "");
   const [text, setText] = useState(promotion?.text ?? "");
   const [imageMediaId, setImageMediaId] = useState<string | null>(
@@ -3282,10 +3311,19 @@ function PromotionEditor({
   const [endsAt, setEndsAt] = useState(promotion?.ends_at?.slice(0, 16) ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!venueId && venues.data?.items[0]) {
+      setVenueId(venues.data.items[0].id);
+    }
+  }, [venueId, venues.data]);
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim() || !text.trim()) {
       setError("Укажите заголовок и текст акции");
+      return;
+    }
+    if (!venueId && !promotion) {
+      setError("Выберите заведение");
       return;
     }
     const startIso = startsAt ? new Date(startsAt).toISOString() : null;
@@ -3298,6 +3336,7 @@ function PromotionEditor({
     setError(null);
     try {
       await coffeeApi.savePromotion(promotion, {
+        ...(venueId ? { venue_id: venueId } : {}),
         title: title.trim(),
         text: text.trim(),
         image_media_id: imageMediaId,
@@ -3317,6 +3356,20 @@ function PromotionEditor({
     <Panel>
       <form className="form" onSubmit={(event) => void save(event)}>
         <h2>{promotion ? "Редактировать акцию" : "Новая акция"}</h2>
+        <Field label="Заведение">
+          <select
+            value={venueId}
+            disabled={Boolean(promotion)}
+            onChange={(event) => setVenueId(event.target.value)}
+          >
+            <option value="">Выберите заведение</option>
+            {venues.data?.items.map((venue) => (
+              <option key={venue.id} value={venue.id}>
+                {venue.name}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Заголовок акции">
           <input
             value={title}
@@ -3496,6 +3549,7 @@ export function AdminPromotionsPage() {
         <Link className="is-active" to="/admin/promotions">
           Акции
         </Link>
+        <Link to="/admin/pricing">Цены и добавки</Link>
       </div>
       <Panel>
         <div className="chip-row">

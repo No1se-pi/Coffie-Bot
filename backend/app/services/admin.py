@@ -20,7 +20,7 @@ from fastapi import status
 from app.core.errors import AppError, ErrorCode
 from app.models.access import StaffInvite, StaffMember
 from app.models.audit import AuditEvent
-from app.models.content import MenuCategory, MenuItem, Promotion
+from app.models.content import MenuCategory, MenuItem, Promotion, Venue
 from app.models.enums import (
     AuditSeverity,
     FeedbackStatus,
@@ -424,6 +424,7 @@ class AdminService:
         self,
         *,
         actor: Actor,
+        venue_id: UUID | None,
         name: str,
         description: str | None,
         icon_media_id: UUID | None,
@@ -431,15 +432,17 @@ class AdminService:
         visible: bool,
         metadata: RequestMetadata = EMPTY_METADATA,
     ) -> MenuCategory:
-        category = MenuCategory(
-            id=uuid4(),
-            name=name,
-            description=description,
-            icon_media_id=icon_media_id,
-            sort_order=sort_order,
-            is_visible=visible,
-        )
         async with self._repository.transaction():
+            venue = await self._resolve_venue(venue_id)
+            category = MenuCategory(
+                id=uuid4(),
+                venue_id=venue.id,
+                name=name,
+                description=description,
+                icon_media_id=icon_media_id,
+                sort_order=sort_order,
+                is_visible=visible,
+            )
             await self._require_media(icon_media_id)
             self._repository.add(category)
             self._audit(
@@ -447,7 +450,7 @@ class AdminService:
                 event_type="menu.category_created",
                 object_type="menu_category",
                 object_id=category.id,
-                event_metadata={"name": name, "visible": visible},
+                event_metadata={"name": name, "venue_id": str(venue.id), "visible": visible},
                 metadata=metadata,
             )
             await self._repository.flush()
@@ -561,7 +564,8 @@ class AdminService:
             sort_order=sort_order,
         )
         async with self._repository.transaction():
-            await self._require_category(category_id)
+            category = await self._require_category(category_id)
+            item.venue_id = category.venue_id
             await self._require_media(image_media_id)
             if points_price is not None:
                 template = self._points_menu_template(item=item, actor=actor)
@@ -614,7 +618,12 @@ class AdminService:
             if item.archived_at is not None:
                 _conflict("archived_content", "Archived menu item cannot be changed")
             if "category_id" in updates:
-                await self._require_category(updates["category_id"])
+                category = await self._require_category(updates["category_id"])
+                if category.venue_id != item.venue_id:
+                    _conflict(
+                        "menu_category_venue_mismatch",
+                        "Нельзя перенести товар в категорию другого заведения",
+                    )
             if "image_media_id" in updates:
                 await self._require_media(updates["image_media_id"])
             attribute_names = {"available": "is_available", "visible": "is_visible"}
@@ -835,6 +844,7 @@ class AdminService:
         self,
         *,
         actor: Actor,
+        venue_id: UUID | None,
         title: str,
         body: str,
         image_media_id: UUID | None,
@@ -847,19 +857,21 @@ class AdminService:
         _validate_window(starts_at, ends_at)
         if actor.staff_member_id is None:
             _forbidden("Staff identity is required")
-        promotion = Promotion(
-            id=uuid4(),
-            title=title,
-            body=body,
-            image_media_id=image_media_id,
-            button_label=button_label,
-            button_url=button_url,
-            status=PromotionStatus.DRAFT,
-            starts_at=starts_at,
-            ends_at=ends_at,
-            created_by_staff_id=actor.staff_member_id,
-        )
         async with self._repository.transaction():
+            venue = await self._resolve_venue(venue_id)
+            promotion = Promotion(
+                id=uuid4(),
+                venue_id=venue.id,
+                title=title,
+                body=body,
+                image_media_id=image_media_id,
+                button_label=button_label,
+                button_url=button_url,
+                status=PromotionStatus.DRAFT,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                created_by_staff_id=actor.staff_member_id,
+            )
             await self._require_media(image_media_id)
             self._repository.add(promotion)
             self._audit(
@@ -867,7 +879,7 @@ class AdminService:
                 event_type="promotion.created",
                 object_type="promotion",
                 object_id=promotion.id,
-                event_metadata={"title": title},
+                event_metadata={"title": title, "venue_id": str(venue.id)},
                 metadata=metadata,
             )
             await self._repository.flush()
@@ -1746,6 +1758,21 @@ class AdminService:
         if category is None or category.archived_at is not None:
             _conflict("invalid_menu_category", "Menu category is unavailable")
         return category
+
+    async def _require_venue(self, venue_id: UUID) -> Venue:
+        venue = await self._repository.get_venue(venue_id)
+        if venue is None or not venue.is_active or venue.archived_at is not None:
+            _conflict("invalid_venue", "Venue is unavailable")
+        return venue
+
+    async def _resolve_venue(self, venue_id: UUID | None) -> Venue:
+        """Use an explicit venue, or the deterministic default for legacy clients."""
+        if venue_id is not None:
+            return await self._require_venue(venue_id)
+        venue = await self._repository.get_default_active_venue()
+        if venue is None:
+            _conflict("invalid_venue", "No active venue is configured")
+        return venue
 
     async def _require_media(self, media_id: UUID | None) -> MediaFile | None:
         if media_id is None:

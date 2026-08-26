@@ -1,6 +1,6 @@
 # План реализации Coffie Bot V2
 
-Статус: Phase 0, Phase 1 и Phase 2 завершены; Phase 3 (Menu / Pricing) — следующий
+Статус: Phase 0–2 завершены; Phase 3 (Menu / Pricing) реализована локально и проходит release gates
 этап. Loyalty V2 готова к merge, но становится deployable release только после
 успешного CI целевой ветки.
 
@@ -237,10 +237,10 @@ gate и фазового отчёта.
 
 ### Phase 3 — Menu / Pricing
 
-- [ ] Venue-owned category/item CRUD.
-- [ ] Generic modifier groups/options/quantities and admin UI.
-- [ ] Practical promotion conditions/actions, priority/benefit/stackability.
-- [ ] Backend pricing preview and snapshot-ready tests.
+- [x] Venue-owned category/item CRUD.
+- [x] Generic modifier groups/options/quantities and admin UI.
+- [x] Practical promotion conditions/actions, priority/benefit/stackability.
+- [x] Backend pricing preview and snapshot-ready tests.
 
 ### Phase 4 — Orders
 
@@ -352,3 +352,16 @@ gate и фазового отчёта.
 - Phase 2 предоставляет per-venue redemption calculation/validation. Оркестрация
   нескольких suborders будет подключена в Phase 4 поверх server-side pricing snapshot;
   она не считается готовой системой заказов на этом этапе.
+
+### 2026-08-27 — Phase 3 Menu / Pricing
+
+- Категории, товары, акции и универсальные modifier groups принадлежат `Venue`;
+  composite PostgreSQL foreign keys запрещают cross-venue связи даже в обход сервиса.
+- Pricing engine заново загружает trusted каталог, проверяет количества и считает
+  mixed cart по venue с practical promotion rules, priority/benefit/stackability.
+- Добавлены `/api/v1/cart/price`, admin pricing API и мобильная админка для групп
+  модификаторов, привязок к товарам и правил скидок.
+- Migration `0012` прошла clean `0001 -> 0012`, Alembic parity и повторный seed на
+  PostgreSQL 17. Backend suite: `236 passed`; frontend: `40 passed`, audit/build зелёные.
+- Development images собраны, backend/frontend smoke вернул `200`, а pricing route
+  без сессии корректно закрыт `401`. Phase 4 сохраняет этот расчёт как order snapshot.

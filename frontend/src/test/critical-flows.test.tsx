@@ -1104,6 +1104,7 @@ describe("critical Mini App flows", () => {
         visit_streak: 2,
         last_visit_business_date: "2026-08-23",
         staff_role: null,
+        birthday_set: true,
       },
       canonical: {
         user_id: canonicalUserId,
@@ -1115,6 +1116,7 @@ describe("critical Mini App flows", () => {
         visit_streak: 5,
         last_visit_business_date: "2026-08-24",
         staff_role: null,
+        birthday_set: true,
       },
       preview_hash: "a".repeat(64),
       points_to_transfer: 70,
@@ -1124,7 +1126,10 @@ describe("critical Mini App flows", () => {
       rewards_to_move: 2,
       sessions_to_revoke: 3,
       cards_to_revoke: 2,
+      feedback_to_move: 1,
       source_staff_rebound: false,
+      birthday_conflict: true,
+      birthday_resolution_required: true,
     };
     const result: CustomerMergeResult = {
       merge_id: "33333333-3333-4333-8333-333333333333",
@@ -1141,6 +1146,8 @@ describe("critical Mini App flows", () => {
       rewards_moved: 2,
       sessions_revoked: 3,
       cards_revoked: 2,
+      feedback_moved: 1,
+      birthday_resolution: "keep_canonical",
       source_staff_rebound: false,
       idempotent_replay: false,
     };
@@ -1185,6 +1192,12 @@ describe("critical Mini App flows", () => {
     expect(previewRegion).toHaveTextContent("сеансов к отзыву");
     expect(previewRegion).toHaveTextContent("карты будут отозваны (2)");
     expect(previewRegion).toHaveTextContent("сеансы завершены (3)");
+    expect(previewRegion).toHaveTextContent("разные дни рождения");
+
+    await user.selectOptions(
+      screen.getByLabelText("Дата рождения"),
+      "keep_canonical",
+    );
 
     await user.type(
       screen.getByLabelText("Причина объединения"),
@@ -1209,6 +1222,7 @@ describe("critical Mini App flows", () => {
       preview_hash: preview.preview_hash,
       reason: "Подтверждённый дубликат",
       confirm: true,
+      birthday_resolution: "keep_canonical",
     });
     expect(confirm.mock.calls[1]?.[0]).toEqual(confirm.mock.calls[0]?.[0]);
     expect(firstKey).toMatch(
@@ -1232,6 +1246,7 @@ describe("critical Mini App flows", () => {
       preview_hash: preview.preview_hash,
       reason: "Клиент подтвердил дубликат",
       confirm: true,
+      birthday_resolution: "keep_canonical",
     });
     expect(confirm.mock.calls[2]?.[1]).not.toBe(firstKey);
   });

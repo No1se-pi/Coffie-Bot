@@ -104,6 +104,8 @@ class LoyaltyRepositoryPort(Protocol):
         for_update: bool,
     ) -> LoyaltyContext | None: ...
 
+    async def resolve_terminal_user_id(self, user_id: UUID) -> UUID | None: ...
+
     async def accrued_points_between(
         self,
         *,
@@ -2092,7 +2094,14 @@ class LoyaltyService:
             initial = await self._repository.get_operation(operation_id, for_update=False)
             if initial is None:
                 _raise_not_found("Операция не найдена")
-            context = await self._require_context(initial.user_id, for_update=True)
+            # Historical operations keep their immutable source profile id.
+            # A merge moves the mutable balance to the terminal canonical
+            # profile, so reversals must follow that lineage before taking the
+            # normal settings -> user/state -> wallet -> lot locks.
+            canonical_user_id = await self._repository.resolve_terminal_user_id(initial.user_id)
+            if canonical_user_id is None:
+                _raise_not_found("Пользователь операции не найден")
+            context = await self._require_context(canonical_user_id, for_update=True)
             _require_not_self(actor, context.user.id)
             original = await self._repository.get_operation(operation_id, for_update=True)
             if original is None:
@@ -2132,17 +2141,14 @@ class LoyaltyService:
             balance_before = context.state.points_balance
             reversal_delta = -original.points_delta
             balance_after = balance_before + reversal_delta
-            if balance_after < 0:
+            if self._point_ledger is None and balance_after < 0:
                 _raise_conflict(
                     "reversal_would_make_balance_negative",
                     "Недостаточно баллов; требуется ручная корректировка администратора",
                 )
-            context.state.points_balance = balance_after
-            context.state.version += 1
-            original.status = OperationStatus.REVERSED
             reversal = LoyaltyOperation(
                 id=uuid4(),
-                user_id=original.user_id,
+                user_id=context.user.id,
                 actor_user_id=actor.user_id,
                 actor_staff_id=actor.staff_member_id,
                 location_id=original.location_id,
@@ -2157,22 +2163,59 @@ class LoyaltyService:
                 reversal_of_id=original.id,
                 occurred_at=current_time,
             )
-            transaction = PointTransaction(
-                id=uuid4(),
-                operation_id=reversal.id,
-                user_id=original.user_id,
-                delta=reversal_delta,
-                balance_before=balance_before,
-                balance_after=balance_after,
-                created_at=current_time,
-            )
+            transaction: PointTransaction | None = None
+            if self._point_ledger is not None:
+                # Reversal lots and allocations reference this operation only
+                # by scalar FK ids. Persist the journal header first so the
+                # staged lineage flush cannot race SQLAlchemy's table ordering.
+                # A later rule failure still rolls the entire transaction back.
+                self._repository.add_all([reversal])
+                await self._repository.flush()
+                try:
+                    mutation = (
+                        await self._point_ledger.reverse_credit(
+                            state=context.state,
+                            original_operation_id=original.id,
+                            reversal=reversal,
+                            points=original.points_delta,
+                            now=current_time,
+                        )
+                        if original.points_delta > 0
+                        else await self._point_ledger.reverse_spend(
+                            state=context.state,
+                            settings=context.settings,
+                            original_operation_id=original.id,
+                            reversal=reversal,
+                            now=current_time,
+                        )
+                    )
+                except LoyaltyRuleViolation as exc:
+                    _raise_conflict(exc.code, exc.message)
+                reversal.points_delta = mutation.points_changed
+                reversal.balance_before = mutation.global_balance_before
+                reversal.balance_after = mutation.global_balance_after
+            else:
+                context.state.points_balance = balance_after
+                transaction = PointTransaction(
+                    id=uuid4(),
+                    operation_id=reversal.id,
+                    user_id=context.user.id,
+                    delta=reversal_delta,
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    created_at=current_time,
+                )
+            context.state.version += 1
+            original.status = OperationStatus.REVERSED
             event_metadata = {
                 "customer_name": _display_name(context.user),
                 "points": original.points_delta,
                 "reason": normalized_reason,
                 "original_operation_id": str(original.id),
             }
-            objects: list[object] = [reversal, transaction]
+            objects: list[object] = [] if self._point_ledger is not None else [reversal]
+            if transaction is not None:
+                objects.append(transaction)
             objects.extend(
                 _operation_side_effects(
                     reversal,
@@ -2187,6 +2230,8 @@ class LoyaltyService:
             )
             self._repository.add_all(objects)
             await self._repository.flush()
+            if self._point_ledger is not None:
+                await self._point_ledger.assert_invariants(context.state)
             return await self._outcome(reversal, replay=False)
 
     async def block_user(

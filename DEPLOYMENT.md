@@ -235,11 +235,11 @@ Alembic migrations считаются forward-only. Откат image на ста
 он совместим с уже применённой схемой. Для несовместимой схемы используйте заранее проверенный
 backup целиком; не пытайтесь вручную удалять колонки на рабочей базе.
 
-### Phase 2 Loyalty V2 upgrade smoke (release gate ещё не закрыт)
+### Phase 2 Loyalty V2 upgrade smoke
 
-Эти шаги применяются только к будущему release после фактического закрытия gates
-migration `0011`, backend, frontend и Compose. Наличие `0011` в development-ветке не
-является разрешением на production upgrade.
+Эти шаги применяются к release с закрытыми gates migration `0011`, backend,
+frontend и Compose. Наличие `0011` только в feature-ветке не является разрешением
+на production upgrade: сначала требуются merge и успешный CI целевой ветки.
 
 1. Перед остановкой writers создайте и проверьте pre-upgrade backup.
 2. После migration выполните wallet/lot/opening-expiry запросы из

@@ -299,6 +299,9 @@ export function AdminCustomerMergePage() {
   const [canonicalUserId, setCanonicalUserId] = useState("");
   const [preview, setPreview] = useState<CustomerMergePreview | null>(null);
   const [reason, setReason] = useState("");
+  const [birthdayResolution, setBirthdayResolution] = useState<
+    "" | "keep_canonical" | "use_source"
+  >("");
   const [confirmed, setConfirmed] = useState(false);
   const [result, setResult] = useState<CustomerMergeResult | null>(null);
   const [busy, setBusy] = useState<"preview" | "confirm" | null>(null);
@@ -351,6 +354,7 @@ export function AdminCustomerMergePage() {
       setCanonicalUserId(canonical);
       setPreview(nextPreview);
       setReason("");
+      setBirthdayResolution("");
       setConfirmed(false);
       idempotencyKey.current = createIdempotencyKey();
     } catch (reasonValue) {
@@ -381,6 +385,10 @@ export function AdminCustomerMergePage() {
       setError("Подтвердите необратимые последствия объединения");
       return;
     }
+    if (preview.birthday_resolution_required && !birthdayResolution) {
+      setError("Выберите, какую дату рождения сохранить");
+      return;
+    }
 
     setBusy("confirm");
     setError(null);
@@ -392,6 +400,7 @@ export function AdminCustomerMergePage() {
           preview_hash: preview.preview_hash,
           reason: normalizedReason,
           confirm: true,
+          birthday_resolution: birthdayResolution || null,
         },
         idempotencyKey.current,
       );
@@ -410,6 +419,7 @@ export function AdminCustomerMergePage() {
   const editProfiles = () => {
     setPreview(null);
     setReason("");
+    setBirthdayResolution("");
     rotateConfirmation();
   };
 
@@ -462,6 +472,10 @@ export function AdminCustomerMergePage() {
                 label="сеансов отозвано"
               />
               <Metric value={result.cards_revoked} label="карт отозвано" />
+              <Metric
+                value={result.feedback_moved}
+                label="отзывов перенесено"
+              />
             </div>
             <div className="action-row">
               <Button type="button" variant="secondary" onClick={reset}>
@@ -497,6 +511,7 @@ export function AdminCustomerMergePage() {
                 label="сеансов к отзыву"
               />
               <Metric value={preview.cards_to_revoke} label="карт к отзыву" />
+              <Metric value={preview.feedback_to_move} label="отзывов" />
             </div>
             <p className="muted">
               Серия посещений будет взята из профиля:{" "}
@@ -515,11 +530,43 @@ export function AdminCustomerMergePage() {
               основному профилю.
             </div>
           )}
+          {preview.birthday_conflict && (
+            <div className="inline-warning">
+              В обоих профилях указаны разные дни рождения. Точные даты не
+              показываются в этом опасном сценарии.
+            </div>
+          )}
           <Panel className="operation-panel">
             <form
               className="form"
               onSubmit={(event) => void confirmMerge(event)}
             >
+              {preview.birthday_resolution_required && (
+                <Field
+                  label="Дата рождения"
+                  hint="Выбор попадёт в аудит без самой даты"
+                >
+                  <select
+                    required
+                    value={birthdayResolution}
+                    disabled={busy !== null}
+                    onChange={(event) => {
+                      setBirthdayResolution(
+                        event.target.value as typeof birthdayResolution,
+                      );
+                      rotateConfirmation();
+                    }}
+                  >
+                    <option value="">Выберите профиль</option>
+                    <option value="keep_canonical">
+                      Оставить дату основного профиля
+                    </option>
+                    <option value="use_source">
+                      Взять дату исходного профиля
+                    </option>
+                  </select>
+                </Field>
+              )}
               <Field label="Причина объединения" hint="Причина попадёт в аудит">
                 <textarea
                   required
@@ -565,7 +612,11 @@ export function AdminCustomerMergePage() {
                   type="submit"
                   variant="danger"
                   disabled={
-                    busy !== null || !confirmed || reason.trim().length < 3
+                    busy !== null ||
+                    !confirmed ||
+                    reason.trim().length < 3 ||
+                    (preview.birthday_resolution_required &&
+                      !birthdayResolution)
                   }
                 >
                   {busy === "confirm" ? "Объединяем…" : "Объединить профили"}

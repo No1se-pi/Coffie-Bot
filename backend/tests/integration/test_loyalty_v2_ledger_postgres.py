@@ -779,6 +779,13 @@ async def test_settings_share_locks_overlap_and_exclude_mode_update() -> None:
     updater_tx = await updater.begin()
     update_task: asyncio.Task[object] | None = None
     try:
+        # Acquire all physical connections before starting the lock timing.
+        # Otherwise a slow TCP/TLS connection setup can be mistaken for a
+        # PostgreSQL lock conflict on loaded CI runners.
+        await first.connection()
+        await second.connection()
+        await updater.connection()
+
         assert await PointLedgerRepository(first).get_settings(lock_mode="share") is not None
         # A second ordinary user mutation must not wait on the first one.
         assert (

@@ -1,6 +1,7 @@
 # Loyalty V2
 
-> Статус: Phase 2 в работе. До завершения её gate-ов deployable release остаётся Phase 1.
+> Статус: Phase 2 завершена и прошла локальные gates. Production upgrade разрешается
+> только после merge и успешного CI целевой ветки.
 
 Loyalty V2 сохраняет старые `/api/v1/me`, `/me/history` и staff operation routes,
 но хранит баллы в кошельках и отдельных партиях. `UserLoyaltyState.points_balance`
@@ -120,5 +121,4 @@ pricing/order pipeline.
 Mini App показывает shared/separate breakdown, ближайшее сгорание и
 недоступное archived venue, а birthday вводит отдельными month/day без года.
 Admin UI показывает активный fallback selector только когда preview обнаружил
-unresolved lots. Все эти экраны остаются implementation-in-progress до закрытия
-Phase 2 frontend/tests gate.
+unresolved lots. Экраны прошли Phase 2 frontend/tests gate.

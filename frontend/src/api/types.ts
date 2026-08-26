@@ -586,6 +586,7 @@ export interface CustomerMergeProfile {
   visit_streak: number;
   last_visit_business_date: string | null;
   staff_role: Role | null;
+  birthday_set: boolean;
 }
 
 export interface CustomerMergePreviewRequest {
@@ -604,13 +605,17 @@ export interface CustomerMergePreview {
   rewards_to_move: number;
   sessions_to_revoke: number;
   cards_to_revoke: number;
+  feedback_to_move: number;
   source_staff_rebound: boolean;
+  birthday_conflict: boolean;
+  birthday_resolution_required: boolean;
 }
 
 export interface CustomerMergeConfirmRequest extends CustomerMergePreviewRequest {
   preview_hash: string;
   reason: string;
   confirm: true;
+  birthday_resolution?: "keep_canonical" | "use_source" | null;
 }
 
 export interface CustomerMergeResult {
@@ -628,6 +633,8 @@ export interface CustomerMergeResult {
   rewards_moved: number;
   sessions_revoked: number;
   cards_revoked: number;
+  feedback_moved: number;
+  birthday_resolution: "keep_canonical" | "use_source" | null;
   source_staff_rebound: boolean;
   idempotent_replay: boolean;
 }

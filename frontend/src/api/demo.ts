@@ -478,6 +478,7 @@ function demoCustomerMergePreview(
       visit_streak: 2,
       last_visit_business_date: "2026-08-23",
       staff_role: null,
+      birthday_set: true,
     },
     canonical: {
       user_id: payload.canonical_user_id,
@@ -489,6 +490,7 @@ function demoCustomerMergePreview(
       visit_streak: 5,
       last_visit_business_date: "2026-08-24",
       staff_role: null,
+      birthday_set: true,
     },
     preview_hash: "d".repeat(64),
     points_to_transfer: 70,
@@ -498,7 +500,10 @@ function demoCustomerMergePreview(
     rewards_to_move: 2,
     sessions_to_revoke: 1,
     cards_to_revoke: 1,
+    feedback_to_move: 1,
     source_staff_rebound: false,
+    birthday_conflict: true,
+    birthday_resolution_required: true,
   };
 }
 
@@ -1234,7 +1239,8 @@ export const demoApi = {
         existing.payload.source_user_id !== payload.source_user_id ||
         existing.payload.canonical_user_id !== payload.canonical_user_id ||
         existing.payload.preview_hash !== payload.preview_hash ||
-        existing.payload.reason !== payload.reason
+        existing.payload.reason !== payload.reason ||
+        existing.payload.birthday_resolution !== payload.birthday_resolution
       ) {
         throw new ApiError("Ключ подтверждения уже использован", {
           status: 409,
@@ -1267,6 +1273,8 @@ export const demoApi = {
       rewards_moved: preview.rewards_to_move,
       sessions_revoked: preview.sessions_to_revoke,
       cards_revoked: preview.cards_to_revoke,
+      feedback_moved: preview.feedback_to_move,
+      birthday_resolution: payload.birthday_resolution ?? null,
       source_staff_rebound: preview.source_staff_rebound,
       idempotent_replay: false,
     };

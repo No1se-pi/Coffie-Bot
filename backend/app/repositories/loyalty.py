@@ -203,6 +203,27 @@ class LoyaltyRepository:
         )
         return await self._context_from_statement(statement)
 
+    async def resolve_terminal_user_id(self, user_id: UUID) -> UUID | None:
+        """Follow immutable merge lineage to the current writable profile."""
+
+        current_id = user_id
+        visited: set[UUID] = set()
+        for _ in range(64):
+            if current_id in visited:
+                raise RuntimeError("Customer merge lineage contains a cycle")
+            visited.add(current_id)
+            row = (
+                await self._session.execute(
+                    select(User.id, User.merged_into_user_id).where(User.id == current_id)
+                )
+            ).one_or_none()
+            if row is None:
+                return None
+            if row[1] is None:
+                return current_id
+            current_id = row[1]
+        raise RuntimeError("Customer merge lineage exceeds the safety limit")
+
     async def _context_from_statement(
         self,
         statement: Select[tuple[User, UserCard, UserLoyaltyState, LoyaltySettings]],

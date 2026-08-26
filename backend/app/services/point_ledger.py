@@ -461,10 +461,15 @@ class PointLedger:
                 created_at=now,
             )
             target_wallet.balance_points += original_allocation.points
-            target_wallet.version += 1
             restored += original_allocation.points
             new_lots.append(lot)
             allocations.append(allocation)
+
+        # Version is a wallet mutation counter, not an allocation counter.
+        # Several restored FIFO fragments in one reversal still constitute one
+        # atomic change per affected wallet.
+        for wallet in touched_wallets.values():
+            wallet.version += 1
 
         if restored <= 0:
             raise RuntimeError("A spend reversal unexpectedly restored zero points")
@@ -477,7 +482,12 @@ class PointLedger:
             balance_after=state.points_balance,
             now=now,
         )
-        self._repository.add_all([*new_lots, *allocations, transaction])
+        # Allocations point at freshly minted reversal lots through scalar FK
+        # ids.  Flush lots first; without ORM relationships SQLAlchemy may emit
+        # the allocation insert before its referenced lot on PostgreSQL.
+        self._repository.add_all([*new_lots])
+        await self._repository.flush()
+        self._repository.add_all([*allocations, transaction])
         return LedgerMutation(
             global_balance_before=global_before,
             global_balance_after=state.points_balance,
@@ -541,6 +551,7 @@ class PointLedger:
         global_before = state.points_balance
         remaining = points
         allocations: list[PointAllocation] = []
+        touched_wallets: dict[UUID, LoyaltyWallet] = {}
         for lot, wallet in resolved:
             if remaining == 0:
                 break
@@ -549,7 +560,7 @@ class PointLedger:
             amount = min(lot.remaining_points, remaining)
             lot.remaining_points -= amount
             wallet.balance_points -= amount
-            wallet.version += 1
+            touched_wallets[wallet.id] = wallet
             allocations.append(
                 PointAllocation(
                     id=uuid4(),
@@ -561,6 +572,8 @@ class PointLedger:
                 )
             )
             remaining -= amount
+        for wallet in touched_wallets.values():
+            wallet.version += 1
         state.points_balance -= points
         transaction = _point_transaction(
             operation=reversal,

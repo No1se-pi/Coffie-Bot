@@ -32,6 +32,7 @@ import {
   AdminStaffPage,
   AdminUsersPage,
 } from "./pages/admin";
+import { AdminPricingPage } from "./pages/admin-pricing";
 
 export { AccrualPanel };
 
@@ -99,6 +100,7 @@ export default function App() {
                 <Route path="settings" element={<AdminSettingsPage />} />
                 <Route path="menu" element={<AdminMenuPage />} />
                 <Route path="promotions" element={<AdminPromotionsPage />} />
+                <Route path="pricing" element={<AdminPricingPage />} />
               </Route>
               <Route path="*" element={<NotFoundPage />} />
             </Route>

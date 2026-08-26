@@ -143,7 +143,9 @@ async def test_upgrade_0010_to_0011_preserves_opening_balances_and_timestamps() 
         await migration_engine.dispose()
         migration_engine = None
 
-        await _run_alembic(rendered_migration_url, "head")
+        # This regression test owns the 0010 -> 0011 boundary. Later migrations
+        # have their own tests and must not change the expected revision here.
+        await _run_alembic(rendered_migration_url, "0011")
         migration_engine = create_async_engine(migration_url)
         async with migration_engine.connect() as connection:
             revision = await connection.scalar(text("SELECT version_num FROM alembic_version"))

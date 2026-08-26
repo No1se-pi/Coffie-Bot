@@ -31,6 +31,10 @@ birthday month/day. Phase 2 становится deployable release после m
 CI целевой ветки. Нормативные инварианты описаны в
 [`docs/LOYALTY_V2.md`](docs/LOYALTY_V2.md).
 
+Phase 3 добавляет venue-owned меню, универсальные модификаторы и авторитетный
+server-side расчёт корзины. Контракт и инварианты snapshot для заказов описаны в
+[`docs/MENU_PRICING.md`](docs/MENU_PRICING.md).
+
 ## Требования
 
 - Docker Engine или Docker Desktop;
@@ -191,6 +195,8 @@ Telegram API.
 - [MIGRATION_V2.md](MIGRATION_V2.md) — forward-only V2 revisions, preflight и проверки;
 - [docs/LOYALTY_V2.md](docs/LOYALTY_V2.md) — нормативный design и additive API contract
   завершённой Phase 2;
+- [docs/MENU_PRICING.md](docs/MENU_PRICING.md) — меню, модификаторы, акции и pricing
+  contract Phase 3;
 - [SECURITY.md](SECURITY.md) — модель доверия, секреты и incident response;
 - [docs/PRODUCT_DECISIONS.md](docs/PRODUCT_DECISIONS.md) — demo-значения, которые владелец
   обязан подтвердить до production;

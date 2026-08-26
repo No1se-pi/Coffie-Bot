@@ -16,7 +16,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.access import Session, StaffInvite, StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
-from app.models.content import MenuCategory, MenuItem, Promotion
+from app.models.content import Location, MenuCategory, MenuItem, Promotion, Venue
 from app.models.enums import (
     FeedbackStatus,
     LoyaltyProgram,
@@ -136,6 +136,21 @@ class AdminRepository:
         if for_update:
             statement = statement.with_for_update()
         value: LoyaltySettings | None = await self._session.scalar(statement)
+        return value
+
+    async def get_venue(self, venue_id: UUID) -> Venue | None:
+        return await self._session.get(Venue, venue_id)
+
+    async def get_default_active_venue(self) -> Venue | None:
+        """Resolve the venue used by legacy clients that do not send venue_id."""
+        statement = (
+            select(Venue)
+            .outerjoin(Location, Location.venue_id == Venue.id)
+            .where(Venue.is_active.is_(True), Venue.archived_at.is_(None))
+            .order_by(Location.is_default.desc(), Venue.sort_order, Venue.id)
+            .limit(1)
+        )
+        value: Venue | None = await self._session.scalar(statement)
         return value
 
     async def list_menu_categories(

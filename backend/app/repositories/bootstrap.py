@@ -14,7 +14,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
-from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion, Venue
+from app.models.content import (
+    AppSetting,
+    Location,
+    MenuCategory,
+    MenuItem,
+    MenuItemModifierGroup,
+    ModifierGroup,
+    ModifierOption,
+    Promotion,
+    PromotionMenuCategory,
+    PromotionMenuItem,
+    Venue,
+)
 from app.models.customers import CustomerIdentity
 from app.models.enums import (
     AuditSeverity,
@@ -232,6 +244,57 @@ class BootstrapRepository:
         await self._session.flush()
         return item.id
 
+    async def upsert_modifier_group(
+        self,
+        entity_id: UUID,
+        values: Mapping[str, Any],
+    ) -> UUID:
+        group = await self._session.get(ModifierGroup, entity_id)
+        if group is None:
+            group = ModifierGroup(id=entity_id, **values)
+            self._session.add(group)
+        else:
+            _assign(group, values)
+        await self._session.flush()
+        return group.id
+
+    async def upsert_modifier_option(
+        self,
+        entity_id: UUID,
+        values: Mapping[str, Any],
+    ) -> UUID:
+        option = await self._session.get(ModifierOption, entity_id)
+        if option is None:
+            option = ModifierOption(id=entity_id, **values)
+            self._session.add(option)
+        else:
+            _assign(option, values)
+        await self._session.flush()
+        return option.id
+
+    async def replace_modifier_group_items(
+        self,
+        group_id: UUID,
+        *,
+        venue_id: UUID,
+        item_ids: list[UUID],
+        sort_order: int,
+    ) -> None:
+        await self._session.execute(
+            delete(MenuItemModifierGroup).where(MenuItemModifierGroup.modifier_group_id == group_id)
+        )
+        self._session.add_all(
+            [
+                MenuItemModifierGroup(
+                    menu_item_id=item_id,
+                    modifier_group_id=group_id,
+                    venue_id=venue_id,
+                    sort_order=sort_order,
+                )
+                for item_id in sorted(set(item_ids), key=str)
+            ]
+        )
+
     async def upsert_promotion(
         self,
         entity_id: UUID,
@@ -247,6 +310,43 @@ class BootstrapRepository:
             promotion.created_by_staff_id = preserved_creator
         await self._session.flush()
         return promotion.id
+
+    async def replace_promotion_targets(
+        self,
+        promotion_id: UUID,
+        *,
+        venue_id: UUID,
+        category_ids: list[UUID],
+        menu_item_ids: list[UUID],
+    ) -> None:
+        """Replace seed-owned target links without duplicating reruns."""
+
+        await self._session.execute(
+            delete(PromotionMenuCategory).where(PromotionMenuCategory.promotion_id == promotion_id)
+        )
+        await self._session.execute(
+            delete(PromotionMenuItem).where(PromotionMenuItem.promotion_id == promotion_id)
+        )
+        self._session.add_all(
+            [
+                PromotionMenuCategory(
+                    promotion_id=promotion_id,
+                    category_id=category_id,
+                    venue_id=venue_id,
+                )
+                for category_id in sorted(set(category_ids), key=str)
+            ]
+        )
+        self._session.add_all(
+            [
+                PromotionMenuItem(
+                    promotion_id=promotion_id,
+                    menu_item_id=menu_item_id,
+                    venue_id=venue_id,
+                )
+                for menu_item_id in sorted(set(menu_item_ids), key=str)
+            ]
+        )
 
     async def find_active_staff_id(self) -> UUID | None:
         owner_first = case((StaffMember.role == Role.OWNER, 0), else_=1)

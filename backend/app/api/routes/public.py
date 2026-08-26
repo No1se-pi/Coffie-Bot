@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
+from app.repositories.pricing import PricingRepository
 from app.repositories.public import PublicRepository
 from app.schemas.public import (
     ContactsResponse,
@@ -38,8 +39,11 @@ router = APIRouter(tags=["public-content"])
 async def menu_categories(
     _actor: Annotated[Actor, Depends(get_current_actor)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    venue_id: Annotated[UUID | None, Query()] = None,
 ) -> MenuCategoryListResponse:
-    return menu_categories_response(await PublicRepository(session).list_menu_categories())
+    return menu_categories_response(
+        await PublicRepository(session).list_menu_categories(venue_id=venue_id)
+    )
 
 
 @router.get(
@@ -52,12 +56,15 @@ async def menu_items(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     category_id: Annotated[UUID | None, Query()] = None,
     available: Annotated[bool | None, Query()] = None,
+    venue_id: Annotated[UUID | None, Query()] = None,
 ) -> MenuItemListResponse:
     items = await PublicRepository(session).list_menu_items(
         category_id=category_id,
         available=available,
+        venue_id=venue_id,
     )
-    return menu_items_response(items)
+    modifier_rows = await PricingRepository(session).list_modifier_rows({item.id for item in items})
+    return menu_items_response(items, modifier_rows)
 
 
 @router.get(
@@ -69,8 +76,9 @@ async def promotions(
     _actor: Annotated[Actor, Depends(get_current_actor)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
     active: Annotated[bool, Query()] = True,
+    venue_id: Annotated[UUID | None, Query()] = None,
 ) -> PromotionListResponse:
-    items = await PublicRepository(session).list_promotions(active=active)
+    items = await PublicRepository(session).list_promotions(active=active, venue_id=venue_id)
     return promotions_response(items)
 
 

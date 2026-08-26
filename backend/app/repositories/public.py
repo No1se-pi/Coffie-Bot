@@ -13,7 +13,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.access import StaffMember, User
 from app.models.audit import AuditEvent
-from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion
+from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion, Venue
 from app.models.enums import (
     AuditSeverity,
     FeedbackCategory,
@@ -35,15 +35,21 @@ class PublicRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_menu_categories(self) -> list[MenuCategory]:
+    async def list_menu_categories(self, *, venue_id: UUID | None = None) -> list[MenuCategory]:
+        filters: list[ColumnElement[bool]] = [
+            MenuCategory.is_visible.is_(True),
+            MenuCategory.archived_at.is_(None),
+            Venue.is_active.is_(True),
+            Venue.archived_at.is_(None),
+        ]
+        if venue_id is not None:
+            filters.append(MenuCategory.venue_id == venue_id)
         return list(
             (
                 await self._session.scalars(
                     select(MenuCategory)
-                    .where(
-                        MenuCategory.is_visible.is_(True),
-                        MenuCategory.archived_at.is_(None),
-                    )
+                    .join(Venue, Venue.id == MenuCategory.venue_id)
+                    .where(*filters)
                     .order_by(MenuCategory.sort_order, MenuCategory.id)
                 )
             ).all()
@@ -54,22 +60,28 @@ class PublicRepository:
         *,
         category_id: UUID | None,
         available: bool | None,
+        venue_id: UUID | None = None,
     ) -> list[MenuItem]:
         filters: list[ColumnElement[bool]] = [
             MenuItem.is_visible.is_(True),
             MenuItem.archived_at.is_(None),
             MenuCategory.is_visible.is_(True),
             MenuCategory.archived_at.is_(None),
+            Venue.is_active.is_(True),
+            Venue.archived_at.is_(None),
         ]
         if category_id is not None:
             filters.append(MenuItem.category_id == category_id)
         if available is not None:
             filters.append(MenuItem.is_available == available)
+        if venue_id is not None:
+            filters.append(MenuItem.venue_id == venue_id)
         return list(
             (
                 await self._session.scalars(
                     select(MenuItem)
                     .join(MenuCategory, MenuCategory.id == MenuItem.category_id)
+                    .join(Venue, Venue.id == MenuItem.venue_id)
                     .where(*filters)
                     .order_by(MenuItem.sort_order, MenuItem.id)
                 )
@@ -80,10 +92,13 @@ class PublicRepository:
         self,
         *,
         active: bool,
+        venue_id: UUID | None = None,
         now: datetime | None = None,
     ) -> list[Promotion]:
         current_time = now or datetime.now(UTC)
         filters = [Promotion.status == PromotionStatus.PUBLISHED]
+        if venue_id is not None:
+            filters.append(Promotion.venue_id == venue_id)
         if active:
             filters.extend(
                 [

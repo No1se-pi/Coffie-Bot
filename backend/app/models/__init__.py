@@ -3,7 +3,19 @@
 from app.models.access import Session, StaffInvite, StaffMember, StaffPermission, User
 from app.models.audit import AuditEvent
 from app.models.cards import UserCard
-from app.models.content import AppSetting, Location, MenuCategory, MenuItem, Promotion, Venue
+from app.models.content import (
+    AppSetting,
+    Location,
+    MenuCategory,
+    MenuItem,
+    MenuItemModifierGroup,
+    ModifierGroup,
+    ModifierOption,
+    Promotion,
+    PromotionMenuCategory,
+    PromotionMenuItem,
+    Venue,
+)
 from app.models.customers import CustomerIdentity, CustomerMerge
 from app.models.delivery import Broadcast, BroadcastDelivery, NotificationOutbox
 from app.models.loyalty import (
@@ -46,12 +58,17 @@ __all__ = [
     "MediaFile",
     "MenuCategory",
     "MenuItem",
+    "MenuItemModifierGroup",
+    "ModifierGroup",
+    "ModifierOption",
     "NotificationOutbox",
     "PointAllocation",
     "PointLot",
     "PointLotRoute",
     "PointTransaction",
     "Promotion",
+    "PromotionMenuCategory",
+    "PromotionMenuItem",
     "Reward",
     "RewardTemplate",
     "Session",

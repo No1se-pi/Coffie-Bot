@@ -1,6 +1,8 @@
 import type {
   AccrualPreview,
   Actor,
+  AdminModifierGroup,
+  AdminModifierGroupDraft,
   AdminCustomerBirthday,
   AdminStaffMember,
   AdminOverview,
@@ -14,6 +16,8 @@ import type {
   AuthSession,
   BirthdayValue,
   CardData,
+  CartPriceRequest,
+  CartPriceResponse,
   ContactsData,
   CustomerMergeConfirmRequest,
   CustomerMergePreview,
@@ -35,6 +39,8 @@ import type {
   PhoneCustomerCreate,
   Promotion,
   PromotionDraft,
+  PromotionPricingRules,
+  PromotionPricingRulesDraft,
   PointsMenuPurchase,
   PostPurchase,
   PublicMoreData,
@@ -582,6 +588,8 @@ export const coffeeApi = {
       ? demoApi.getRewards(status)
       : request(`/me/rewards${queryString({ status })}`),
   getMenu,
+  priceCart: (payload: CartPriceRequest): Promise<CartPriceResponse> =>
+    request("/cart/price", { method: "POST", body: jsonBody(payload) }),
   getPostPurchase: (operationId: string): Promise<PostPurchase> =>
     isDemoMode
       ? Promise.resolve({
@@ -1099,7 +1107,15 @@ export const coffeeApi = {
             : "/admin/menu/categories",
           {
             method: category ? "PATCH" : "POST",
-            body: jsonBody(payload),
+            body: jsonBody(
+              category
+                ? Object.fromEntries(
+                    Object.entries(payload).filter(
+                      ([key]) => key !== "venue_id",
+                    ),
+                  )
+                : payload,
+            ),
           },
         ),
   saveMenuItem: (
@@ -1145,13 +1161,64 @@ export const coffeeApi = {
           {
             method: promotion ? "PATCH" : "POST",
             body: jsonBody({
-              ...payload,
+              ...(promotion
+                ? Object.fromEntries(
+                    Object.entries(payload).filter(
+                      ([key]) => key !== "venue_id",
+                    ),
+                  )
+                : payload),
               // Promotions are static cards. Saving also clears legacy links.
               button_label: null,
               button_url: null,
             }),
           },
         ),
+  getAdminModifierGroups: async (
+    includeArchived = false,
+  ): Promise<AdminModifierGroup[]> => {
+    if (isDemoMode) return [];
+    const value = await request<{ items: AdminModifierGroup[] }>(
+      `/admin/pricing/modifier-groups${queryString({ include_archived: includeArchived || undefined })}`,
+    );
+    return value.items;
+  },
+  saveAdminModifierGroup: (
+    group: AdminModifierGroup | null,
+    payload: AdminModifierGroupDraft,
+  ): Promise<AdminModifierGroup> =>
+    request(
+      group
+        ? `/admin/pricing/modifier-groups/${encodeURIComponent(group.id)}`
+        : "/admin/pricing/modifier-groups",
+      { method: group ? "PUT" : "POST", body: jsonBody(payload) },
+    ),
+  archiveAdminModifierGroup: (
+    group: AdminModifierGroup,
+  ): Promise<AdminModifierGroup> =>
+    request(
+      `/admin/pricing/modifier-groups/${encodeURIComponent(group.id)}/archive`,
+      { method: "POST" },
+    ),
+  restoreAdminModifierGroup: (
+    group: AdminModifierGroup,
+  ): Promise<AdminModifierGroup> =>
+    request(
+      `/admin/pricing/modifier-groups/${encodeURIComponent(group.id)}/restore`,
+      { method: "POST" },
+    ),
+  getPromotionPricingRules: (
+    promotionId: string,
+  ): Promise<PromotionPricingRules> =>
+    request(`/admin/pricing/promotions/${encodeURIComponent(promotionId)}`),
+  savePromotionPricingRules: (
+    promotionId: string,
+    payload: PromotionPricingRulesDraft,
+  ): Promise<PromotionPricingRules> =>
+    request(`/admin/pricing/promotions/${encodeURIComponent(promotionId)}`, {
+      method: "PUT",
+      body: jsonBody(payload),
+    }),
   archivePromotion: (promotion: Promotion): Promise<Promotion> =>
     isDemoMode
       ? demoApi.archivePromotion(promotion)

@@ -119,6 +119,37 @@ class FakeSeedRepository:
         self.entity_id_calls.append(entity_id)
         return entity_id
 
+    async def upsert_modifier_group(
+        self,
+        entity_id: UUID,
+        values: dict[str, Any],
+    ) -> UUID:
+        assert values["venue_id"]
+        self.entity_id_calls.append(entity_id)
+        return entity_id
+
+    async def upsert_modifier_option(
+        self,
+        entity_id: UUID,
+        values: dict[str, Any],
+    ) -> UUID:
+        assert values["group_id"]
+        self.entity_id_calls.append(entity_id)
+        return entity_id
+
+    async def replace_modifier_group_items(
+        self,
+        group_id: UUID,
+        *,
+        venue_id: UUID,
+        item_ids: list[UUID],
+        sort_order: int,
+    ) -> None:
+        assert group_id
+        assert venue_id
+        assert item_ids
+        assert sort_order >= 0
+
     async def upsert_promotion(
         self,
         entity_id: UUID,
@@ -127,6 +158,18 @@ class FakeSeedRepository:
         assert values["created_by_staff_id"] == self.active_staff_id
         self.entity_id_calls.append(entity_id)
         return entity_id
+
+    async def replace_promotion_targets(
+        self,
+        promotion_id: UUID,
+        *,
+        venue_id: UUID,
+        category_ids: list[UUID],
+        menu_item_ids: list[UUID],
+    ) -> None:
+        assert promotion_id
+        assert venue_id
+        assert len(category_ids) + len(menu_item_ids) <= 2
 
     async def find_active_staff_id(self) -> UUID | None:
         return self.active_staff_id

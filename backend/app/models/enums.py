@@ -146,6 +146,13 @@ class PromotionStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class PromotionActionType(StrEnum):
+    """Supported pricing actions; intentionally small and auditable."""
+
+    PERCENT_DISCOUNT = "percent_discount"
+    FIXED_DISCOUNT = "fixed_discount"
+
+
 class TipProfileStatus(StrEnum):
     DRAFT = "draft"
     PENDING_REVIEW = "pending_review"

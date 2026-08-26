@@ -2175,6 +2175,39 @@ details p {
   }
 }
 
+.pricing-fieldset {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+}
+
+.pricing-fieldset legend {
+  padding-inline: 0.35rem;
+  font-weight: 700;
+}
+
+.pricing-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.65rem 1rem;
+}
+
+.pricing-option-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 2fr) minmax(90px, 1fr) auto 72px auto;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .pricing-option-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 @media (max-width: 360px) {
   .page {
     padding-inline: 0.75rem;

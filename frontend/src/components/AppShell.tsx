@@ -15,6 +15,7 @@ import { Avatar, Button, ErrorState, Loader } from "./ui";
 const roleLabels: Record<Role, string> = {
   customer: "Гость",
   staff: "Сотрудник",
+  courier: "Курьер",
   admin: "Администратор",
   owner: "Владелец",
 };
@@ -22,12 +23,13 @@ const roleLabels: Record<Role, string> = {
 const roleHome: Record<Role, string> = {
   customer: "/",
   staff: "/staff",
+  courier: "/courier",
   admin: "/admin",
   owner: "/admin",
 };
 
 const navItems: Record<
-  "customer" | "staff" | "admin",
+  "customer" | "staff" | "courier" | "admin",
   Array<{ to: string; label: string; icon: string; end?: boolean }>
 > = {
   customer: [
@@ -46,6 +48,10 @@ const navItems: Record<
     { to: "/staff/orders", label: "Заказы", icon: "▣" },
     { to: "/staff/profile", label: "Профиль", icon: "○" },
   ],
+  courier: [
+    { to: "/courier", label: "Доступные", icon: "▣", end: true },
+    { to: "/courier/mine", label: "Мои", icon: "◇" },
+  ],
   admin: [
     { to: "/admin", label: "Обзор", icon: "⌂", end: true },
     { to: "/admin/users", label: "Клиенты", icon: "○" },
@@ -58,7 +64,9 @@ const navItems: Record<
   ],
 };
 
-function effectiveNavRole(role: Role): "customer" | "staff" | "admin" {
+function effectiveNavRole(
+  role: Role,
+): "customer" | "staff" | "courier" | "admin" {
   if (role === "owner" || role === "admin") return "admin";
   return role;
 }

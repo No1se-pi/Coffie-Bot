@@ -842,7 +842,9 @@ function StaffMemberEditor({
                 ? "Владелец"
                 : member.role === "admin"
                   ? "Администратор"
-                  : "Сотрудник"}
+                  : member.role === "courier"
+                    ? "Курьер"
+                    : "Сотрудник"}
             </Badge>
           </div>
           <h2>{member.display_name}</h2>
@@ -887,6 +889,7 @@ function StaffMemberEditor({
                 disabled={!manageable}
               >
                 <option value="staff">Сотрудник</option>
+                <option value="courier">Курьер</option>
                 {canManageAdmins && (
                   <option value="admin">Администратор</option>
                 )}
@@ -975,7 +978,7 @@ export function AdminStaffPage() {
   const [active, setActive] = useState<"all" | "active" | "inactive">("active");
   const [showCreate, setShowCreate] = useState(false);
   const [userId, setUserId] = useState("");
-  const [role, setRole] = useState<"staff" | "admin">("staff");
+  const [role, setRole] = useState<"staff" | "courier" | "admin">("staff");
   const [displayName, setDisplayName] = useState("");
   const [position, setPosition] = useState("");
   const [permissions, setPermissions] = useState(defaultStaffPermissions);
@@ -1103,10 +1106,11 @@ export function AdminStaffPage() {
                 <select
                   value={role}
                   onChange={(event) =>
-                    setRole(event.target.value as "staff" | "admin")
+                    setRole(event.target.value as "staff" | "courier" | "admin")
                   }
                 >
                   <option value="staff">Сотрудник</option>
+                  <option value="courier">Курьер</option>
                   {canManageAdmins && (
                     <option value="admin">Администратор</option>
                   )}

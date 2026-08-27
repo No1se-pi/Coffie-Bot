@@ -595,13 +595,28 @@ export function OrderDetailPage() {
 
 export function StaffOrdersPage() {
   const resource = useResource(coffeeApi.getStaffOrders);
+  const couriers = useResource(coffeeApi.getCourierOptions);
   const [busy, setBusy] = useState("");
+  const [courierByOrder, setCourierByOrder] = useState<Record<string, string>>(
+    {},
+  );
   const advanceOrder = async (order: CustomerOrder) => {
     const target = getNextStaffStatus(order);
     if (!target) return;
     setBusy(order.id);
     try {
       await coffeeApi.transitionOrder(order.id, target);
+      await resource.reload();
+    } finally {
+      setBusy("");
+    }
+  };
+  const assignCourier = async (orderId: string) => {
+    const courierId = courierByOrder[orderId];
+    if (!courierId) return;
+    setBusy(orderId);
+    try {
+      await coffeeApi.assignCourier(orderId, courierId);
       await resource.reload();
     } finally {
       setBusy("");
@@ -632,6 +647,34 @@ export function StaffOrdersPage() {
                   >
                     Следующий этап: {statusLabels[getNextStaffStatus(order)!]}
                   </Button>
+                )}
+                {order.status === "waiting_for_courier" && (
+                  <div className="form-grid">
+                    <Field label="Назначить курьера">
+                      <select
+                        value={courierByOrder[order.id] ?? ""}
+                        onChange={(event) =>
+                          setCourierByOrder((value) => ({
+                            ...value,
+                            [order.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Выберите курьера</option>
+                        {(couriers.data?.items ?? []).map((courier) => (
+                          <option key={courier.id} value={courier.id}>
+                            {courier.display_name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Button
+                      disabled={busy === order.id || !courierByOrder[order.id]}
+                      onClick={() => void assignCourier(order.id)}
+                    >
+                      Назначить
+                    </Button>
+                  </div>
                 )}
               </Panel>
             ))}

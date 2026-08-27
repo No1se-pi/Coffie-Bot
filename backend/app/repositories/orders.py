@@ -12,8 +12,10 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.access import StaffMember, User
+from app.models.audit import AuditEvent
 from app.models.content import Location, Venue
-from app.models.enums import OrderStatus
+from app.models.enums import FulfillmentMode, OrderStatus, Role
 from app.models.orders import (
     CustomerOrder,
     DeliverySettings,
@@ -122,6 +124,76 @@ class OrderRepository:
                 .order_by(CustomerOrder.created_at, CustomerOrder.id)
                 .limit(limit)
             )
+        )
+
+    async def list_available_courier_orders(self, *, limit: int) -> list[CustomerOrder]:
+        """Return only unclaimed deliveries; private customer fields are serialized elsewhere."""
+
+        return list(
+            await self._session.scalars(
+                select(CustomerOrder)
+                .where(
+                    CustomerOrder.fulfillment_mode == FulfillmentMode.DELIVERY,
+                    CustomerOrder.status == OrderStatus.WAITING_FOR_COURIER,
+                    CustomerOrder.assigned_courier_staff_id.is_(None),
+                )
+                .order_by(CustomerOrder.created_at, CustomerOrder.id)
+                .limit(limit)
+            )
+        )
+
+    async def list_courier_orders(
+        self, courier_staff_id: UUID, *, include_completed: bool, limit: int
+    ) -> list[CustomerOrder]:
+        statement = select(CustomerOrder).where(
+            CustomerOrder.assigned_courier_staff_id == courier_staff_id,
+            CustomerOrder.fulfillment_mode == FulfillmentMode.DELIVERY,
+        )
+        if not include_completed:
+            statement = statement.where(
+                CustomerOrder.status.not_in({OrderStatus.DELIVERED, OrderStatus.CANCELLED})
+            )
+        return list(
+            await self._session.scalars(
+                statement.order_by(CustomerOrder.created_at.desc(), CustomerOrder.id.desc()).limit(
+                    limit
+                )
+            )
+        )
+
+    async def get_active_courier(
+        self, staff_member_id: UUID, *, for_update: bool = False
+    ) -> StaffMember | None:
+        statement = select(StaffMember).where(
+            StaffMember.id == staff_member_id,
+            StaffMember.role == Role.COURIER,
+            StaffMember.is_active.is_(True),
+            StaffMember.archived_at.is_(None),
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return cast(StaffMember | None, await self._session.scalar(statement))
+
+    async def list_active_couriers(self) -> list[tuple[StaffMember, User]]:
+        rows = await self._session.execute(
+            select(StaffMember, User)
+            .join(User, User.id == StaffMember.user_id)
+            .where(
+                StaffMember.role == Role.COURIER,
+                StaffMember.is_active.is_(True),
+                StaffMember.archived_at.is_(None),
+            )
+            .order_by(StaffMember.display_name, User.first_name, StaffMember.id)
+        )
+        return [(staff, user) for staff, user in rows.all()]
+
+    async def get_user(self, user_id: UUID) -> User | None:
+        return cast(User | None, await self._session.scalar(select(User).where(User.id == user_id)))
+
+    async def get_audit_by_idempotency(self, key: str) -> AuditEvent | None:
+        return cast(
+            AuditEvent | None,
+            await self._session.scalar(select(AuditEvent).where(AuditEvent.idempotency_key == key)),
         )
 
     async def get_suborder(self, suborder_id: UUID, *, for_update: bool) -> OrderSuborder | None:

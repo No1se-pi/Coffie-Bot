@@ -24,6 +24,8 @@ import type {
   CartPriceRequest,
   CartPriceResponse,
   CustomerOrder,
+  CourierOrder,
+  CourierOption,
   ContactsData,
   CustomerMergeConfirmRequest,
   CustomerMergePreview,
@@ -633,6 +635,45 @@ export const coffeeApi = {
       method: "POST",
       body: jsonBody({ status, reason: null, comment: null }),
     }),
+  getAvailableCourierOrders: (): Promise<{ items: CourierOrder[] }> =>
+    request("/courier/orders/available?limit=100"),
+  getMyCourierOrders: (
+    includeCompleted = false,
+  ): Promise<{ items: CourierOrder[] }> =>
+    request(
+      `/courier/orders/mine${queryString({ include_completed: includeCompleted, limit: 100 })}`,
+    ),
+  getCourierOrder: (id: string): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}`),
+  claimCourierOrder: (id: string): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}/claim`, {
+      method: "POST",
+      idempotencyKey: uuid(),
+    }),
+  declineCourierOrder: (id: string): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}/decline`, {
+      method: "POST",
+      idempotencyKey: uuid(),
+    }),
+  transitionCourierOrder: (
+    id: string,
+    action: "pickup" | "in-transit" | "delivered",
+  ): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      idempotencyKey: uuid(),
+    }),
+  assignCourier: (
+    orderId: string,
+    courierStaffId: string,
+  ): Promise<CourierOrder> =>
+    request(`/staff/orders/${encodeURIComponent(orderId)}/courier`, {
+      method: "POST",
+      body: jsonBody({ courier_staff_id: courierStaffId }),
+      idempotencyKey: uuid(),
+    }),
+  getCourierOptions: (): Promise<{ items: CourierOption[] }> =>
+    request("/staff/couriers"),
   getPostPurchase: (operationId: string): Promise<PostPurchase> =>
     isDemoMode
       ? Promise.resolve({

@@ -6,6 +6,7 @@ from enum import StrEnum
 class Role(StrEnum):
     CUSTOMER = "customer"
     STAFF = "staff"
+    COURIER = "courier"
     ADMIN = "admin"
     OWNER = "owner"
 
@@ -30,6 +31,9 @@ class PermissionCode(StrEnum):
     OWN_TIP_PROFILE_MANAGE = "tip_profile.manage_own"
     ORDERS_READ = "orders.read"
     ORDERS_MANAGE = "orders.manage"
+    COURIER_ORDERS_READ = "courier.orders.read"
+    COURIER_ORDERS_CLAIM = "courier.orders.claim"
+    COURIER_ORDERS_UPDATE = "courier.orders.update"
     ADMIN_USERS_READ = "admin.users.read"
     ADMIN_USERS_MANAGE = "admin.users.manage"
     ADMIN_STAFF_MANAGE = "admin.staff.manage"

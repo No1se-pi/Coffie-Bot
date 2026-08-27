@@ -50,6 +50,13 @@ ADMIN_PERMISSIONS = STAFF_DEFAULT_PERMISSIONS | frozenset(
         PermissionCode.ADMIN_DELIVERY_MANAGE,
     }
 )
+COURIER_PERMISSIONS = frozenset(
+    {
+        PermissionCode.COURIER_ORDERS_READ,
+        PermissionCode.COURIER_ORDERS_CLAIM,
+        PermissionCode.COURIER_ORDERS_UPDATE,
+    }
+)
 OWNER_PERMISSIONS = frozenset(PermissionCode)
 
 
@@ -76,6 +83,8 @@ def resolve_permissions(
         return OWNER_PERMISSIONS
     if role is Role.ADMIN:
         return ADMIN_PERMISSIONS
+    if role is Role.COURIER:
+        return COURIER_PERMISSIONS
 
     permissions = set(STAFF_DEFAULT_PERMISSIONS)
     for permission, allowed in (overrides or {}).items():

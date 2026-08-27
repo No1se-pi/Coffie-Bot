@@ -251,10 +251,10 @@ gate и фазового отчёта.
 
 ### Phase 5 — Courier
 
-- [ ] Courier role/permissions/privacy DTO.
-- [ ] Manual assignment and atomic self-claim.
-- [ ] Available/mine/detail mobile UI and allowed transitions.
-- [ ] Race/security tests and notifications.
+- [x] Courier role/permissions/privacy DTO.
+- [x] Manual assignment and atomic self-claim.
+- [x] Available/mine/detail mobile UI and allowed transitions.
+- [x] Race/security tests and notifications.
 
 ### Phase 6 — Receipts
 
@@ -383,3 +383,16 @@ gate и фазового отчёта.
 - Frontend gates: Prettier, TypeScript, ESLint, `42 passed`, production build и
   `npm audit` без уязвимостей. Development Compose images/startup и health smoke
   вернули backend live/ready `200` и frontend `200`.
+
+### 2026-08-27 — Phase 5 Courier
+
+- Добавлена изолированная роль `courier` с фиксированными правами только на delivery-заказы;
+  staff permission overrides не могут расширить её доступ.
+- Свободная очередь скрывает имя, телефон и адрес клиента. Поля доставки появляются только
+  у назначенного курьера; loyalty, birthday, internal note, Telegram ID и audit DTO отсутствуют.
+- Self-claim сериализован `SELECT FOR UPDATE`: два курьера не могут забрать один заказ.
+  Отказ разрешён только до pickup, затем действует цепочка picked up → in transit → delivered.
+- Staff/admin могут выбрать активного курьера из минимального справочника и назначить его
+  вручную. Claim, assignment, decline и статусы фиксируются в audit/order events и outbox.
+- Backend: Ruff/format/mypy и `249 passed` на PostgreSQL 17. Frontend: Prettier/ESLint/
+  TypeScript, `44 passed` и production build прошли.

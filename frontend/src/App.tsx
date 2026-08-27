@@ -42,6 +42,11 @@ import {
   OrdersPage,
   StaffOrdersPage,
 } from "./pages/orders";
+import {
+  CourierAvailablePage,
+  CourierMinePage,
+  CourierOrderPage,
+} from "./pages/courier";
 
 export { AccrualPanel };
 
@@ -75,6 +80,21 @@ export default function App() {
                   <Route path="orders" element={<OrdersPage />} />
                   <Route path="orders/:orderId" element={<OrderDetailPage />} />
                   <Route path="more" element={<MorePage />} />
+                </Route>
+                <Route
+                  path="courier"
+                  element={
+                    <RoleGuard allow={["courier"]}>
+                      <Outlet />
+                    </RoleGuard>
+                  }
+                >
+                  <Route index element={<CourierAvailablePage />} />
+                  <Route path="mine" element={<CourierMinePage />} />
+                  <Route
+                    path="orders/:orderId"
+                    element={<CourierOrderPage />}
+                  />
                 </Route>
                 <Route
                   path="staff"

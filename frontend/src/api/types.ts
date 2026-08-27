@@ -1,4 +1,4 @@
-export type Role = "customer" | "staff" | "admin" | "owner";
+export type Role = "customer" | "staff" | "courier" | "admin" | "owner";
 
 export interface Actor {
   id: string;
@@ -563,6 +563,30 @@ export interface CustomerOrder {
     comment: string | null;
     created_at: string;
   }>;
+}
+
+/** Courier DTO deliberately omits loyalty, Telegram identifiers and audit history. */
+export interface CourierOrder {
+  id: string;
+  number: number;
+  status: OrderStatus;
+  status_version: number;
+  venue_names: string[];
+  delivery_zone_name: string | null;
+  desired_delivery_at: string | null;
+  created_at: string;
+  customer_name: string | null;
+  contact_phone: string | null;
+  delivery_address: string | null;
+  entrance: string | null;
+  apartment: string | null;
+  floor: string | null;
+  customer_comment: string | null;
+}
+
+export interface CourierOption {
+  id: string;
+  display_name: string;
 }
 
 export interface AdminDeliverySettings {

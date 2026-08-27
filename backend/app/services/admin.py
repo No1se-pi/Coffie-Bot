@@ -1792,7 +1792,7 @@ class AdminService:
         if role is not Role.STAFF and permissions:
             _validation(
                 "role_permissions_derived",
-                "Admin and owner permissions are derived from their role",
+                "Permissions for this role are derived from the role",
             )
         unsupported = set(permissions) - STAFF_OVERRIDE_PERMISSIONS
         if unsupported:

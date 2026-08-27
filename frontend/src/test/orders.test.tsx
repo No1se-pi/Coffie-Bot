@@ -9,7 +9,10 @@ import { CartPage, StaffOrdersPage } from "../pages/orders";
 import type { CustomerOrder } from "../api/types";
 
 describe("order flows", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    vi.spyOn(coffeeApi, "getCourierOptions").mockResolvedValue({ items: [] });
+  });
 
   it("requires a configured modifier and keeps the item in the cart", async () => {
     const user = userEvent.setup();
@@ -98,5 +101,42 @@ describe("order flows", () => {
 
     expect(transition).toHaveBeenCalledWith("order-1", "confirmed");
     expect(await screen.findByText("Подтверждён")).toBeInTheDocument();
+  });
+
+  it("lets staff manually assign an active courier", async () => {
+    const user = userEvent.setup();
+    const order = {
+      id: "delivery-2",
+      number: 9,
+      status: "waiting_for_courier",
+      fulfillment_mode: "delivery",
+      total_minor: 30000,
+      created_at: "2026-08-27T10:00:00Z",
+      suborders: [],
+    } as unknown as CustomerOrder;
+    vi.mocked(coffeeApi.getCourierOptions).mockResolvedValue({
+      items: [{ id: "courier-1", display_name: "Иван Курьер" }],
+    });
+    vi.spyOn(coffeeApi, "getStaffOrders")
+      .mockResolvedValueOnce({ items: [order] })
+      .mockResolvedValueOnce({
+        items: [{ ...order, status: "courier_assigned" }],
+      });
+    const assign = vi
+      .spyOn(coffeeApi, "assignCourier")
+      .mockResolvedValue({} as never);
+
+    render(
+      <MemoryRouter>
+        <StaffOrdersPage />
+      </MemoryRouter>,
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Назначить курьера"),
+      "courier-1",
+    );
+    await user.click(screen.getByRole("button", { name: "Назначить" }));
+
+    expect(assign).toHaveBeenCalledWith("delivery-2", "courier-1");
   });
 });

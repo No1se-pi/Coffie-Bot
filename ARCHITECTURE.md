@@ -131,8 +131,25 @@ FIFO allocations, order/suborders, snapshots, первый event и notification
 Pickup location и delivery zone выбираются только из активной конфигурации. Стоимость,
 минимум, бесплатный порог, доступность scheduling и часы работы рассчитывает backend.
 Простая зона — явный выбор пользователя, а не неподтверждённое GIS-сопоставление.
-Адресные данные доступны customer/staff order DTO; courier privacy DTO вводится отдельно
-в Phase 5.
+Адресные данные доступны customer/staff order DTO. Courier получает отдельный минимальный
+DTO: свободная очередь содержит только номер, точки, зону и время; имя, телефон, адрес,
+детали подъезда и комментарий появляются лишь после назначения именно этому курьеру.
+Loyalty, birthday, internal notes, Telegram ID и audit history в courier API отсутствуют.
+
+### Courier workflow (Phase 5)
+
+`courier` — отдельная роль с фиксированным набором delivery permissions, а не разновидность
+staff. Активный курьер может видеть свободные доставки, атомарно принять одну из них и
+работать только со своими заказами. Claim блокирует `CustomerOrder` через `FOR UPDATE` и
+повторно проверяет status/assignment внутри транзакции.
+Все courier mutations требуют `Idempotency-Key`; уникальный audit key обеспечивает
+безопасный replay после потерянного HTTP-ответа и не допускает повторного применения команды.
+
+Staff/admin с `orders.manage` может назначить активного курьера вручную. Отказ возвращает
+заказ в `waiting_for_courier` только до pickup. После pickup разрешены лишь последовательные
+переходы `picked_up → in_transit → delivered`; GPS и фиктивная карта не используются.
+Каждое изменение состояния создаёт append-only `OrderEvent`, структурированный audit event
+и customer notification через outbox после commit.
 
 Разрешённые переходы задаёт state machine. Venue-suborders проходят приготовление,
 общий customer status выводится из всех частей; каждый переход создаёт append-only

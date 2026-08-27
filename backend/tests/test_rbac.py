@@ -48,6 +48,21 @@ def test_owner_receives_all_permissions() -> None:
     assert resolve_permissions(Role.OWNER) == frozenset(PermissionCode)
 
 
+def test_courier_receives_only_fixed_delivery_permissions() -> None:
+    permissions = resolve_permissions(
+        Role.COURIER,
+        {PermissionCode.ADMIN_USERS_READ: True, PermissionCode.ORDERS_MANAGE: True},
+    )
+
+    assert permissions == frozenset(
+        {
+            PermissionCode.COURIER_ORDERS_READ,
+            PermissionCode.COURIER_ORDERS_CLAIM,
+            PermissionCode.COURIER_ORDERS_UPDATE,
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_role_dependency_rejects_wrong_role() -> None:
     dependency = require_roles(Role.OWNER)

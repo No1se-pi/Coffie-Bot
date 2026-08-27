@@ -171,6 +171,22 @@ class FakeSeedRepository:
         assert venue_id
         assert len(category_ids) + len(menu_item_ids) <= 2
 
+    async def upsert_pass_template(self, entity_id: UUID, values: dict[str, Any]) -> UUID:
+        assert values["created_by_staff_id"] == self.active_staff_id
+        self.entity_id_calls.append(entity_id)
+        return entity_id
+
+    async def replace_pass_template_access(
+        self,
+        template_id: UUID,
+        *,
+        venue_ids: list[UUID],
+        category_ids: list[UUID],
+        item_ids: list[UUID],
+    ) -> None:
+        assert template_id
+        assert venue_ids or category_ids or item_ids
+
     async def find_active_staff_id(self) -> UUID | None:
         return self.active_staff_id
 

@@ -35,6 +35,7 @@ from app.security.rbac import resolve_permissions
 from app.security.sessions import IssuedSessionToken, issue_session_token
 from app.security.telegram import (
     TelegramInitDataVerifier,
+    TelegramLoginVerifier,
     TelegramUserData,
     VerifiedTelegramInitData,
 )
@@ -171,10 +172,51 @@ class IdentityService:
 
         current_time = _aware_now(now)
         telegram_user = self._verified_telegram_user(init_data, now=current_time)
+        return await self._authenticate_telegram_user(
+            telegram_user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            now=current_time,
+        )
+
+    async def authenticate_web_login(
+        self,
+        payload: Mapping[str, str | int | None],
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        now: datetime | None = None,
+    ) -> AuthenticationResult:
+        """Verify Telegram browser-login data and issue the same opaque session."""
+
+        current_time = _aware_now(now)
+        if self._settings.bot_token is None:
+            raise RuntimeError("BOT_TOKEN is required for Telegram authentication")
+        verifier = TelegramLoginVerifier(
+            bot_token=self._settings.bot_token.get_secret_value(),
+            ttl=timedelta(seconds=self._settings.telegram_init_data_ttl_seconds),
+            future_skew=timedelta(seconds=self._settings.telegram_auth_future_skew_seconds),
+        )
+        telegram_user = verifier.verify(payload, now=current_time)
+        return await self._authenticate_telegram_user(
+            telegram_user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            now=current_time,
+        )
+
+    async def _authenticate_telegram_user(
+        self,
+        telegram_user: TelegramUserData,
+        *,
+        ip_address: str | None,
+        user_agent: str | None,
+        now: datetime,
+    ) -> AuthenticationResult:
         issued = issue_session_token(
             ttl=timedelta(seconds=self._settings.session_ttl_seconds),
             pepper=_session_pepper(self._settings),
-            now=current_time,
+            now=now,
         )
         safe_ip = _truncate(ip_address, 45)
         safe_user_agent = _truncate(user_agent, 512)
@@ -184,7 +226,7 @@ class IdentityService:
                 telegram_user,
                 ip_address=safe_ip,
                 user_agent=safe_user_agent,
-                now=current_time,
+                now=now,
             )
             self._repository.create_session(
                 user_id=registration.identity.user.id,

@@ -28,6 +28,12 @@ from app.models.content import (
     Venue,
 )
 from app.models.customers import CustomerIdentity
+from app.models.engagement import (
+    PassTemplate,
+    PassTemplateCategory,
+    PassTemplateItem,
+    PassTemplateVenue,
+)
 from app.models.enums import (
     AuditSeverity,
     IdentityProvider,
@@ -345,6 +351,51 @@ class BootstrapRepository:
                     venue_id=venue_id,
                 )
                 for menu_item_id in sorted(set(menu_item_ids), key=str)
+            ]
+        )
+
+    async def upsert_pass_template(self, entity_id: UUID, values: Mapping[str, Any]) -> UUID:
+        template = await self._session.get(PassTemplate, entity_id)
+        if template is None:
+            template = PassTemplate(id=entity_id, **values)
+            self._session.add(template)
+        else:
+            preserved_creator = template.created_by_staff_id
+            _assign(template, values)
+            template.created_by_staff_id = preserved_creator
+        await self._session.flush()
+        return template.id
+
+    async def replace_pass_template_access(
+        self,
+        template_id: UUID,
+        *,
+        venue_ids: list[UUID],
+        category_ids: list[UUID],
+        item_ids: list[UUID],
+    ) -> None:
+        # Seed-owned template access is replaced atomically so reruns are exact.
+        await self._session.execute(
+            delete(PassTemplateVenue).where(PassTemplateVenue.template_id == template_id)
+        )
+        await self._session.execute(
+            delete(PassTemplateCategory).where(PassTemplateCategory.template_id == template_id)
+        )
+        await self._session.execute(
+            delete(PassTemplateItem).where(PassTemplateItem.template_id == template_id)
+        )
+        self._session.add_all(
+            [
+                PassTemplateVenue(template_id=template_id, venue_id=value)
+                for value in sorted(set(venue_ids), key=str)
+            ]
+            + [
+                PassTemplateCategory(template_id=template_id, category_id=value)
+                for value in sorted(set(category_ids), key=str)
+            ]
+            + [
+                PassTemplateItem(template_id=template_id, item_id=value)
+                for value in sorted(set(item_ids), key=str)
             ]
         )
 

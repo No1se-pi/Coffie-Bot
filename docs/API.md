@@ -2,9 +2,9 @@
 
 Все endpoints имеют префикс `/api/v1`. JSON использует `snake_case`. Денежные значения передаются как `*_minor` (копейки), timestamps — ISO 8601 UTC. Приватные endpoints принимают `Authorization: Bearer <opaque-session-token>`.
 
-> Контракты Loyalty V2 ниже аддитивны и реализуются в Phase 2. До
-> закрытия migration, backend, frontend и release gates они не являются
-> обещанием deployable Phase 1.
+V2 contract реализован аддитивно поверх стабильных `users.id` и
+immutable journals. Актуальный migration head и фактические release gates
+фиксируются в `MIGRATION_V2.md` и `IMPLEMENTATION_PLAN_V2.md`.
 
 ## Общие ответы
 
@@ -37,6 +37,9 @@ Dangerous POST endpoints требуют `Idempotency-Key` (UUID, до 128 сим
 ## Auth и текущий пользователь
 
 - `POST /auth/telegram` — body `{ "init_data": "query-string" }`; проверяет подпись/TTL, регистрирует при первом входе, возвращает `{access_token, expires_at, user, staff}`.
+- `POST /auth/telegram/web` — Telegram Login Widget payload; отдельно
+  проверяет Login Widget HMAC/TTL и выдаёт ту же opaque session. Этот
+  endpoint не принимает Mini App `init_data`.
 - `POST /auth/logout` — отзывает текущую session.
 - `GET /me` — profile, роли и разрешения.
 - `GET /me/card` — active QR payload, короткий код, balance/progress.
@@ -90,8 +93,13 @@ venue accrual policy. Это не fallback на старую global formula. В 
 
 ## Admin users и staff
 
+- `GET /admin/dashboard` — операционная сводка для admin/owner.
+- `GET /admin/analytics?days=7..90` — агрегаты заказов, выручки, loyalty,
+  доставки, чеков, абонементов и сотрудников; требует permission
+  просмотра admin events.
 - `GET /admin/users?query=&status=&page=&page_size=`.
 - `GET /admin/users/{user_id}` и `/history`, `/rewards`.
+- `PATCH /admin/users/{user_id}/note` — обновляет audit-safe внутреннюю заметку.
 - `POST /admin/users/{user_id}/adjustments` — `{delta_points, reason}`.
 - `PUT /admin/users/{user_id}/birthday` (Phase 2) — admin/owner меняет month/day
   только с непустой `reason`; old/new value и actor фиксируются в audit.
@@ -106,6 +114,19 @@ venue accrual policy. Это не fallback на старую global formula. В 
 - `POST /admin/staff/{staff_id}/revoke-sessions`.
 - `POST /admin/staff/invites` — TTL-limited one-time token.
 - `POST /admin/staff/{staff_id}/role` — `admin`/`owner` transitions требуют owner.
+
+## Orders и staff queue
+
+- `GET /order-options` — trusted pickup/delivery options для checkout.
+- `POST /orders` — создаёт server-priced order snapshot; требует
+  `Idempotency-Key`.
+- `GET /orders`, `GET /orders/{order_id}`, `POST /orders/{order_id}/cancel` — только
+  собственные заказы customer.
+- `GET /staff/orders?venue_id=&statuses=&limit=` и
+  `GET /staff/orders/{order_id}` — очередь и полная карточка заказа в рамках
+  разрешённого venue scope.
+- `POST /staff/orders/{order_id}/transition` — только разрешённый state
+  transition с optional reason/comment; бизнес-правила повторно проверяет backend.
 
 ## Admin audit/content
 

@@ -61,12 +61,36 @@ $ResolvedEnvFile = Resolve-ProjectPath -Path $EnvFile -Default ".env"
 $ResolvedComposeFile = Resolve-ProjectPath -Path $ComposeFile -Default "compose.yaml"
 $databaseDump = Join-Path $BackupPath "database.dump"
 $mediaArchive = Join-Path $BackupPath "media.tar.gz"
+$manifestPath = Join-Path $BackupPath "manifest.txt"
 
 if (-not (Test-Path -LiteralPath $BackupPath -PathType Container)) { throw "Backup directory not found: $BackupPath" }
 if (-not (Test-Path -LiteralPath $databaseDump -PathType Leaf)) { throw "database.dump is missing from $BackupPath" }
 if (-not (Test-Path -LiteralPath $mediaArchive -PathType Leaf)) { throw "media.tar.gz is missing from $BackupPath" }
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "manifest.txt is missing from $BackupPath" }
 if (-not (Test-Path -LiteralPath $ResolvedEnvFile -PathType Leaf)) { throw "Environment file not found: $ResolvedEnvFile" }
 if (-not (Test-Path -LiteralPath $ResolvedComposeFile -PathType Leaf)) { throw "Compose file not found: $ResolvedComposeFile" }
+
+# Verify both artifacts before stopping any application process or replacing data.
+$manifest = @{}
+foreach ($line in Get-Content -LiteralPath $manifestPath -Encoding UTF8) {
+    $separator = $line.IndexOf("=", [StringComparison]::Ordinal)
+    if ($separator -gt 0) {
+        $manifest[$line.Substring(0, $separator)] = $line.Substring($separator + 1).Trim()
+    }
+}
+$expectedDatabaseHash = $manifest["database_sha256"]
+$expectedMediaHash = $manifest["media_sha256"]
+if ($expectedDatabaseHash -notmatch "^[a-f0-9]{64}$" -or $expectedMediaHash -notmatch "^[a-f0-9]{64}$") {
+    throw "Backup manifest contains invalid SHA256 values"
+}
+$actualDatabaseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $databaseDump).Hash.ToLowerInvariant()
+$actualMediaHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $mediaArchive).Hash.ToLowerInvariant()
+if ($actualDatabaseHash -ne $expectedDatabaseHash) {
+    throw "database.dump checksum does not match manifest.txt"
+}
+if ($actualMediaHash -ne $expectedMediaHash) {
+    throw "media.tar.gz checksum does not match manifest.txt"
+}
 
 $ComposePrefix = @("compose", "--env-file", $ResolvedEnvFile, "-f", $ResolvedComposeFile)
 Invoke-Compose -Arguments @("config", "--quiet")
@@ -94,13 +118,31 @@ try {
     if ([string]::IsNullOrWhiteSpace($helperImage)) { $helperImage = "postgres:17-alpine" }
 
     Invoke-Docker -Arguments @("volume", "inspect", $mediaVolume)
+    # Native Windows argument quoting can corrupt the regular expressions in an
+    # inline `sh -c` script. Base64 keeps the shell program opaque until it is
+    # decoded inside the trusted helper container.
+    $mediaRestoreScript = @'
+if tar -tzf /backup/media.tar.gz | grep -Eq "(^/|(^|/)\.\.(/|$))"; then
+    echo "Unsafe path in media archive" >&2
+    exit 1
+fi
+if tar -tvzf /backup/media.tar.gz | grep -Eq "^[lh]"; then
+    echo "Links are not allowed in media archive" >&2
+    exit 1
+fi
+find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+tar -xzf /backup/media.tar.gz -C /target
+'@
+    $encodedMediaRestoreScript = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes($mediaRestoreScript)
+    )
     Invoke-Docker -Arguments @(
         "run", "--rm",
         "--volume", "${mediaVolume}:/target",
         "--volume", "${BackupPath}:/backup:ro",
         $helperImage,
         "sh", "-eu", "-c",
-        'if tar -tzf /backup/media.tar.gz | grep -Eq "(^/|(^|/)\.\.(/|$))"; then echo "Unsafe path in media archive" >&2; exit 1; fi; if tar -tvzf /backup/media.tar.gz | grep -Eq "^[lh]"; then echo "Links are not allowed in media archive" >&2; exit 1; fi; find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; tar -xzf /backup/media.tar.gz -C /target'
+        "echo $encodedMediaRestoreScript | base64 -d | sh -eu"
     )
 
     Invoke-Compose -Arguments @("run", "--rm", "migrate")

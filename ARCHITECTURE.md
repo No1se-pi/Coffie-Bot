@@ -13,6 +13,7 @@ customer profile ID, identities выносятся отдельно, `Venue` п�
 
 ```text
 Telegram client ── initData ──> React Mini App ── HTTPS /api/v1 ──> FastAPI
+Browser ── signed Telegram Login ──> desktop Web Admin ──────────┤
        │                                                        │
        └──────── messages <── aiogram bot <── notification outbox
                                                                 │
@@ -48,7 +49,7 @@ Transport не выполняет расчёты и не меняет модел
 - Карты: `user_cards`; один active QR на пользователя, старые записи отозваны и остаются для аудита.
 - Loyalty compatibility journal: `loyalty_settings`, `user_loyalty_states`,
   `loyalty_operations`, `point_transactions`, `visits`, `stamp_transactions`.
-- Loyalty V2 (Phase 2 в работе): `loyalty_wallets`, `point_lots`,
+- Loyalty V2: `loyalty_wallets`, `point_lots`,
   `point_allocations`, `wallet_mode_switches`, `wallet_transfers`, неизменяемые
   routes партий и birthday policy. `user_loyalty_states.points_balance` остаётся
   compatibility snapshot и равен сумме wallet balances.
@@ -68,6 +69,12 @@ Transport не выполняет расчёты и не меняет модел
 4. Подтверждённый Telegram user ID сопоставляется с локальным `user`; первый вход атомарно создаёт пользователя, карту и welcome operation.
 5. Backend выдаёт случайный короткоживущий session token. В `sessions` хранится только SHA-256 hash, TTL и revocation data.
 6. Каждый запрос загружает actor, его active status, role и granular permissions. Объектные проверки выполняются после RBAC.
+
+Для входа в Web Admin вне Mini App используется Telegram Login Widget. Backend принимает
+только подписанный Telegram payload, отдельно проверяет HMAC и TTL по алгоритму Login Widget,
+после чего вызывает тот же identity/session service. Алгоритм Mini App `initData` не
+переиспользуется: у этих двух Telegram flows разные derivation keys. В обоих случаях frontend
+получает одинаковый opaque session token, а в БД хранится только его hash.
 
 Development bypass разрешён только при явных `APP_ENV=development` и `DEV_AUTH_ENABLED=true`; production-конфигурация с bypass должна завершать запуск ошибкой.
 
@@ -115,6 +122,46 @@ Development bypass разрешён только при явных `APP_ENV=deve
   даже для уже полностью израсходованного lot, чтобы поздний reversal оставался
   однозначным.
 
+## Заказы, выдача и доставка
+
+`CustomerOrder` — один заказ для клиента; товары каждого `Venue` сохраняются в
+`OrderSuborder`. При создании backend повторно загружает меню и правила pricing,
+фиксирует денежные значения, названия, модификаторы и применённые акции. Изменение
+каталога после commit не меняет исторический заказ.
+
+Создание заказа требует idempotency key. PostgreSQL advisory lock сериализует повторы
+одного пользователя и ключа, а unique constraint не допускает дубль. Списание баллов,
+FIFO allocations, order/suborders, snapshots, первый event и notification outbox
+записываются в одной транзакции. Отмена возвращает баллы связанной компенсирующей
+операцией; исходные операции и события не переписываются.
+
+Pickup location и delivery zone выбираются только из активной конфигурации. Стоимость,
+минимум, бесплатный порог, доступность scheduling и часы работы рассчитывает backend.
+Простая зона — явный выбор пользователя, а не неподтверждённое GIS-сопоставление.
+Адресные данные доступны customer/staff order DTO. Courier получает отдельный минимальный
+DTO: свободная очередь содержит только номер, точки, зону и время; имя, телефон, адрес,
+детали подъезда и комментарий появляются лишь после назначения именно этому курьеру.
+Loyalty, birthday, internal notes, Telegram ID и audit history в courier API отсутствуют.
+
+### Courier workflow (Phase 5)
+
+`courier` — отдельная роль с фиксированным набором delivery permissions, а не разновидность
+staff. Активный курьер может видеть свободные доставки, атомарно принять одну из них и
+работать только со своими заказами. Claim блокирует `CustomerOrder` через `FOR UPDATE` и
+повторно проверяет status/assignment внутри транзакции.
+Все courier mutations требуют `Idempotency-Key`; уникальный audit key обеспечивает
+безопасный replay после потерянного HTTP-ответа и не допускает повторного применения команды.
+
+Staff/admin с `orders.manage` может назначить активного курьера вручную. Отказ возвращает
+заказ в `waiting_for_courier` только до pickup. После pickup разрешены лишь последовательные
+переходы `picked_up → in_transit → delivered`; GPS и фиктивная карта не используются.
+Каждое изменение состояния создаёт append-only `OrderEvent`, структурированный audit event
+и customer notification через outbox после commit.
+
+Разрешённые переходы задаёт state machine. Venue-suborders проходят приготовление,
+общий customer status выводится из всех частей; каждый переход создаёт append-only
+`OrderEvent`, audit event и, при изменении общего статуса, outbox notification.
+
 ## Посещения, штампы и награды
 
 - Business date вычисляется на backend по timezone и configurable day-boundary.
@@ -129,6 +176,18 @@ Development bypass разрешён только при явных `APP_ENV=deve
 
 Технические JSON logs и audit events разделены. В логи не попадают секреты, init data, session tokens и полные приватные payloads.
 
+## Web Admin и аналитика
+
+Мобильная админка и desktop Web Admin — два responsive представления одного React-приложения
+и того же `/api/v1`. Desktop shell добавляет боковую навигацию, но не создаёт отдельный backend
+или набор привилегий. Карточка клиента, заказ, меню, loyalty, акции, сотрудники/курьеры, чеки,
+отзывы и абонементы используют существующие application services и RBAC.
+
+Dashboard и analytics читают агрегаты напрямую из PostgreSQL через отдельный read-only
+repository/service. Клиент не получает сырые телефоны, адреса или Telegram ID для построения
+графиков; сторонний analytics SaaS не используется. Business-day метрики рассчитываются с
+timezone и границей дня из настроек loyalty.
+
 ## Уведомления и рассылки
 
 Notification outbox записывается вместе с доменной транзакцией. Worker получает записи через `FOR UPDATE SKIP LOCKED`, устанавливает lease, отправляет, записывает attempts/result и планирует retry с backoff.
@@ -138,3 +197,53 @@ Broadcast имеет draft/preview/confirmed/running/completed/failed status и 
 ## Media
 
 Backend ограничивает размер, читает сигнатуру разрешённых JPEG/PNG/WebP, генерирует random storage key и пишет файл без execute permissions в выделенный volume. Исходное имя используется только как необязательные безопасные metadata. Публичная выдача использует known storage key, `nosniff` и attachment/appropriate image headers.
+
+Receipt images используют тот же pipeline, но не публичную выдачу: общий media endpoint
+возвращает для kind `receipt` нейтральный 404, а чтение доступно только staff с
+`receipts.manage` через отдельный authenticated route.
+
+## Ручные чеки
+
+`Receipt` хранит текущий оптимизированный snapshot и future-compatible source
+`manual/rkeeper/other_pos`; `(source, external_id)` уникален, когда внешний ID задан.
+Текущий staff transport создаёт исключительно manual receipt и требует проверенное фото.
+
+Создание сериализуется advisory lock и защищено `(created_by_staff_id, idempotency_key)`.
+Каждое дополнение номера, fiscal data, note, external ID или фото создаёт полный неизменяемый
+`ReceiptRevision`; повтор с тем же ключом возвращает ту же ревизию. Отмена меняет только
+status/cancel metadata и оставляет исходный чек и историю.
+
+`ReceiptRiskSettings` хранит пороги установки. Сервис пишет объяснимые flags для высокой
+суммы, частоты сотрудника/клиента, одинаковых сумм, повторного номера, отсутствующего фото
+и частых отмен. Это сигналы владельцу для проверки, а не автоматический ML-вердикт.
+
+## Публичные отзывы
+
+`PublicReview` не заменяет private `FeedbackItem`. Customer может связать отзыв с заведением,
+своим заказом и optional сотрудником; связь order проверяется backend по canonical owner и
+venue, поэтому чужой UUID не раскрывает заказ. Новый отзыв всегда `pending`. В публичный feed
+попадают только `approved`; `rejected` и `hidden` остаются доступны модератору и автору.
+Approve/reject/hide сохраняют moderator, UTC timestamp, optional note и audit event.
+
+## Абонементы
+
+`PassTemplate` — не банковская подписка и не платёж: это неизменяемое правило количества,
+срока и optional allowed venues/categories/items. При выдаче `CustomerPass` фиксирует имя,
+описание, изображение, total uses и expires_at. Issue/cancel требуют idempotency key.
+
+Использование блокирует pass через `SELECT FOR UPDATE`, повторно проверяет active/expiry,
+trusted venue и menu item, затем уменьшает остаток ровно на один. `PassUsage` append-only
+хранит actor, customer, pass, venue, item, before/after и собственный idempotency key.
+Последнее использование атомарно переводит pass в `exhausted`; два concurrent staff не могут
+успешно списать единственный остаток дважды.
+
+## Массовый бонус
+
+Bulk bonus — admin/owner preview/confirm. Preview возвращает ordered audience snapshot,
+recipient count, total points и hash. Confirm повторно вычисляет eligible audience, требует
+тот же hash, блокирует user/loyalty state в порядке UUID и выполняется одной транзакцией.
+
+`BulkBonusBatch` объясняет общую команду, `BulkBonusItem` связывает каждого получателя с
+отдельной `LoyaltyOperation`. Для каждого клиента создаются `PointTransaction`, отдельный
+`PointLot` с expiry policy и notification outbox; snapshot баланса обновляется только через
+общий point ledger. Batch и операции защищены PostgreSQL unique constraints и advisory lock.

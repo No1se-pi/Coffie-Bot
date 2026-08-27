@@ -364,6 +364,7 @@ describe("Loyalty V2 frontend", () => {
           isDemo: false,
           setActiveRole: vi.fn(),
           retry: vi.fn(),
+          loginWithTelegram: vi.fn().mockResolvedValue(undefined),
           logout: vi.fn(),
         }}
       >

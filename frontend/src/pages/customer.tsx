@@ -11,6 +11,7 @@ import type {
 import { useResource } from "../hooks/useResource";
 import { formatDate, formatDateTime, formatMoney } from "../utils/format";
 import { VenueSelector, useVenueSelection } from "../components/VenueSelector";
+import { useCart } from "../components/CartContext";
 import {
   Avatar,
   Badge,
@@ -419,7 +420,15 @@ export function RewardsPage() {
 
 export function MenuPage() {
   const resource = useResource(coffeeApi.getMenu);
+  const cart = useCart();
   const [category, setCategory] = useState<string>("");
+  const [configuring, setConfiguring] = useState<MenuItem | null>(null);
+  const [selectedModifiers, setSelectedModifiers] = useState<
+    Record<string, number>
+  >({});
+  const [configurationError, setConfigurationError] = useState<string | null>(
+    null,
+  );
   const [buying, setBuying] = useState<MenuItem | null>(null);
   const [purchase, setPurchase] = useState<PointsMenuPurchase | null>(null);
   const [purchaseKey, setPurchaseKey] = useState("");
@@ -443,7 +452,7 @@ export function MenuPage() {
     setPurchaseError(null);
   };
   useEffect(() => {
-    if (!buying && !purchase) return;
+    if (!buying && !purchase && !configuring) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -452,13 +461,51 @@ export function MenuPage() {
       setPurchase(null);
       setPurchaseKey("");
       setPurchaseError(null);
+      setConfiguring(null);
+      setConfigurationError(null);
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [buying, purchase, purchasing]);
+  }, [buying, purchase, configuring, purchasing]);
+  const startConfiguration = (item: MenuItem) => {
+    if (!item.modifier_groups?.length) {
+      cart.add(item, []);
+      return;
+    }
+    setSelectedModifiers({});
+    setConfigurationError(null);
+    setConfiguring(item);
+  };
+  const addConfiguredItem = () => {
+    if (!configuring) return;
+    for (const group of configuring.modifier_groups ?? []) {
+      const selected = group.options.reduce(
+        (sum, option) => sum + (selectedModifiers[option.id] ?? 0),
+        0,
+      );
+      if (selected < group.min_selections || selected > group.max_selections) {
+        setConfigurationError(
+          `${group.name}: выберите от ${group.min_selections} до ${group.max_selections}`,
+        );
+        return;
+      }
+    }
+    const options = (configuring.modifier_groups ?? []).flatMap((group) =>
+      group.options
+        .filter((option) => (selectedModifiers[option.id] ?? 0) > 0)
+        .map((option) => ({
+          option_id: option.id,
+          quantity: selectedModifiers[option.id] ?? 1,
+          name: option.name,
+          price: option.price_delta_minor,
+        })),
+    );
+    cart.add(configuring, options);
+    setConfiguring(null);
+  };
   const confirmPointsPurchase = async () => {
     if (!buying) return;
     setPurchasing(true);
@@ -551,6 +598,9 @@ export function MenuPage() {
                         </Badge>
                       ))}
                     </div>
+                    <Button onClick={() => startConfiguration(item)}>
+                      В корзину
+                    </Button>
                     {item.points_price && (
                       <Button
                         className="menu-card__points-button"
@@ -578,10 +628,74 @@ export function MenuPage() {
             />
           )}
           <p className="muted centered">
-            Обычный заказ и оплата выполняются в кофейне. Позиции с ценой в
-            баллах можно купить в приложении.
+            Итоговая цена, модификаторы и скидки проверяются сервером при
+            оформлении.
           </p>
+          {cart.count > 0 && (
+            <Link
+              className="button button--primary order-wide-action"
+              to="/cart"
+            >
+              Корзина · {cart.count}
+            </Link>
+          )}
         </>
+      )}
+      {configuring && (
+        <div className="purchase-sheet-backdrop">
+          <Panel className="purchase-sheet" role="dialog" aria-modal="true">
+            <h2>{configuring.name}</h2>
+            {(configuring.modifier_groups ?? []).map((group) => (
+              <fieldset className="modifier-choice" key={group.id}>
+                <legend>
+                  {group.name} · {group.required ? "обязательно" : "по желанию"}
+                </legend>
+                {group.options.map((option) => {
+                  const single = group.max_selections === 1;
+                  const checked = (selectedModifiers[option.id] ?? 0) > 0;
+                  return (
+                    <label key={option.id}>
+                      <input
+                        type={single ? "radio" : "checkbox"}
+                        name={group.id}
+                        checked={checked}
+                        onChange={() => {
+                          setConfigurationError(null);
+                          setSelectedModifiers((current) => {
+                            const next = { ...current };
+                            if (single) {
+                              group.options.forEach(
+                                (value) => delete next[value.id],
+                              );
+                              next[option.id] = 1;
+                            } else if (checked) delete next[option.id];
+                            else next[option.id] = 1;
+                            return next;
+                          });
+                        }}
+                      />
+                      <span>{option.name}</span>
+                      <strong>
+                        {option.price_delta_minor > 0
+                          ? `+${formatMoney(option.price_delta_minor)}`
+                          : "без доплаты"}
+                      </strong>
+                    </label>
+                  );
+                })}
+              </fieldset>
+            ))}
+            {configurationError && (
+              <div className="inline-error">{configurationError}</div>
+            )}
+            <div className="action-row">
+              <Button variant="secondary" onClick={() => setConfiguring(null)}>
+                Отмена
+              </Button>
+              <Button onClick={addConfiguredItem}>Добавить</Button>
+            </div>
+          </Panel>
+        </div>
       )}
       {(buying || purchase) && (
         <div

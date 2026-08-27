@@ -6,6 +6,7 @@ from enum import StrEnum
 class Role(StrEnum):
     CUSTOMER = "customer"
     STAFF = "staff"
+    COURIER = "courier"
     ADMIN = "admin"
     OWNER = "owner"
 
@@ -28,6 +29,15 @@ class PermissionCode(StrEnum):
     REWARDS_REDEEM = "rewards.redeem"
     OWN_OPERATIONS_REVERSE = "operations.reverse_own"
     OWN_TIP_PROFILE_MANAGE = "tip_profile.manage_own"
+    ORDERS_READ = "orders.read"
+    ORDERS_MANAGE = "orders.manage"
+    COURIER_ORDERS_READ = "courier.orders.read"
+    COURIER_ORDERS_CLAIM = "courier.orders.claim"
+    COURIER_ORDERS_UPDATE = "courier.orders.update"
+    RECEIPTS_READ = "receipts.read"
+    RECEIPTS_MANAGE = "receipts.manage"
+    SUBSCRIPTIONS_READ = "subscriptions.read"
+    SUBSCRIPTIONS_MANAGE = "subscriptions.manage"
     ADMIN_USERS_READ = "admin.users.read"
     ADMIN_USERS_MANAGE = "admin.users.manage"
     ADMIN_STAFF_MANAGE = "admin.staff.manage"
@@ -36,6 +46,9 @@ class PermissionCode(StrEnum):
     ADMIN_CONTENT_MANAGE = "admin.content.manage"
     ADMIN_BROADCASTS_MANAGE = "admin.broadcasts.manage"
     ADMIN_FEEDBACK_MANAGE = "admin.feedback.manage"
+    ADMIN_REVIEWS_MANAGE = "admin.reviews.manage"
+    ADMIN_BULK_BONUS_MANAGE = "admin.bulk_bonus.manage"
+    ADMIN_DELIVERY_MANAGE = "admin.delivery.manage"
     OWNER_ADMINS_MANAGE = "owner.admins.manage"
     OWNER_EXPORT_DATA = "owner.export_data"
     OWNER_CRITICAL_SETTINGS = "owner.critical_settings"
@@ -68,6 +81,7 @@ class LoyaltyOperationType(StrEnum):
     POINTS_PRODUCT_PURCHASE = "points_product_purchase"
     WELCOME_BONUS = "welcome_bonus"
     ADMIN_ADJUSTMENT = "admin_adjustment"
+    BULK_BONUS = "bulk_bonus"
     OPERATION_REVERSAL = "operation_reversal"
     POINTS_EXPIRATION = "points_expiration"
     VISIT_MARK = "visit_mark"
@@ -94,6 +108,7 @@ class PointLotSourceType(StrEnum):
     WELCOME_BONUS = "welcome_bonus"
     REWARD_BONUS = "reward_bonus"
     ADMIN_ADJUSTMENT = "admin_adjustment"
+    BULK_BONUS = "bulk_bonus"
     REVERSAL = "reversal"
     WALLET_TRANSFER = "wallet_transfer"
     ACCOUNT_MERGE = "account_merge"
@@ -151,6 +166,64 @@ class PromotionActionType(StrEnum):
 
     PERCENT_DISCOUNT = "percent_discount"
     FIXED_DISCOUNT = "fixed_discount"
+
+
+class FulfillmentMode(StrEnum):
+    PICKUP = "pickup"
+    DELIVERY = "delivery"
+
+
+class OrderStatus(StrEnum):
+    NEW = "new"
+    CONFIRMED = "confirmed"
+    PREPARING = "preparing"
+    READY = "ready"
+    WAITING_FOR_COURIER = "waiting_for_courier"
+    COURIER_ASSIGNED = "courier_assigned"
+    PICKED_UP = "picked_up"
+    IN_TRANSIT = "in_transit"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+
+
+class PaymentMethod(StrEnum):
+    CASH = "cash"
+    CARD_ON_RECEIPT = "card_on_receipt"
+
+
+class PaymentStatus(StrEnum):
+    UNPAID = "unpaid"
+    PAID_EXTERNALLY = "paid_externally"
+    CANCELLED = "cancelled"
+
+
+class ReceiptSource(StrEnum):
+    MANUAL = "manual"
+    RKEEPER = "rkeeper"
+    OTHER_POS = "other_pos"
+
+
+class ReceiptStatus(StrEnum):
+    ACTIVE = "active"
+    CANCELLED = "cancelled"
+
+
+class ReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    HIDDEN = "hidden"
+
+
+class PassStatus(StrEnum):
+    ACTIVE = "active"
+    EXHAUSTED = "exhausted"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class BulkBonusStatus(StrEnum):
+    COMPLETED = "completed"
 
 
 class TipProfileStatus(StrEnum):

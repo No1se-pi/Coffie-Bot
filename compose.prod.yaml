@@ -130,6 +130,7 @@ services:
       target: production
       args:
         VITE_API_BASE_URL: /api/v1
+        VITE_TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
     image: ${FRONTEND_IMAGE:-coffie-bot-frontend:local}
     ports:
       - ${PROD_FRONTEND_BIND_ADDRESS:-127.0.0.1}:${PROD_FRONTEND_PORT:-8080}:80

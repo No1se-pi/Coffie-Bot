@@ -1,4 +1,4 @@
-export type Role = "customer" | "staff" | "admin" | "owner";
+export type Role = "customer" | "staff" | "courier" | "admin" | "owner";
 
 export interface Actor {
   id: string;
@@ -15,6 +15,16 @@ export interface AuthSession {
   access_token: string;
   expires_at: string;
   actor: Actor;
+}
+
+export interface TelegramWebLoginData {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
 }
 
 export interface ListResponse<T> {
@@ -193,6 +203,7 @@ export type HistoryType =
   | "reward_redeemed"
   | "reward_cancelled"
   | "admin_adjustment"
+  | "bulk_bonus"
   | "operation_reversal";
 
 export interface HistoryItem {
@@ -422,12 +433,246 @@ export interface CartPriceResponse {
       total_minor: number;
     }>;
     promotions: Array<{
-      promotion_id: string;
+      promotion_id: string | null;
       title: string;
       priority: number;
       discount_minor: number;
     }>;
   }>;
+}
+
+export type FulfillmentMode = "pickup" | "delivery";
+export type OrderStatus =
+  | "new"
+  | "confirmed"
+  | "preparing"
+  | "ready"
+  | "waiting_for_courier"
+  | "courier_assigned"
+  | "picked_up"
+  | "in_transit"
+  | "delivered"
+  | "cancelled";
+
+export interface CartLineDraft {
+  line_id: string;
+  menu_item_id: string;
+  quantity: number;
+  modifiers: Array<{ option_id: string; quantity: number }>;
+}
+
+export interface OrderCreateRequest {
+  fulfillment_mode: FulfillmentMode;
+  lines: CartLineDraft[];
+  point_redemptions: Array<{ venue_id: string; points: number }>;
+  pickup_location_id: string | null;
+  delivery_zone_id: string | null;
+  contact_phone: string;
+  delivery_address: string | null;
+  entrance: string | null;
+  apartment: string | null;
+  floor: string | null;
+  customer_comment: string | null;
+  desired_delivery_at: string | null;
+  payment_method: "cash" | "card_on_receipt";
+}
+
+export interface OrderOptions {
+  delivery_enabled: boolean;
+  minimum_order_minor: number;
+  fixed_fee_minor: number;
+  free_delivery_threshold_minor: number | null;
+  scheduling_allowed: boolean;
+  earliest_preparation_minutes: number;
+  pickup_locations: Array<{
+    id: string;
+    name: string;
+    address: string;
+    opening_hours: Record<string, unknown>;
+    comment: string | null;
+    preparation_minutes: number;
+  }>;
+  delivery_zones: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    fee_minor: number;
+    minimum_order_minor: number | null;
+  }>;
+}
+
+export interface CustomerOrder {
+  id: string;
+  number: number;
+  fulfillment_mode: FulfillmentMode;
+  status: OrderStatus;
+  status_version: number;
+  contact_phone: string;
+  delivery_address: string | null;
+  entrance: string | null;
+  apartment: string | null;
+  floor: string | null;
+  customer_comment: string | null;
+  desired_delivery_at: string | null;
+  pickup_name: string | null;
+  pickup_address: string | null;
+  delivery_zone_name: string | null;
+  subtotal_minor: number;
+  promotion_discount_minor: number;
+  points_discount_minor: number;
+  delivery_fee_minor: number;
+  total_minor: number;
+  payment_method: "cash" | "card_on_receipt";
+  payment_status: "unpaid" | "paid_externally" | "cancelled";
+  created_at: string;
+  updated_at: string;
+  idempotent_replay: boolean;
+  suborders: Array<{
+    id: string;
+    venue_id: string;
+    venue_name: string;
+    status: OrderStatus;
+    subtotal_minor: number;
+    promotion_discount_minor: number;
+    points_discount_minor: number;
+    total_minor: number;
+    lines: Array<{
+      id: string;
+      menu_item_id: string | null;
+      name: string;
+      quantity: number;
+      unit_base_price_minor: number;
+      unit_modifiers_price_minor: number;
+      subtotal_minor: number;
+      promotion_discount_minor: number;
+      points_discount_minor: number;
+      total_minor: number;
+      modifiers: Array<{
+        id: string;
+        option_id: string | null;
+        group_name: string;
+        name: string;
+        quantity: number;
+        unit_price_delta_minor: number;
+        total_price_delta_minor: number;
+      }>;
+    }>;
+    promotions: Array<{
+      id: string;
+      promotion_id: string | null;
+      title: string;
+      priority: number;
+      discount_minor: number;
+    }>;
+  }>;
+  events: Array<{
+    id: string;
+    suborder_id: string | null;
+    from_status: OrderStatus | null;
+    to_status: OrderStatus;
+    reason: string | null;
+    comment: string | null;
+    created_at: string;
+  }>;
+}
+
+/** Courier DTO deliberately omits loyalty, Telegram identifiers and audit history. */
+export interface CourierOrder {
+  id: string;
+  number: number;
+  status: OrderStatus;
+  status_version: number;
+  venue_names: string[];
+  delivery_zone_name: string | null;
+  desired_delivery_at: string | null;
+  created_at: string;
+  customer_name: string | null;
+  contact_phone: string | null;
+  delivery_address: string | null;
+  entrance: string | null;
+  apartment: string | null;
+  floor: string | null;
+  customer_comment: string | null;
+}
+
+export interface CourierOption {
+  id: string;
+  display_name: string;
+}
+
+export interface Receipt {
+  id: string;
+  user_id: string;
+  customer_name: string;
+  venue_id: string;
+  venue_name: string;
+  amount_minor: number;
+  image_media_id: string | null;
+  source: "manual" | "rkeeper" | "other_pos";
+  external_id: string | null;
+  receipt_number: string | null;
+  fiscal_data: Record<string, unknown>;
+  note: string | null;
+  status: "active" | "cancelled";
+  current_revision: number;
+  created_at: string;
+  updated_at: string;
+  idempotent_replay: boolean;
+  revisions: Array<{
+    revision: number;
+    image_media_id: string | null;
+    receipt_number: string | null;
+    external_id: string | null;
+    fiscal_data: Record<string, unknown>;
+    note: string | null;
+    changed_fields: string[];
+    created_at: string;
+  }>;
+  risk_flags: Array<{
+    code: string;
+    details: Record<string, unknown>;
+    created_at: string;
+    resolved_at: string | null;
+  }>;
+}
+
+export interface AdminDeliverySettings {
+  id: string;
+  delivery_enabled: boolean;
+  minimum_order_minor: number;
+  fixed_fee_minor: number;
+  free_delivery_threshold_minor: number | null;
+  scheduling_allowed: boolean;
+  earliest_preparation_minutes: number;
+  operating_hours: Record<string, unknown>;
+  default_pickup_location_id: string | null;
+  consolidation_location_id: string | null;
+}
+
+export type AdminDeliverySettingsDraft = Omit<AdminDeliverySettings, "id">;
+
+export interface AdminDeliveryZone {
+  id: string;
+  name: string;
+  description: string | null;
+  fee_minor: number;
+  minimum_order_minor: number | null;
+  is_active: boolean;
+  sort_order: number;
+  archived: boolean;
+}
+
+export type AdminDeliveryZoneDraft = Omit<AdminDeliveryZone, "id" | "archived">;
+
+export interface AdminFulfillmentLocation {
+  id: string;
+  name: string;
+  address: string;
+  is_active: boolean;
+  pickup_enabled: boolean;
+  consolidation_enabled: boolean;
+  pickup_comment: string | null;
+  preparation_minutes: number;
 }
 
 export interface ContactLocation {
@@ -636,6 +881,15 @@ export interface AdminUser extends AdminUserListItem {
   active_card?: boolean;
   birthday?: BirthdayValue | null;
   birthday_locked?: boolean;
+  internal_note?: string | null;
+}
+
+export interface CustomerIdentity {
+  id: string;
+  provider: CustomerIdentityProvider;
+  subject: string;
+  verified: boolean;
+  verified_at: string | null;
 }
 
 export interface AuditEvent {
@@ -678,7 +932,13 @@ export type OperationalPermission =
   | "stamps.add"
   | "rewards.redeem"
   | "operations.reverse_own"
-  | "tip_profile.manage_own";
+  | "tip_profile.manage_own"
+  | "orders.read"
+  | "orders.manage"
+  | "receipts.read"
+  | "receipts.manage"
+  | "subscriptions.read"
+  | "subscriptions.manage";
 
 export interface PermissionOverride {
   permission: OperationalPermission;
@@ -816,11 +1076,49 @@ export type LoyaltyRewardConfig =
   | { kind: "points"; points: number };
 
 export interface AdminOverview {
-  users_total: number;
-  blocked_users: number;
+  generated_at: string;
+  orders_today: number;
+  active_orders: number;
+  customers: number;
+  new_customers_today: number;
+  loyalty_accrual_today: number;
+  loyalty_redemption_today: number;
+  manual_receipts_today: number;
   suspicious_events: number;
   active_promotions: number;
+  reviews_waiting_moderation: number;
+  courier_orders: number;
   recent_events: AuditEvent[];
+}
+
+export interface DailyOrderMetric {
+  day: string;
+  orders: number;
+  revenue_minor: number;
+}
+
+export interface NamedMetric {
+  id: string | null;
+  name: string;
+  count: number;
+  amount_minor: number;
+}
+
+export interface AdminAnalytics {
+  generated_at: string;
+  days: number;
+  started_at: string;
+  ended_at: string;
+  orders_by_day: DailyOrderMetric[];
+  orders_by_venue: NamedMetric[];
+  popular_items: NamedMetric[];
+  promotion_usage: NamedMetric[];
+  employee_activity: NamedMetric[];
+  loyalty: { accrued_points: number; redeemed_points: number };
+  customers: { active_customers: number; repeat_customers: number };
+  subscriptions: { issued: number; uses: number; active: number };
+  receipts: { created: number; amount_minor: number; suspicious: number };
+  delivery: { orders: number; completed: number; cancelled: number };
 }
 
 export interface AdjustmentPreview {
@@ -832,4 +1130,97 @@ export interface AdjustmentPreview {
   reason: string;
   venue_id: string | null;
   scope_label: string;
+}
+
+export type ReviewStatus = "pending" | "approved" | "rejected" | "hidden";
+
+export interface PublicReview {
+  id: string;
+  venue_id: string;
+  venue_name: string;
+  order_id: string | null;
+  employee_staff_id: string | null;
+  employee_name: string | null;
+  rating: number;
+  text: string;
+  author_display_name: string;
+  status: ReviewStatus;
+  moderation_note: string | null;
+  created_at: string;
+  moderated_at: string | null;
+}
+
+export interface PassTemplate {
+  id: string;
+  name: string;
+  description: string;
+  image_media_id: string | null;
+  total_uses: number;
+  validity_days: number;
+  venue_ids: string[];
+  category_ids: string[];
+  item_ids: string[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export type CustomerPassStatus =
+  "active" | "exhausted" | "expired" | "cancelled";
+
+export interface CustomerPass {
+  id: string;
+  template_id: string;
+  user_id: string;
+  name: string;
+  description: string;
+  image_media_id: string | null;
+  total_uses: number;
+  remaining_uses: number;
+  status: CustomerPassStatus;
+  issued_at: string;
+  expires_at: string;
+  usage_count: number;
+  replay: boolean;
+}
+
+export interface PassUsage {
+  id: string;
+  pass_id: string;
+  venue_id: string;
+  item_id: string;
+  uses_before: number;
+  uses_after: number;
+  created_at: string;
+  replay: boolean;
+}
+
+export interface BulkBonusDraft {
+  customer_ids: string[];
+  points_per_user: number;
+  reason: string;
+  venue_id: string | null;
+}
+
+export interface BulkBonusPreview extends BulkBonusDraft {
+  recipient_count: number;
+  total_points: number;
+  preview_hash: string;
+}
+
+export interface BulkBonusResult {
+  id: string;
+  recipient_count: number;
+  points_per_user: number;
+  total_points: number;
+  reason: string;
+  venue_id: string | null;
+  created_at: string;
+  replay: boolean;
+  items: Array<{
+    user_id: string;
+    operation_id: string;
+    points: number;
+    balance_before: number;
+    balance_after: number;
+  }>;
 }

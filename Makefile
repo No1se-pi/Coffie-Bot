@@ -5,6 +5,9 @@ COMPOSE_FILE ?= compose.yaml
 COMPOSE := docker compose --env-file "$(ENV_FILE)" -f "$(COMPOSE_FILE)"
 RUN_BACKEND := $(COMPOSE) run --rm backend
 RUN_FRONTEND := $(COMPOSE) run --rm frontend
+# Tests must not inherit development-only auth/debug values. The extra read-only
+# mount preserves the repository-relative seed path used both locally and in CI.
+RUN_BACKEND_TEST := $(COMPOSE) run --rm -e APP_ENV=test -e APP_DEBUG=false -e DEV_AUTH_ENABLED=false --volume "$(CURDIR)/configs:/configs:ro" backend
 SEED_FILE ?= /app/configs/demo-seed.json
 
 .PHONY: help install dev up down logs migrate migration seed create-owner test lint format format-check typecheck backup restore deploy compose-check prod-up prod-down prod-logs
@@ -52,7 +55,7 @@ create-owner: ## Create/update the first owner; requires OWNER_TELEGRAM_ID.
 	$(RUN_BACKEND) python -m app.cli create-owner --telegram-id "$(OWNER_TELEGRAM_ID)" $(if $(strip $(OWNER_NAME)),--display-name "$(OWNER_NAME)",)
 
 test: ## Run backend and frontend tests.
-	$(RUN_BACKEND) pytest
+	$(RUN_BACKEND_TEST) pytest
 	$(RUN_FRONTEND) npm run test
 
 lint: ## Run backend and frontend linters.

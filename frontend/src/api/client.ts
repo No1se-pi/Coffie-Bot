@@ -3,10 +3,16 @@ import type {
   Actor,
   AdminModifierGroup,
   AdminModifierGroupDraft,
+  AdminAnalytics,
   AdminCustomerBirthday,
   AdminStaffMember,
   AdminOverview,
   AdminFeedback,
+  AdminDeliverySettings,
+  AdminDeliverySettingsDraft,
+  AdminDeliveryZone,
+  AdminDeliveryZoneDraft,
+  AdminFulfillmentLocation,
   AdminLoyaltyV2Settings,
   AdminLoyaltyV2Update,
   AdminUser,
@@ -15,15 +21,23 @@ import type {
   AuditEvent,
   AuthSession,
   BirthdayValue,
+  BulkBonusDraft,
+  BulkBonusPreview,
+  BulkBonusResult,
   CardData,
   CartPriceRequest,
   CartPriceResponse,
+  CustomerOrder,
+  CourierOrder,
+  CourierOption,
   ContactsData,
   CustomerMergeConfirmRequest,
   CustomerMergePreview,
   CustomerMergePreviewRequest,
   CustomerMergeResult,
+  CustomerIdentity,
   CustomerBirthday,
+  CustomerPass,
   CustomerWalletSummary,
   HistoryItem,
   HomeData,
@@ -35,6 +49,9 @@ import type {
   MenuItemDraft,
   MediaUpload,
   OperationResult,
+  OrderCreateRequest,
+  OrderOptions,
+  OrderStatus,
   PhoneCustomer,
   PhoneCustomerCreate,
   Promotion,
@@ -46,6 +63,7 @@ import type {
   PublicMoreData,
   PurchasePreview,
   RedemptionPreview,
+  Receipt,
   Reward,
   Role,
   StaffClient,
@@ -54,7 +72,12 @@ import type {
   StaffMemberDraft,
   StaffProfile,
   TipProfile,
+  TelegramWebLoginData,
   PendingTipProfile,
+  PassTemplate,
+  PassUsage,
+  PublicReview,
+  ReviewStatus,
   Venue,
   WalletModeChangeResult,
   WalletModeConfirmRequest,
@@ -178,11 +201,22 @@ async function request<T>(
 }
 
 function queryString(
-  values: Record<string, string | number | boolean | undefined>,
+  values: Record<
+    string,
+    | string
+    | number
+    | boolean
+    | readonly (string | number | boolean)[]
+    | undefined
+  >,
 ): string {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") params.set(key, String(value));
+    if (Array.isArray(value)) {
+      value.forEach((item) => params.append(key, String(item)));
+    } else if (value !== undefined && value !== "") {
+      params.set(key, String(value));
+    }
   });
   const value = params.toString();
   return value ? `?${value}` : "";
@@ -278,6 +312,10 @@ async function bootstrapAuth(initData: string): Promise<AuthSession> {
     method: "POST",
     body: jsonBody({ init_data: initData }),
   });
+  return normalizeAuth(raw);
+}
+
+function normalizeAuth(raw: RawAuthResponse): AuthSession {
   const staffRole = raw.staff?.role;
   const role = staffRole ?? raw.user.role ?? "customer";
   const availableRoles =
@@ -299,6 +337,16 @@ async function bootstrapAuth(initData: string): Promise<AuthSession> {
   };
   setSessionToken(session.access_token);
   return session;
+}
+
+async function telegramWebLogin(
+  payload: TelegramWebLoginData,
+): Promise<AuthSession> {
+  const raw = await request<RawAuthResponse>("/auth/telegram/web", {
+    method: "POST",
+    body: jsonBody(payload),
+  });
+  return normalizeAuth(raw);
 }
 
 async function getHome(): Promise<HomeData> {
@@ -335,26 +383,14 @@ async function getMore(): Promise<PublicMoreData> {
 
 async function getAdminOverview(): Promise<AdminOverview> {
   if (isDemoMode) return demoApi.getAdminOverview();
-  const [users, blocked, events, suspicious, promotions] = await Promise.all([
-    request<ListResponse<AdminUserListItem>>("/admin/users?page=1&page_size=1"),
-    request<ListResponse<AdminUserListItem>>(
-      "/admin/users?status=blocked&page=1&page_size=1",
-    ),
+  const [dashboard, events] = await Promise.all([
+    request<Omit<AdminOverview, "recent_events">>("/admin/dashboard"),
     request<ListResponse<BackendAuditEvent>>(
       "/admin/events?page=1&page_size=5",
     ),
-    request<ListResponse<BackendAuditEvent>>(
-      "/admin/events?suspicious=true&page=1&page_size=1",
-    ),
-    request<ListResponse<Promotion>>(
-      "/admin/promotions?status=published&page=1&page_size=1",
-    ),
   ]);
   return {
-    users_total: users.total,
-    blocked_users: blocked.total,
-    suspicious_events: suspicious.total,
-    active_promotions: promotions.total,
+    ...dashboard,
     recent_events: events.items.map(normalizeAuditEvent),
   };
 }
@@ -462,6 +498,7 @@ const operationDescriptions: Record<HistoryItem["type"], string> = {
   reward_redeemed: "Погашена награда",
   reward_cancelled: "Награда отменена",
   admin_adjustment: "Корректировка администратором",
+  bulk_bonus: "Массовый бонус",
   operation_reversal: "Отмена операции",
 };
 
@@ -555,6 +592,7 @@ function normalizeAuditEvent(event: BackendAuditEvent): AuditEvent {
 export const coffeeApi = {
   isDemo: isDemoMode,
   bootstrapAuth,
+  telegramWebLogin,
   async logout(): Promise<void> {
     if (!isDemoMode) await request<void>("/auth/logout", { method: "POST" });
     setSessionToken(null);
@@ -590,6 +628,145 @@ export const coffeeApi = {
   getMenu,
   priceCart: (payload: CartPriceRequest): Promise<CartPriceResponse> =>
     request("/cart/price", { method: "POST", body: jsonBody(payload) }),
+  getOrderOptions: (): Promise<OrderOptions> => request("/order-options"),
+  createOrder: (
+    payload: OrderCreateRequest,
+    idempotencyKey = uuid(),
+  ): Promise<CustomerOrder> =>
+    request("/orders", {
+      method: "POST",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
+  getOrders: (active?: boolean): Promise<{ items: CustomerOrder[] }> =>
+    request(`/orders${queryString({ active, limit: 100 })}`),
+  getOrder: (id: string): Promise<CustomerOrder> =>
+    request(`/orders/${encodeURIComponent(id)}`),
+  cancelOrder: (id: string, reason: string): Promise<CustomerOrder> =>
+    request(`/orders/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: jsonBody({ reason }),
+    }),
+  getStaffOrders: (
+    venueId?: string,
+    statuses?: OrderStatus[],
+  ): Promise<{ items: CustomerOrder[] }> =>
+    request(
+      `/staff/orders${queryString({ venue_id: venueId, statuses, limit: 200 })}`,
+    ),
+  getStaffOrder: (id: string): Promise<CustomerOrder> =>
+    request(`/staff/orders/${encodeURIComponent(id)}`),
+  transitionOrder: (
+    id: string,
+    status: OrderStatus,
+    reason: string | null = null,
+    comment: string | null = null,
+  ): Promise<CustomerOrder> =>
+    request(`/staff/orders/${encodeURIComponent(id)}/transition`, {
+      method: "POST",
+      body: jsonBody({ status, reason, comment }),
+    }),
+  transitionSuborder: (
+    id: string,
+    status: OrderStatus,
+    reason: string | null = null,
+    comment: string | null = null,
+  ): Promise<CustomerOrder> =>
+    request(`/staff/suborders/${encodeURIComponent(id)}/transition`, {
+      method: "POST",
+      body: jsonBody({ status, reason, comment }),
+    }),
+  getAvailableCourierOrders: (): Promise<{ items: CourierOrder[] }> =>
+    request("/courier/orders/available?limit=100"),
+  getMyCourierOrders: (
+    includeCompleted = false,
+  ): Promise<{ items: CourierOrder[] }> =>
+    request(
+      `/courier/orders/mine${queryString({ include_completed: includeCompleted, limit: 100 })}`,
+    ),
+  getCourierOrder: (id: string): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}`),
+  claimCourierOrder: (id: string): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}/claim`, {
+      method: "POST",
+      idempotencyKey: uuid(),
+    }),
+  declineCourierOrder: (id: string): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}/decline`, {
+      method: "POST",
+      idempotencyKey: uuid(),
+    }),
+  transitionCourierOrder: (
+    id: string,
+    action: "pickup" | "in-transit" | "delivered",
+  ): Promise<CourierOrder> =>
+    request(`/courier/orders/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      idempotencyKey: uuid(),
+    }),
+  assignCourier: (
+    orderId: string,
+    courierStaffId: string,
+  ): Promise<CourierOrder> =>
+    request(`/staff/orders/${encodeURIComponent(orderId)}/courier`, {
+      method: "POST",
+      body: jsonBody({ courier_staff_id: courierStaffId }),
+      idempotencyKey: uuid(),
+    }),
+  getCourierOptions: (): Promise<{ items: CourierOption[] }> =>
+    request("/staff/couriers"),
+  uploadReceiptMedia: async (file: File): Promise<MediaUpload> => {
+    const body = new FormData();
+    body.append("upload", file);
+    return request<MediaUpload>("/staff/receipts/media", {
+      method: "POST",
+      body,
+    });
+  },
+  createReceipt: (
+    payload: {
+      user_id: string;
+      venue_id: string;
+      amount_minor: number;
+      image_media_id: string;
+      receipt_number: string | null;
+      external_id: string | null;
+      fiscal_data: Record<string, unknown>;
+      note: string | null;
+      source: "manual";
+    },
+    idempotencyKey = uuid(),
+  ): Promise<Receipt> =>
+    request("/staff/receipts", {
+      method: "POST",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
+  getReceipts: (): Promise<{ items: Receipt[] }> =>
+    request("/staff/receipts?limit=100"),
+  getReceipt: (id: string): Promise<Receipt> =>
+    request(`/staff/receipts/${encodeURIComponent(id)}`),
+  editReceipt: (
+    id: string,
+    payload: {
+      image_media_id: string | null;
+      receipt_number: string | null;
+      external_id: string | null;
+      fiscal_data: Record<string, unknown>;
+      note: string | null;
+    },
+    idempotencyKey = uuid(),
+  ): Promise<Receipt> =>
+    request(`/staff/receipts/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
+  cancelReceipt: (id: string, idempotencyKey = uuid()): Promise<Receipt> =>
+    request(`/staff/receipts/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      idempotencyKey,
+    }),
   getPostPurchase: (operationId: string): Promise<PostPurchase> =>
     isDemoMode
       ? Promise.resolve({
@@ -848,6 +1025,10 @@ export const coffeeApi = {
     return request<MediaUpload>("/staff/me/media", { method: "POST", body });
   },
   getAdminOverview,
+  getAdminAnalytics: (days = 30): Promise<AdminAnalytics> =>
+    isDemoMode
+      ? demoApi.getAdminAnalytics(days)
+      : request(`/admin/analytics${queryString({ days })}`),
   getAdminUsers: (
     query?: string,
     status?: string,
@@ -865,6 +1046,63 @@ export const coffeeApi = {
             `/admin/users/${encodeURIComponent(id)}`,
           ),
         ),
+  getAdminUserHistory: async (
+    id: string,
+  ): Promise<ListResponse<HistoryItem>> => {
+    if (isDemoMode) return demoApi.getHistory();
+    const response = await request<ListResponse<BackendOperation>>(
+      `/admin/users/${encodeURIComponent(id)}/history?page=1&page_size=50`,
+    );
+    return {
+      ...response,
+      items: response.items.map(normalizeHistoryOperation),
+    };
+  },
+  getAdminCustomerIdentities: (
+    id: string,
+  ): Promise<{ items: CustomerIdentity[] }> =>
+    isDemoMode
+      ? Promise.resolve({ items: [] })
+      : request(`/admin/users/${encodeURIComponent(id)}/identities`),
+  updateAdminUserNote: async (
+    id: string,
+    internalNote: string | null,
+  ): Promise<AdminUser> =>
+    isDemoMode
+      ? demoApi.getAdminUser(id)
+      : normalizeAdminUser(
+          await request<BackendAdminUser>(
+            `/admin/users/${encodeURIComponent(id)}/note`,
+            {
+              method: "PATCH",
+              body: jsonBody({ internal_note: internalNote }),
+            },
+          ),
+        ),
+  setAdminUserBlocked: async (
+    id: string,
+    blocked: boolean,
+    reason: string,
+  ): Promise<{ status: string; blocked: boolean }> => {
+    if (isDemoMode) return { status: blocked ? "blocked" : "active", blocked };
+    return request(
+      `/admin/users/${encodeURIComponent(id)}/${blocked ? "block" : "unblock"}`,
+      {
+        method: "POST",
+        body: blocked ? jsonBody({ reason }) : undefined,
+        idempotencyKey: uuid(),
+      },
+    );
+  },
+  reissueAdminUserCard: (
+    id: string,
+  ): Promise<{ card_id: string; short_code: string }> =>
+    isDemoMode
+      ? Promise.resolve({ card_id: uuid(), short_code: "DEMO-CARD" })
+      : request(`/admin/users/${encodeURIComponent(id)}/cards/reissue`, {
+          method: "POST",
+          idempotencyKey: uuid(),
+        }),
   previewCustomerMerge: (
     payload: CustomerMergePreviewRequest,
   ): Promise<CustomerMergePreview> =>
@@ -1183,6 +1421,53 @@ export const coffeeApi = {
     );
     return value.items;
   },
+  getAdminDelivery: async (): Promise<{
+    settings: AdminDeliverySettings;
+    zones: AdminDeliveryZone[];
+    locations: AdminFulfillmentLocation[];
+  }> => {
+    const [settings, zones, locations] = await Promise.all([
+      request<AdminDeliverySettings>("/admin/delivery/settings"),
+      request<{ items: AdminDeliveryZone[] }>("/admin/delivery/zones"),
+      request<{ items: AdminFulfillmentLocation[] }>(
+        "/admin/delivery/locations",
+      ),
+    ]);
+    return { settings, zones: zones.items, locations: locations.items };
+  },
+  saveAdminDeliverySettings: (
+    payload: AdminDeliverySettingsDraft,
+  ): Promise<AdminDeliverySettings> =>
+    request("/admin/delivery/settings", {
+      method: "PUT",
+      body: jsonBody(payload),
+    }),
+  saveAdminDeliveryZone: (
+    zone: AdminDeliveryZone | null,
+    payload: AdminDeliveryZoneDraft,
+  ): Promise<AdminDeliveryZone> =>
+    request(
+      zone
+        ? `/admin/delivery/zones/${encodeURIComponent(zone.id)}`
+        : "/admin/delivery/zones",
+      { method: zone ? "PUT" : "POST", body: jsonBody(payload) },
+    ),
+  archiveAdminDeliveryZone: (id: string): Promise<AdminDeliveryZone> =>
+    request(`/admin/delivery/zones/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+    }),
+  saveAdminFulfillmentLocation: (
+    location: AdminFulfillmentLocation,
+  ): Promise<AdminFulfillmentLocation> =>
+    request(`/admin/delivery/locations/${encodeURIComponent(location.id)}`, {
+      method: "PUT",
+      body: jsonBody({
+        pickup_enabled: location.pickup_enabled,
+        consolidation_enabled: location.consolidation_enabled,
+        pickup_comment: location.pickup_comment,
+        preparation_minutes: location.preparation_minutes,
+      }),
+    }),
   saveAdminModifierGroup: (
     group: AdminModifierGroup | null,
     payload: AdminModifierGroupDraft,
@@ -1277,4 +1562,104 @@ export const coffeeApi = {
             idempotencyKey: uuid(),
           },
         ).then(normalizeOperationResult),
+  getReviews: (venueId?: string): Promise<{ items: PublicReview[] }> =>
+    isDemoMode
+      ? Promise.resolve({ items: [] })
+      : request(`/reviews${queryString({ venue_id: venueId, limit: 100 })}`),
+  getMyReviews: (): Promise<{ items: PublicReview[] }> =>
+    isDemoMode ? Promise.resolve({ items: [] }) : request("/me/reviews"),
+  createReview: (payload: {
+    venue_id: string;
+    order_id: string | null;
+    employee_staff_id: string | null;
+    rating: number;
+    text: string;
+    author_display_name: string | null;
+  }): Promise<PublicReview> =>
+    request("/reviews", { method: "POST", body: jsonBody(payload) }),
+  getAdminReviews: (
+    status?: ReviewStatus,
+  ): Promise<{ items: PublicReview[] }> =>
+    request(`/admin/reviews${queryString({ status, limit: 200 })}`),
+  moderateReview: (
+    id: string,
+    status: Exclude<ReviewStatus, "pending">,
+    moderationNote: string | null,
+  ): Promise<PublicReview> =>
+    request(`/admin/reviews/${encodeURIComponent(id)}/moderate`, {
+      method: "POST",
+      body: jsonBody({ status, moderation_note: moderationNote }),
+    }),
+  getMyPasses: (): Promise<{ items: CustomerPass[] }> =>
+    isDemoMode ? Promise.resolve({ items: [] }) : request("/me/subscriptions"),
+  getCustomerPasses: (userId: string): Promise<{ items: CustomerPass[] }> =>
+    request(`/staff/customers/${encodeURIComponent(userId)}/subscriptions`),
+  usePass: (
+    passId: string,
+    venueId: string,
+    itemId: string,
+    idempotencyKey = uuid(),
+  ): Promise<PassUsage> =>
+    request(`/staff/subscriptions/${encodeURIComponent(passId)}/use`, {
+      method: "POST",
+      body: jsonBody({ venue_id: venueId, item_id: itemId }),
+      idempotencyKey,
+    }),
+  getPassTemplates: (activeOnly = false): Promise<{ items: PassTemplate[] }> =>
+    request(
+      `/admin/subscriptions/templates${queryString({ active_only: activeOnly })}`,
+    ),
+  createPassTemplate: (payload: {
+    name: string;
+    description: string;
+    image_media_id: string | null;
+    total_uses: number;
+    validity_days: number;
+    venue_ids: string[];
+    category_ids: string[];
+    item_ids: string[];
+  }): Promise<PassTemplate> =>
+    request("/admin/subscriptions/templates", {
+      method: "POST",
+      body: jsonBody(payload),
+    }),
+  archivePassTemplate: (id: string): Promise<PassTemplate> =>
+    request(
+      `/admin/subscriptions/templates/${encodeURIComponent(id)}/archive`,
+      { method: "POST" },
+    ),
+  issuePass: (
+    userId: string,
+    templateId: string,
+    idempotencyKey = uuid(),
+  ): Promise<CustomerPass> =>
+    request("/admin/subscriptions/issue", {
+      method: "POST",
+      body: jsonBody({ user_id: userId, template_id: templateId }),
+      idempotencyKey,
+    }),
+  cancelPass: (
+    id: string,
+    reason: string,
+    idempotencyKey = uuid(),
+  ): Promise<CustomerPass> =>
+    request(`/admin/subscriptions/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: jsonBody({ reason }),
+      idempotencyKey,
+    }),
+  previewBulkBonus: (payload: BulkBonusDraft): Promise<BulkBonusPreview> =>
+    request("/admin/bulk-bonus/preview", {
+      method: "POST",
+      body: jsonBody(payload),
+    }),
+  confirmBulkBonus: (
+    payload: BulkBonusDraft & { preview_hash: string },
+    idempotencyKey: string,
+  ): Promise<BulkBonusResult> =>
+    request("/admin/bulk-bonus/confirm", {
+      method: "POST",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
 };

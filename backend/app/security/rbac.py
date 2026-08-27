@@ -33,6 +33,12 @@ STAFF_DEFAULT_PERMISSIONS = frozenset(
         PermissionCode.REWARDS_REDEEM,
         PermissionCode.OWN_OPERATIONS_REVERSE,
         PermissionCode.OWN_TIP_PROFILE_MANAGE,
+        PermissionCode.ORDERS_READ,
+        PermissionCode.ORDERS_MANAGE,
+        PermissionCode.RECEIPTS_READ,
+        PermissionCode.RECEIPTS_MANAGE,
+        PermissionCode.SUBSCRIPTIONS_READ,
+        PermissionCode.SUBSCRIPTIONS_MANAGE,
     }
 )
 ADMIN_PERMISSIONS = STAFF_DEFAULT_PERMISSIONS | frozenset(
@@ -45,6 +51,16 @@ ADMIN_PERMISSIONS = STAFF_DEFAULT_PERMISSIONS | frozenset(
         PermissionCode.ADMIN_CONTENT_MANAGE,
         PermissionCode.ADMIN_BROADCASTS_MANAGE,
         PermissionCode.ADMIN_FEEDBACK_MANAGE,
+        PermissionCode.ADMIN_REVIEWS_MANAGE,
+        PermissionCode.ADMIN_BULK_BONUS_MANAGE,
+        PermissionCode.ADMIN_DELIVERY_MANAGE,
+    }
+)
+COURIER_PERMISSIONS = frozenset(
+    {
+        PermissionCode.COURIER_ORDERS_READ,
+        PermissionCode.COURIER_ORDERS_CLAIM,
+        PermissionCode.COURIER_ORDERS_UPDATE,
     }
 )
 OWNER_PERMISSIONS = frozenset(PermissionCode)
@@ -73,6 +89,8 @@ def resolve_permissions(
         return OWNER_PERMISSIONS
     if role is Role.ADMIN:
         return ADMIN_PERMISSIONS
+    if role is Role.COURIER:
+        return COURIER_PERMISSIONS
 
     permissions = set(STAFF_DEFAULT_PERMISSIONS)
     for permission, allowed in (overrides or {}).items():

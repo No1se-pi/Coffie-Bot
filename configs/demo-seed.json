@@ -336,6 +336,20 @@
       "category_slugs": ["desserts"]
     }
   ],
+  "subscription_templates": [
+    {
+      "slug": "coffee-20",
+      "name": "Абонемент на 20 кофе",
+      "description": "Синтетический пример абонемента для демонстрации и тестирования.",
+      "image_media_key": null,
+      "total_uses": 20,
+      "validity_days": 90,
+      "venue_slugs": ["coffee-point"],
+      "category_slugs": ["coffee"],
+      "menu_item_slugs": [],
+      "is_active": true
+    }
+  ],
   "development_only": {
     "staff_members": [
       {

@@ -43,11 +43,7 @@
 5. Параллельно погасить одну награду — успешен один запрос; повтор не меняет состояние.
 6. Попробовать погасить expired/cancelled reward.
 
-## Loyalty V2 и birthday (Phase 2, gate в работе)
-
-Этот раздел — acceptance plan для реализуемой Phase 2. Пункты не считаются
-пройденными до фактического запуска автотестов, migration и release gates;
-deployable-базой пока остаётся Phase 1.
+## Loyalty V2 и birthday (Phase 2)
 
 1. В shared mode провести покупку на 100 ₽ в каждом demo venue: backend должен начислить
    10, 7 и 5 баллов в один master wallet.
@@ -111,3 +107,22 @@ deployable-базой пока остаётся Phase 1.
 3. Проверить scanner в Telegram iOS, Android и Desktop; ручной код остаётся доступен всегда.
 4. Перезапустить backend/bot/worker во время pending notification/broadcast и убедиться в продолжении без дублей.
 5. Выполнить backup БД/media, восстановить в чистое окружение и повторить smoke-сценарий.
+6. Повредить копию `database.dump` после backup: restore должен
+   отказать по SHA-256 до остановки сервисов, а readiness остаться `ok`.
+
+## Desktop Web Admin
+
+1. Настроить hostname через BotFather `/setdomain`, открыть HTTPS URL вне Telegram и войти
+   через Login Widget. Изменённый/просроченный payload не должен создавать session.
+2. Проверить owner/admin/staff/customer аккаунты: sidebar и маршруты отображаются по роли,
+   а прямой запрос к запрещённому endpoint получает `403`.
+3. Сравнить dashboard «сегодня» с business-day boundary и записи PostgreSQL; завершённые и
+   отменённые заказы не входят в active, а заказ `picked_up` остаётся активным.
+4. Переключить analytics 7/30/90 дней и сверить тихие дни, суммы, risk receipts и promotion
+   usage. В browser payload/ответах analytics не должно быть телефонов, адресов и Telegram ID.
+5. Найти заказ по номеру/телефону/адресу/позиции, открыть все suborders/modifiers, провести
+   разрешённые статусы и отмену с причиной; проверить append-only history и audit.
+6. В карточке клиента сохранить внутреннюю заметку, заблокировать/разблокировать, перевыпустить
+   карту и проверить, что старый QR отозван; courier/customer DTO заметку не раскрывают.
+7. На ширине desktop проверить fixed sidebar и широкие формы/таблицы, затем на 320/390 px —
+   горизонтальную admin-навигацию без потери существующей мобильной админки.

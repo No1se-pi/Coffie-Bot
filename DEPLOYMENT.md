@@ -131,6 +131,23 @@ curl --fail https://coffee.example.com/api/v1/health/ready
 Не используйте HTTP URL, IP-адрес или другой origin в production. Frontend никогда не должен
 передавать backend собственный «доверенный» Telegram ID или role.
 
+## Telegram Login для Web Admin
+
+Чтобы администратор мог открыть тот же HTTPS URL в обычном desktop-браузере:
+
+1. Укажите username бота без `@` в `TELEGRAM_BOT_USERNAME`; production frontend получает его
+   как `VITE_TELEGRAM_BOT_USERNAME` во время Docker build.
+2. В BotFather выполните `/setdomain`, выберите этого бота и задайте только hostname Web Admin,
+   например `coffee.example.com`.
+3. Пересоберите frontend после изменения username или домена.
+4. Откройте URL вне Telegram и проверьте Login Widget под admin/owner-аккаунтом.
+5. Проверьте, что payload с изменённым `id`, `auth_date` или `hash`, а также просроченный payload
+   получает `401` и не создаёт session.
+
+Login Widget не передаёт frontend доверенную роль: backend проверяет подпись Telegram,
+сопоставляет identity и загружает текущие RBAC permissions из PostgreSQL. Выданная browser
+session использует тот же TTL, hash-only storage и отзыв, что и Mini App session.
+
 ## Persistent data
 
 Compose создаёт два боевых named volumes:
@@ -168,9 +185,10 @@ restore rehearsal в отдельном окружении. Скрипты не 
 ## Restore
 
 Restore полностью заменяет текущие БД и media, поэтому требует явного подтверждения. Сначала
-сделайте backup текущего состояния. Скрипт останавливает frontend/backend/bot/worker,
-восстанавливает PostgreSQL одной транзакцией, проверяет пути media archive, применяет текущие
-migrations и затем запускает сервисы.
+сделайте backup текущего состояния. До любой остановки скрипт сверяет SHA-256 обоих
+артефактов с manifest и fail-fast при несовпадении. Затем он останавливает
+frontend/backend/bot/worker, восстанавливает PostgreSQL одной транзакцией,
+проверяет пути media archive, применяет текущие migrations и только после этого запускает сервисы.
 
 Linux:
 

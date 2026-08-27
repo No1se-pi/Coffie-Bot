@@ -18,6 +18,17 @@ from app.models.content import (
 )
 from app.models.customers import CustomerIdentity, CustomerMerge
 from app.models.delivery import Broadcast, BroadcastDelivery, NotificationOutbox
+from app.models.engagement import (
+    BulkBonusBatch,
+    BulkBonusItem,
+    CustomerPass,
+    PassTemplate,
+    PassTemplateCategory,
+    PassTemplateItem,
+    PassTemplateVenue,
+    PassUsage,
+    PublicReview,
+)
 from app.models.loyalty import (
     LoyaltyOperation,
     LoyaltySettings,
@@ -39,6 +50,18 @@ from app.models.loyalty_v2 import (
     WalletTransfer,
 )
 from app.models.media import MediaFile
+from app.models.orders import (
+    CustomerOrder,
+    DeliverySettings,
+    DeliveryZone,
+    OrderAppliedPromotion,
+    OrderEvent,
+    OrderLine,
+    OrderLineModifier,
+    OrderPointRedemption,
+    OrderSuborder,
+)
+from app.models.receipts import Receipt, ReceiptRevision, ReceiptRiskFlag, ReceiptRiskSettings
 from app.models.staff import FeedbackItem, StaffTipProfile
 
 __all__ = [
@@ -48,8 +71,14 @@ __all__ = [
     "BirthdayPromotionVenue",
     "Broadcast",
     "BroadcastDelivery",
+    "BulkBonusBatch",
+    "BulkBonusItem",
     "CustomerIdentity",
     "CustomerMerge",
+    "CustomerOrder",
+    "CustomerPass",
+    "DeliverySettings",
+    "DeliveryZone",
     "FeedbackItem",
     "Location",
     "LoyaltyOperation",
@@ -62,6 +91,17 @@ __all__ = [
     "ModifierGroup",
     "ModifierOption",
     "NotificationOutbox",
+    "OrderAppliedPromotion",
+    "OrderEvent",
+    "OrderLine",
+    "OrderLineModifier",
+    "OrderPointRedemption",
+    "OrderSuborder",
+    "PassTemplate",
+    "PassTemplateCategory",
+    "PassTemplateItem",
+    "PassTemplateVenue",
+    "PassUsage",
     "PointAllocation",
     "PointLot",
     "PointLotRoute",
@@ -69,6 +109,11 @@ __all__ = [
     "Promotion",
     "PromotionMenuCategory",
     "PromotionMenuItem",
+    "PublicReview",
+    "Receipt",
+    "ReceiptRevision",
+    "ReceiptRiskFlag",
+    "ReceiptRiskSettings",
     "Reward",
     "RewardTemplate",
     "Session",

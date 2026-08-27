@@ -244,45 +244,45 @@ gate и фазового отчёта.
 
 ### Phase 4 — Orders
 
-- [ ] Cart reducer/UI and backend repricing.
-- [ ] Order/suborder models, create idempotency and snapshot.
-- [ ] Pickup/delivery settings/zones/fees and checkout.
-- [ ] State machines, event log, outbox notifications and customer tracking/history.
+- [x] Cart reducer/UI and backend repricing.
+- [x] Order/suborder models, create idempotency and snapshot.
+- [x] Pickup/delivery settings/zones/fees and checkout.
+- [x] State machines, event log, outbox notifications and customer tracking/history.
 
 ### Phase 5 — Courier
 
-- [ ] Courier role/permissions/privacy DTO.
-- [ ] Manual assignment and atomic self-claim.
-- [ ] Available/mine/detail mobile UI and allowed transitions.
-- [ ] Race/security tests and notifications.
+- [x] Courier role/permissions/privacy DTO.
+- [x] Manual assignment and atomic self-claim.
+- [x] Available/mine/detail mobile UI and allowed transitions.
+- [x] Race/security tests and notifications.
 
 ### Phase 6 — Receipts
 
-- [ ] Fast manual receipt flow via existing secure media.
-- [ ] Optional later metadata, immutable revisions and source/external ID.
-- [ ] Simple suspicious flags, staff UI and audit tests.
+- [x] Fast manual receipt flow via existing secure media.
+- [x] Optional later metadata, immutable revisions and source/external ID.
+- [x] Simple suspicious flags, staff UI and audit tests.
 
 ### Phase 7 — Reviews / Subscriptions / Bulk bonus
 
-- [ ] Public review creation and moderation.
-- [ ] Pass templates, issue/cancel/use and concurrent idempotent usage.
-- [ ] Bulk bonus preview/confirm with per-customer operations.
+- [x] Public review creation and moderation.
+- [x] Pass templates, issue/cancel/use and concurrent idempotent usage.
+- [x] Bulk bonus preview/confirm with per-customer operations.
 
 ### Phase 8 — Web Admin
 
-- [ ] Standalone safe Telegram web login over existing session model.
-- [ ] Desktop shell/sidebar/tables/forms/dialogs.
-- [ ] Dashboard, orders, customers/merge, menu, loyalty, promotions, staff/couriers,
+- [x] Standalone safe Telegram web login over existing session model.
+- [x] Desktop shell/sidebar/tables/forms/dialogs.
+- [x] Dashboard, orders, customers/merge, menu, loyalty, promotions, staff/couriers,
   receipts, reviews, analytics and help.
-- [ ] Mobile admin remains available.
+- [x] Mobile admin remains available.
 
 ### Phase 9 — Hardening и передача
 
-- [ ] Full lint/format/typecheck/tests/build/dependency audits.
-- [ ] Clean and `0007 -> head` migration tests plus seed.
-- [ ] Concurrency/idempotency/IDOR/privacy suite.
-- [ ] Compose images/startup/health and backup/restore rehearsal where environment permits.
-- [ ] Обновить все docs и финальный manual test plan.
+- [x] Full lint/format/typecheck/tests/build/dependency audits.
+- [x] Clean and `0007 -> head` migration tests plus seed.
+- [x] Concurrency/idempotency/IDOR/privacy suite.
+- [x] Compose images/startup/health and backup/restore rehearsal where environment permits.
+- [x] Обновить все docs и финальный manual test plan.
 
 ## Baseline GitHub Actions
 
@@ -365,3 +365,98 @@ gate и фазового отчёта.
   PostgreSQL 17. Backend suite: `236 passed`; frontend: `40 passed`, audit/build зелёные.
 - Development images собраны, backend/frontend smoke вернул `200`, а pricing route
   без сессии корректно закрыт `401`. Phase 4 сохраняет этот расчёт как order snapshot.
+
+### 2026-08-27 — Phase 4 Orders
+
+- Добавлен customer order с venue-suborders, неизменяемыми снимками позиций,
+  модификаторов, акций и цен; mixed-venue корзина создаётся одной транзакцией.
+- Создание защищено обязательным idempotency key и PostgreSQL advisory lock;
+  баллы списываются FIFO отдельно по venue-частям и восстанавливаются компенсацией
+  при допустимой отмене без переписывания исходного журнала.
+- Реализованы pickup/delivery, простые выбираемые зоны, server-side fee/minimum/free
+  threshold, расписание в timezone точки, точка выдачи и консолидации.
+- State machine синхронизирует order/suborders, пишет append-only events, audit и
+  notification outbox; клиент получил корзину, checkout, историю/детали, сотрудник —
+  очередь, администратор — настройки доставки, зон и точек.
+- Backend gates: Ruff/format, mypy и `245 passed` на PostgreSQL 17. Clean
+  `0001 -> 0013`, повторный seed и migration head прошли на отдельной базе.
+- Frontend gates: Prettier, TypeScript, ESLint, `42 passed`, production build и
+  `npm audit` без уязвимостей. Development Compose images/startup и health smoke
+  вернули backend live/ready `200` и frontend `200`.
+
+### 2026-08-27 — Phase 5 Courier
+
+- Добавлена изолированная роль `courier` с фиксированными правами только на delivery-заказы;
+  staff permission overrides не могут расширить её доступ.
+- Свободная очередь скрывает имя, телефон и адрес клиента. Поля доставки появляются только
+  у назначенного курьера; loyalty, birthday, internal note, Telegram ID и audit DTO отсутствуют.
+- Self-claim сериализован `SELECT FOR UPDATE`: два курьера не могут забрать один заказ.
+  Отказ разрешён только до pickup, затем действует цепочка picked up → in transit → delivered.
+- Staff/admin могут выбрать активного курьера из минимального справочника и назначить его
+  вручную. Claim, assignment, decline и статусы фиксируются в audit/order events и outbox.
+- Backend: Ruff/format/mypy и `249 passed` на PostgreSQL 17. Frontend: Prettier/ESLint/
+  TypeScript, `44 passed` и production build прошли.
+
+### 2026-08-27 — Phase 6 Manual Receipts
+
+- В карточку клиента добавлен быстрый staff flow: venue берётся из выбранной точки,
+  сотрудник вводит сумму, прикладывает JPEG/PNG/WebP и сохраняет ручной чек.
+- Фото проходит существующую проверку сигнатуры/MIME/размера, получает случайное имя и
+  выдаётся только через staff-authenticated URL; публичный media endpoint скрывает его 404.
+- Receipt хранит customer, venue, сумму, автора, фото и `source`; модель заранее допускает
+  rkeeper/other_pos и уникальный external ID, но текущий API разрешает только manual.
+- Номер, fiscal data, note, external ID и фото дополняются полной append-only ревизией.
+  Create/edit/cancel требуют idempotency key; все действия создают structured audit events.
+- Простые настраиваемые DB-сигналы отмечают высокую сумму, объём сотрудника/клиента,
+  повтор суммы/номера, отсутствие фото и частые отмены — без ML antifraud.
+- Backend gates: Ruff/format, mypy и `250 passed`; clean `0001 -> 0015`, двойной seed и
+  Alembic parity прошли. Frontend: Prettier/ESLint/TypeScript, `45 passed`, build и audit=0.
+
+### 2026-08-27 — Phase 7 Reviews / Subscriptions / Bulk bonus
+
+- Private feedback сохранён отдельно. Customer создаёт public review с venue и optional
+  order/employee; order ID проверяется по владельцу и venue. Публично выдаются только
+  approved, а approve/reject/hide и moderation note фиксируются в audit.
+- Pass template задаёт uses, validity и optional venue/category/item scope. Выдача и отмена
+  идемпотентны, issued snapshot не зависит от будущих изменений. Staff usage блокирует pass,
+  валидирует trusted menu item/venue и добавляет неизменяемую usage operation before/after.
+- Bulk bonus использует preview hash и explicit confirm. Audience пересчитывается и блокируется
+  в стабильном порядке; каждому клиенту создаются отдельные LoyaltyOperation, PointTransaction,
+  PointLot и notification outbox, массового UPDATE баланса нет.
+- Migration `0016` прошла clean `0001 -> 0016`, Alembic parity и двойной seed; seed содержит
+  один synthetic pass template и остаётся идемпотентным. Backend suite: `252 passed`.
+- Frontend добавляет customer reviews/passes, staff pass usage, review moderation, template
+  create/issue/archive с выбором заведений, категорий и позиций, а также bulk preview/confirm.
+  Prettier/TypeScript/ESLint и `48 passed` прошли.
+
+### 2026-08-28 — Phase 8 Web Admin
+
+- Добавлен отдельный Telegram Login Widget flow для обычного браузера. Backend независимо
+  проверяет Login Widget HMAC/TTL и выдаёт ту же hash-only session, что и Mini App; доверенные
+  Telegram ID или роль от frontend не принимаются.
+- Responsive admin shell сохраняет мобильную навигацию и включает desktop sidebar. Dashboard
+  показывает операционные метрики, а PostgreSQL analytics — заказы, выручку, заведения,
+  товары, акции, сотрудников, loyalty, клиентов, абонементы, чеки и доставку без внешнего SaaS.
+- Очередь заказов получила поиск/фильтр и полную карточку с suborders, modifiers, историей,
+  разрешёнными переходами и причиной отмены. Карточка клиента объединяет identities, историю,
+  абонементы, блокировку, перевыпуск QR и audit-safe внутреннюю заметку.
+- Добавлены desktop help, управление отзывом staff sessions и расширенные admin shortcuts.
+  Backend Ruff/format/mypy и `258 passed`; frontend Prettier/ESLint/TypeScript, `50 passed`,
+  `npm audit = 0` и production build прошли.
+
+### 2026-08-28 — Phase 9 Hardening
+
+- Backend повторно прошёл Ruff, format, mypy и `258 passed`; frontend —
+  Prettier, ESLint, TypeScript, `50 passed`, production build и `npm audit = 0`.
+  Linux `pip-audit` после обновления pip до 26.2.1 не нашёл известных уязвимостей.
+- Clean `0001 -> 0016` и legacy `0007 -> 0016` прошли Alembic upgrade/check и
+  двойной seed на отдельных PostgreSQL базах. Временные базы удалены.
+- Изолированный production Compose прошёл migrations, seed, frontend `200` и
+  backend readiness. На нём реальный backup/restore вернул БД к исходному
+  состоянию; повреждённая копия dump отклонена по SHA-256 до остановки
+  сервисов. Временные containers, volumes и images удалены.
+- PowerShell restore исправлен для Windows Docker CLI: shell program передаётся
+  в helper container как UTF-8 base64, не теряя regex quoting. `make test` больше
+  не наследует development debug/auth env и монтирует seed по CI-compatible пути.
+- PowerShell/POSIX scripts, demo JSON, development/production Compose и `git diff --check`
+  прошли проверку; основной development stack остался healthy.

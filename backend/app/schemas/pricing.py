@@ -64,7 +64,7 @@ class PricedLineResponse(ApiSchema):
 
 
 class AppliedPromotionResponse(ApiSchema):
-    promotion_id: UUID
+    promotion_id: UUID | None
     title: str
     priority: int
     discount_minor: int

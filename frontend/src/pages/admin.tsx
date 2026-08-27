@@ -38,6 +38,10 @@ import {
   Panel,
 } from "../components/ui";
 
+function errorMessage(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
 export function AdminOverviewPage() {
   const resource = useResource(coffeeApi.getAdminOverview);
   return (
@@ -49,17 +53,50 @@ export function AdminOverviewPage() {
       {resource.data && (
         <>
           <div className="metrics-grid metrics-grid--admin">
-            <Metric value={resource.data.users_total} label="клиентов" />
             <Metric
-              value={resource.data.active_promotions}
-              label="активных акций"
+              value={resource.data.orders_today}
+              label="заказов сегодня"
+            />
+            <Metric
+              value={resource.data.active_orders}
+              label="активных заказов"
               tone="accent"
             />
-            <Metric value={resource.data.blocked_users} label="блокировок" />
+            <Metric value={resource.data.customers} label="клиентов" />
+            <Metric
+              value={resource.data.new_customers_today}
+              label="новых сегодня"
+            />
+            <Metric
+              value={`+${resource.data.loyalty_accrual_today}`}
+              label="баллов начислено"
+              tone="accent"
+            />
+            <Metric
+              value={`−${resource.data.loyalty_redemption_today}`}
+              label="баллов списано"
+            />
+            <Metric
+              value={resource.data.manual_receipts_today}
+              label="ручных чеков"
+            />
             <Metric
               value={resource.data.suspicious_events}
               label="требуют внимания"
               tone="warning"
+            />
+            <Metric
+              value={resource.data.active_promotions}
+              label="активных акций"
+            />
+            <Metric
+              value={resource.data.reviews_waiting_moderation}
+              label="отзывов на модерации"
+              tone="warning"
+            />
+            <Metric
+              value={resource.data.courier_orders}
+              label="курьерских заказов"
             />
           </div>
           <div className="admin-shortcuts">
@@ -67,6 +104,11 @@ export function AdminOverviewPage() {
               <span>○</span>
               <strong>Пользователи</strong>
               <small>Поиск и корректировки</small>
+            </Link>
+            <Link to="/staff/orders">
+              <span>▣</span>
+              <strong>Заказы</strong>
+              <small>Статусы и выдача</small>
             </Link>
             <Link to="/admin/events">
               <span>↻</span>
@@ -92,6 +134,11 @@ export function AdminOverviewPage() {
               <span>★</span>
               <strong>Отзывы</strong>
               <small>Обратная связь клиентов</small>
+            </Link>
+            <Link to="/admin/analytics">
+              <span>⌁</span>
+              <strong>Аналитика</strong>
+              <small>Продажи и активность</small>
             </Link>
           </div>
           <Panel>
@@ -701,6 +748,12 @@ const staffPermissionLabels: Record<OperationalPermission, string> = {
   "rewards.redeem": "Погашение наград",
   "operations.reverse_own": "Отмена собственных операций",
   "tip_profile.manage_own": "Редактирование профиля и чаевых",
+  "orders.read": "Просмотр заказов",
+  "orders.manage": "Изменение статусов и назначение курьеров",
+  "receipts.read": "Просмотр ручных чеков",
+  "receipts.manage": "Создание, дополнение и отмена чеков",
+  "subscriptions.read": "Просмотр абонементов клиента",
+  "subscriptions.manage": "Использование абонементов",
 };
 
 const operationalPermissions = Object.keys(
@@ -747,6 +800,7 @@ function StaffMemberEditor({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const manageable =
     member.user_id !== currentUserId &&
     (member.role === "staff" ||
@@ -829,6 +883,25 @@ function StaffMemberEditor({
     }
   };
 
+  const revokeSessions = async () => {
+    if (!window.confirm("Завершить все активные сеансы сотрудника?")) return;
+    setBusy(true);
+    setError(null);
+    setSessionMessage(null);
+    try {
+      const result = await coffeeApi.revokeAdminStaffSessions(member.id);
+      setSessionMessage(`Завершено сеансов: ${result.revoked_sessions}`);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось завершить сеансы",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Panel className="staff-admin-card">
       <div className="section-heading">
@@ -842,7 +915,9 @@ function StaffMemberEditor({
                 ? "Владелец"
                 : member.role === "admin"
                   ? "Администратор"
-                  : "Сотрудник"}
+                  : member.role === "courier"
+                    ? "Курьер"
+                    : "Сотрудник"}
             </Badge>
           </div>
           <h2>{member.display_name}</h2>
@@ -887,6 +962,7 @@ function StaffMemberEditor({
                 disabled={!manageable}
               >
                 <option value="staff">Сотрудник</option>
+                <option value="courier">Курьер</option>
                 {canManageAdmins && (
                   <option value="admin">Администратор</option>
                 )}
@@ -936,6 +1012,7 @@ function StaffMemberEditor({
             </div>
           )}
           {error && <div className="inline-error">{error}</div>}
+          {sessionMessage && <p className="muted">{sessionMessage}</p>}
           <div className="action-row">
             <Button type="submit" disabled={busy}>
               {busy ? "Сохраняем…" : "Сохранить"}
@@ -956,6 +1033,14 @@ function StaffMemberEditor({
             >
               Удалить
             </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void revokeSessions()}
+              disabled={busy}
+            >
+              Завершить сеансы
+            </Button>
           </div>
         </form>
       )}
@@ -975,7 +1060,7 @@ export function AdminStaffPage() {
   const [active, setActive] = useState<"all" | "active" | "inactive">("active");
   const [showCreate, setShowCreate] = useState(false);
   const [userId, setUserId] = useState("");
-  const [role, setRole] = useState<"staff" | "admin">("staff");
+  const [role, setRole] = useState<"staff" | "courier" | "admin">("staff");
   const [displayName, setDisplayName] = useState("");
   const [position, setPosition] = useState("");
   const [permissions, setPermissions] = useState(defaultStaffPermissions);
@@ -1103,10 +1188,11 @@ export function AdminStaffPage() {
                 <select
                   value={role}
                   onChange={(event) =>
-                    setRole(event.target.value as "staff" | "admin")
+                    setRole(event.target.value as "staff" | "courier" | "admin")
                   }
                 >
                   <option value="staff">Сотрудник</option>
+                  <option value="courier">Курьер</option>
                   {canManageAdmins && (
                     <option value="admin">Администратор</option>
                   )}
@@ -1524,6 +1610,18 @@ export function AdminAdjustmentPage() {
   const { userId = "" } = useParams();
   const resource = useResource(() => coffeeApi.getAdminUser(userId), [userId]);
   const loyaltyResource = useResource(coffeeApi.getAdminLoyaltyV2);
+  const identitiesResource = useResource(
+    () => coffeeApi.getAdminCustomerIdentities(userId),
+    [userId],
+  );
+  const historyResource = useResource(
+    () => coffeeApi.getAdminUserHistory(userId),
+    [userId],
+  );
+  const passesResource = useResource(
+    () => coffeeApi.getCustomerPasses(userId),
+    [userId],
+  );
   const [direction, setDirection] = useState<"credit" | "debit">("credit");
   const [venueId, setVenueId] = useState("");
   const [amount, setAmount] = useState("");
@@ -1535,6 +1633,79 @@ export function AdminAdjustmentPage() {
     balance_after: number;
     delta_points: number;
   } | null>(null);
+  const [internalNote, setInternalNote] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
+  const [profileError, setProfileError] = useState("");
+
+  useEffect(() => {
+    if (resource.data) setInternalNote(resource.data.internal_note ?? "");
+  }, [resource.data]);
+
+  const saveInternalNote = async () => {
+    setProfileBusy(true);
+    setProfileMessage("");
+    setProfileError("");
+    try {
+      await coffeeApi.updateAdminUserNote(userId, internalNote.trim() || null);
+      setProfileMessage("Внутренняя заметка сохранена");
+      await resource.reload();
+    } catch (reasonValue) {
+      setProfileError(
+        errorMessage(reasonValue, "Не удалось сохранить заметку"),
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const toggleBlocked = async () => {
+    if (!resource.data) return;
+    const blocked = resource.data.status !== "blocked";
+    const reason = blocked
+      ? window.prompt("Причина блокировки")?.trim()
+      : "Доступ восстановлен администратором";
+    if (!reason) return;
+    setProfileBusy(true);
+    setProfileMessage("");
+    setProfileError("");
+    try {
+      await coffeeApi.setAdminUserBlocked(userId, blocked, reason);
+      setProfileMessage(
+        blocked ? "Клиент заблокирован" : "Клиент разблокирован",
+      );
+      await resource.reload();
+    } catch (reasonValue) {
+      setProfileError(
+        errorMessage(reasonValue, "Не удалось изменить доступ клиента"),
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const reissueCard = async () => {
+    if (
+      !window.confirm(
+        "Перевыпустить карту? Предыдущий QR сразу перестанет работать.",
+      )
+    )
+      return;
+    setProfileBusy(true);
+    setProfileMessage("");
+    setProfileError("");
+    try {
+      const card = await coffeeApi.reissueAdminUserCard(userId);
+      setProfileMessage(`Карта перевыпущена. Новый код: ${card.short_code}`);
+      await resource.reload();
+    } catch (reasonValue) {
+      setProfileError(
+        errorMessage(reasonValue, "Не удалось перевыпустить карту"),
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  };
 
   const makePreview = (event: FormEvent) => {
     event.preventDefault();
@@ -1617,7 +1788,7 @@ export function AdminAdjustmentPage() {
   };
 
   return (
-    <Page title="Корректировка баланса" eyebrow="Опасное действие">
+    <Page title="Карточка клиента" eyebrow="Управление клиентом">
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
@@ -1643,6 +1814,77 @@ export function AdminAdjustmentPage() {
               {result?.balance_after ?? resource.data.balance_points}
               <small>баллов</small>
             </strong>
+          </Panel>
+          <Panel>
+            <div className="section-heading">
+              <div>
+                <h2>Профиль и доступ</h2>
+                <p className="muted">
+                  Карта: {resource.data.active_card ? "активна" : "неактивна"} ·
+                  статус: {resource.data.status}
+                </p>
+              </div>
+              <Badge
+                tone={resource.data.status === "active" ? "success" : "danger"}
+              >
+                {resource.data.status === "active" ? "Активен" : "Заблокирован"}
+              </Badge>
+            </div>
+            <div className="tag-row">
+              {(identitiesResource.data?.items ?? []).map((identity) => (
+                <Badge
+                  key={identity.id}
+                  tone={identity.verified ? "success" : "neutral"}
+                >
+                  {identity.provider}: {identity.subject}
+                </Badge>
+              ))}
+            </div>
+            <Field
+              label="Внутренняя заметка"
+              hint="Видна только сотрудникам с правом управления клиентами"
+            >
+              <textarea
+                value={internalNote}
+                maxLength={4000}
+                rows={3}
+                onChange={(event) => setInternalNote(event.target.value)}
+              />
+            </Field>
+            {profileMessage && <p className="muted">{profileMessage}</p>}
+            {profileError && <p className="form-error">{profileError}</p>}
+            <div className="action-row">
+              <Button
+                disabled={profileBusy}
+                onClick={() => void saveInternalNote()}
+              >
+                Сохранить заметку
+              </Button>
+              <Button
+                variant={
+                  resource.data.status === "blocked" ? "secondary" : "danger"
+                }
+                disabled={profileBusy}
+                onClick={() => void toggleBlocked()}
+              >
+                {resource.data.status === "blocked"
+                  ? "Разблокировать"
+                  : "Заблокировать"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={profileBusy}
+                onClick={() => void reissueCard()}
+              >
+                Перевыпустить карту
+              </Button>
+              <Link
+                className="button button--secondary"
+                to="/admin/subscriptions"
+              >
+                Выдать абонемент
+              </Link>
+            </div>
           </Panel>
           <AdminBirthdayEditor
             userId={resource.data.id}
@@ -1853,6 +2095,45 @@ export function AdminAdjustmentPage() {
               </div>
             )}
           </Panel>
+          <div className="analytics-grid">
+            <Panel>
+              <h2>Последние операции</h2>
+              {historyResource.loading && <Loader />}
+              {(historyResource.data?.items ?? [])
+                .slice(0, 10)
+                .map((operation) => (
+                  <div className="order-event" key={operation.id}>
+                    <span>
+                      {operation.description} ·{" "}
+                      {(operation.delta_points ?? 0) > 0 ? "+" : ""}
+                      {operation.delta_points ?? 0}
+                    </span>
+                    <small>{formatDateTime(operation.created_at)}</small>
+                  </div>
+                ))}
+              {!historyResource.loading &&
+                !historyResource.data?.items.length && (
+                  <p className="muted">Операций пока нет.</p>
+                )}
+            </Panel>
+            <Panel>
+              <h2>Абонементы</h2>
+              {passesResource.loading && <Loader />}
+              {(passesResource.data?.items ?? []).map((pass) => (
+                <div className="order-event" key={pass.id}>
+                  <span>{pass.name}</span>
+                  <small>
+                    {pass.remaining_uses}/{pass.total_uses} · до{" "}
+                    {formatDateTime(pass.expires_at)}
+                  </small>
+                </div>
+              ))}
+              {!passesResource.loading &&
+                !passesResource.data?.items.length && (
+                  <p className="muted">Абонементов нет.</p>
+                )}
+            </Panel>
+          </div>
         </>
       )}
     </Page>

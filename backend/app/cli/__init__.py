@@ -59,6 +59,7 @@ async def run_command(args: argparse.Namespace, settings: Settings) -> int:
                     f"{report.reward_templates} rewards, "
                     f"{report.menu_items} menu items, "
                     f"{report.promotions} promotions, "
+                    f"{report.subscription_templates} subscription templates, "
                     f"{report.development_staff} development staff."
                 )
                 return 0

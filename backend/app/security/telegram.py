@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 from urllib.parse import parse_qsl
@@ -142,3 +143,71 @@ class TelegramInitDataVerifier:
             message="Invalid Telegram authorization data",
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
+
+
+class TelegramLoginVerifier:
+    """Validate the signed payload returned by Telegram's browser login widget."""
+
+    _allowed_fields = frozenset(
+        {"id", "first_name", "last_name", "username", "photo_url", "auth_date", "hash"}
+    )
+
+    def __init__(
+        self,
+        *,
+        bot_token: str,
+        ttl: timedelta,
+        future_skew: timedelta = timedelta(seconds=30),
+    ) -> None:
+        if not bot_token:
+            raise ValueError("bot_token must not be empty")
+        if ttl <= timedelta(0):
+            raise ValueError("ttl must be positive")
+        if future_skew < timedelta(0):
+            raise ValueError("future_skew must not be negative")
+        self._bot_token = bot_token
+        self._ttl = ttl
+        self._future_skew = future_skew
+
+    def verify(
+        self,
+        payload: Mapping[str, str | int | None],
+        *,
+        now: datetime | None = None,
+    ) -> TelegramUserData:
+        current_time = now or datetime.now(UTC)
+        if current_time.tzinfo is None or current_time.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        if not payload or not set(payload).issubset(self._allowed_fields):
+            TelegramInitDataVerifier._raise_invalid()
+
+        fields = {key: str(value) for key, value in payload.items() if value is not None}
+        received_hash = fields.pop("hash", None)
+        if received_hash is None or len(received_hash) != 64:
+            TelegramInitDataVerifier._raise_invalid()
+        data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
+        # Browser Login uses SHA256(bot token), unlike Mini App initData's
+        # WebAppData-derived secret. Keeping the algorithms separate prevents mixups.
+        secret_key = hashlib.sha256(self._bot_token.encode("utf-8")).digest()
+        expected_hash = hmac.new(
+            secret_key,
+            data_check_string.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(received_hash.lower(), expected_hash):
+            TelegramInitDataVerifier._raise_invalid()
+
+        try:
+            auth_date = datetime.fromtimestamp(int(fields["auth_date"]), tz=UTC)
+            user = TelegramUserData(
+                id=int(fields["id"]),
+                first_name=fields["first_name"],
+                last_name=fields.get("last_name"),
+                username=fields.get("username"),
+                photo_url=fields.get("photo_url"),
+            )
+        except (KeyError, ValueError, TypeError, ValidationError, OverflowError):
+            TelegramInitDataVerifier._raise_invalid()
+        if auth_date > current_time + self._future_skew or current_time - auth_date > self._ttl:
+            TelegramInitDataVerifier._raise_invalid()
+        return user

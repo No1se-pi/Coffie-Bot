@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
+import { CartProvider } from "../components/CartContext";
 import type {
   AdminFeedback,
   AdminLoyaltyV2Settings,
@@ -48,6 +49,7 @@ import {
   AdminStaffPage,
   AdminUsersPage,
 } from "../pages/admin";
+import { AdminAnalyticsPage, AdminHelpPage } from "../pages/web-admin";
 import { AuthContext, AuthProvider } from "../auth/AuthContext";
 import { AuthGate } from "../components/AppShell";
 import {
@@ -208,6 +210,55 @@ function VenueSelectionHarness({ items }: { items: Venue[] }) {
 }
 
 describe("critical Mini App flows", () => {
+  it("renders PostgreSQL admin analytics and changes the reporting period", async () => {
+    const user = userEvent.setup();
+    const analytics = vi
+      .spyOn(coffeeApi, "getAdminAnalytics")
+      .mockResolvedValue({
+        generated_at: "2026-08-28T09:00:00Z",
+        days: 30,
+        started_at: "2026-07-29T09:00:00Z",
+        ended_at: "2026-08-28T09:00:00Z",
+        orders_by_day: [
+          { day: "2026-08-28", orders: 4, revenue_minor: 120000 },
+        ],
+        orders_by_venue: [
+          { id: "venue-1", name: "Кофейня", count: 4, amount_minor: 120000 },
+        ],
+        popular_items: [],
+        promotion_usage: [],
+        employee_activity: [],
+        loyalty: { accrued_points: 30, redeemed_points: 10 },
+        customers: { active_customers: 3, repeat_customers: 1 },
+        subscriptions: { issued: 1, uses: 2, active: 1 },
+        receipts: { created: 2, amount_minor: 50000, suspicious: 1 },
+        delivery: { orders: 2, completed: 1, cancelled: 0 },
+      });
+
+    render(
+      <MemoryRouter>
+        <AdminAnalyticsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Заказы по дням")).toBeInTheDocument();
+    expect(screen.getByText("Кофейня")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "7 дней" }));
+    await waitFor(() => expect(analytics).toHaveBeenLastCalledWith(7));
+  });
+
+  it("keeps the operational help available inside the admin", () => {
+    render(
+      <MemoryRouter>
+        <AdminHelpPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Добавить сотрудника")).toBeInTheDocument();
+    expect(screen.getByText("Назначить курьера")).toBeInTheDocument();
+    expect(screen.getByText("Проверить suspicious event")).toBeInTheDocument();
+  });
+
   it("delegates empty initData acceptance to the backend DEV_AUTH boundary", async () => {
     const originalDemoMode = coffeeApi.isDemo;
     coffeeApi.isDemo = false;
@@ -517,7 +568,9 @@ describe("critical Mini App flows", () => {
       });
     render(
       <MemoryRouter>
-        <MenuPage />
+        <CartProvider>
+          <MenuPage />
+        </CartProvider>
       </MemoryRouter>,
     );
 
@@ -868,6 +921,7 @@ describe("critical Mini App flows", () => {
           isDemo: false,
           setActiveRole: vi.fn(),
           retry: vi.fn(),
+          loginWithTelegram: vi.fn().mockResolvedValue(undefined),
           logout: vi.fn().mockResolvedValue(undefined),
         }}
       >
@@ -1450,6 +1504,7 @@ describe("critical Mini App flows", () => {
           isDemo: false,
           setActiveRole: vi.fn(),
           retry: vi.fn(),
+          loginWithTelegram: vi.fn().mockResolvedValue(undefined),
           logout: vi.fn().mockResolvedValue(undefined),
         }}
       >

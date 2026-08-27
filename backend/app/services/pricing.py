@@ -74,7 +74,9 @@ class RequestedLine:
 
 @dataclass(frozen=True, slots=True)
 class PromotionSnapshot:
-    id: UUID
+    # Virtual promotions (for example, the birthday rule from loyalty settings)
+    # do not have a row in promotions and therefore have no persistent id.
+    id: UUID | None
     venue_id: UUID
     title: str
     action_type: PromotionActionType
@@ -122,7 +124,7 @@ class PricedLine:
 
 @dataclass(frozen=True, slots=True)
 class AppliedPromotion:
-    promotion_id: UUID
+    promotion_id: UUID | None
     title: str
     priority: int
     discount_minor: int
@@ -244,7 +246,7 @@ class CartPricingService:
             eligible = birthday_venues or venue_ids
             promotion_snapshots.extend(
                 PromotionSnapshot(
-                    id=settings.id,
+                    id=None,
                     venue_id=venue_id,
                     title="Скидка ко дню рождения",
                     action_type=PromotionActionType.PERCENT_DISCOUNT,

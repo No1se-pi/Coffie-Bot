@@ -35,6 +35,10 @@ def test_staff_override_can_deny_but_cannot_grant_admin_permission() -> None:
     assert PermissionCode.POINTS_ACCRUE in permissions
     assert PermissionCode.POINTS_REDEEM not in permissions
     assert PermissionCode.ADMIN_SETTINGS_MANAGE not in permissions
+    assert PermissionCode.RECEIPTS_READ in permissions
+    assert PermissionCode.RECEIPTS_MANAGE in permissions
+    assert PermissionCode.SUBSCRIPTIONS_READ in permissions
+    assert PermissionCode.SUBSCRIPTIONS_MANAGE in permissions
 
 
 def test_admin_does_not_receive_owner_only_permissions() -> None:
@@ -46,6 +50,21 @@ def test_admin_does_not_receive_owner_only_permissions() -> None:
 
 def test_owner_receives_all_permissions() -> None:
     assert resolve_permissions(Role.OWNER) == frozenset(PermissionCode)
+
+
+def test_courier_receives_only_fixed_delivery_permissions() -> None:
+    permissions = resolve_permissions(
+        Role.COURIER,
+        {PermissionCode.ADMIN_USERS_READ: True, PermissionCode.ORDERS_MANAGE: True},
+    )
+
+    assert permissions == frozenset(
+        {
+            PermissionCode.COURIER_ORDERS_READ,
+            PermissionCode.COURIER_ORDERS_CLAIM,
+            PermissionCode.COURIER_ORDERS_UPDATE,
+        }
+    )
 
 
 @pytest.mark.asyncio

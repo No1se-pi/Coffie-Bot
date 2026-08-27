@@ -15,7 +15,7 @@ Coffie Bot — автономный шаблон Telegram-бота и web-при
 В репозитории используется monorepo и модульный монолит:
 
 - `backend` — FastAPI, SQLAlchemy/Alembic, общая бизнес-логика, aiogram bot, worker и CLI;
-- `frontend` — React/TypeScript/Vite Mini App;
+- `frontend` — React/TypeScript/Vite Mini App и responsive desktop Web Admin;
 - `db` — PostgreSQL, единственный источник состояния;
 - `bot` и `worker` — отдельные процессы того же backend-образа, а не микросервисы;
 - `media` — persistent Docker volume для проверенных JPEG/PNG/WebP;
@@ -27,13 +27,16 @@ Coffie Bot — автономный шаблон Telegram-бота и web-при
 
 Loyalty V2 реализована в Phase 2: additive-контракт добавляет
 shared/separate кошельки, point lots, строгое FIFO, календарное сгорание и
-birthday month/day. Phase 2 становится deployable release после merge и успешного
-CI целевой ветки. Нормативные инварианты описаны в
+birthday month/day. Нормативные инварианты описаны в
 [`docs/LOYALTY_V2.md`](docs/LOYALTY_V2.md).
 
 Phase 3 добавляет venue-owned меню, универсальные модификаторы и авторитетный
 server-side расчёт корзины. Контракт и инварианты snapshot для заказов описаны в
 [`docs/MENU_PRICING.md`](docs/MENU_PRICING.md).
+
+Phases 4–8 добавляют mixed-venue заказы, pickup/delivery и курьеров, ручные чеки,
+отзывы, абонементы, массовые бонусы и desktop Web Admin с PostgreSQL-аналитикой.
+Фактические проверки и ограничения каждой фазы перечислены в implementation plan.
 
 ## Требования
 
@@ -106,6 +109,8 @@ server-side расчёт корзины. Контракт и инвариант�
 
 `DEV_AUTH_ENABLED=true` разрешён только для локальной браузерной разработки.
 Production-конфигурация принудительно отключает bypass.
+Для production-входа в Web Admin настройте hostname бота через BotFather `/setdomain`;
+пошаговая инструкция находится в [`DEPLOYMENT.md`](DEPLOYMENT.md#telegram-login-для-web-admin).
 
 ## Основные команды
 

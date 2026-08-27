@@ -107,6 +107,8 @@
 3. Проверить scanner в Telegram iOS, Android и Desktop; ручной код остаётся доступен всегда.
 4. Перезапустить backend/bot/worker во время pending notification/broadcast и убедиться в продолжении без дублей.
 5. Выполнить backup БД/media, восстановить в чистое окружение и повторить smoke-сценарий.
+6. Повредить копию `database.dump` после backup: restore должен
+   отказать по SHA-256 до остановки сервисов, а readiness остаться `ok`.
 
 ## Desktop Web Admin
 

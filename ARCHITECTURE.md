@@ -49,7 +49,7 @@ Transport не выполняет расчёты и не меняет модел
 - Карты: `user_cards`; один active QR на пользователя, старые записи отозваны и остаются для аудита.
 - Loyalty compatibility journal: `loyalty_settings`, `user_loyalty_states`,
   `loyalty_operations`, `point_transactions`, `visits`, `stamp_transactions`.
-- Loyalty V2 (Phase 2 в работе): `loyalty_wallets`, `point_lots`,
+- Loyalty V2: `loyalty_wallets`, `point_lots`,
   `point_allocations`, `wallet_mode_switches`, `wallet_transfers`, неизменяемые
   routes партий и birthday policy. `user_loyalty_states.points_balance` остаётся
   compatibility snapshot и равен сумме wallet balances.

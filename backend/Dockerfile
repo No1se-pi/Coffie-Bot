@@ -12,7 +12,7 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # Pin the installer copied into the runtime venv as well as application dependencies.
-RUN python -m pip install --upgrade "pip==26.1.2"
+RUN python -m pip install --upgrade "pip==26.2.1"
 
 COPY backend/pyproject.toml ./pyproject.toml
 COPY backend/app ./app

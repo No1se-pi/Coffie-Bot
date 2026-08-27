@@ -29,11 +29,11 @@ V2 развивается поверх существующих `users.id` и ж
   operation. Merge не меняет owner IDs исторических операций: canonical history читает их по
   recursive lineage. Баллы и штампы переносятся компенсирующими journal rows.
 
-## Phase 2 revision (в работе)
+## Phase 2 revision
 
-`0011_v2_loyalty_wallets_and_point_lots` — forward-only migration разрабатываемой
-Phase 2. До закрытия clean/legacy migration, parity и application gates её наличие в
-ветке не означает готовый production upgrade.
+`0011_v2_loyalty_wallets_and_point_lots` — forward-only migration Loyalty V2. Она
+прошла clean/legacy migration, parity и application gates вместе с последующими
+V2 revisions.
 
 Revision:
 
@@ -51,6 +51,17 @@ Revision:
   admin adjustment с reason и audit trail;
 - проверяет внутри migration, что wallet/lot totals равны исходному
   `user_loyalty_states.points_balance`; несовпадение останавливает upgrade.
+
+## Phase 3–7 revisions
+
+- `0012_v2_menu_modifiers_and_pricing` — venue-owned modifiers, bindings и promotion rules.
+- `0013_add_orders_pickup_and_delivery` — order/suborder snapshots, pickup/delivery и events.
+- `0014_add_courier_role` — изолированная courier role и assignment state.
+- `0015_add_manual_receipts_and_risk_flags` — ручные чеки, revisions и risk flags.
+- `0016_add_reviews_passes_and_bulk_bonus` — public reviews, passes/usages и bulk bonus.
+
+Текущий head — `0016`. Полная цепочка проверена как на чистой БД,
+так и upgrade с legacy `0007`; после миграций seed остаётся идемпотентным.
 
 ## Проверка после Phase 1
 

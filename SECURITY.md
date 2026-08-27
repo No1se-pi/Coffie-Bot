@@ -30,6 +30,11 @@ Mini App отправляет backend исходную строку Telegram `in
 Нельзя принимать `user_id`, role, permission или итог расчёта от frontend как доказательство.
 Не логируйте полную init data: она содержит подпись и пользовательские поля.
 
+Обычный browser Web Admin использует Telegram Login Widget payload. Это
+отдельная схема подписи: backend не переиспользует Mini App derivation key,
+проверяет HMAC constant-time и `auth_date`, и только затем вызывает общий
+identity/session service. Оба flow выдают одинаковый opaque session token.
+
 `DEV_AUTH_ENABLED` — только browser-development bypass. Production Settings и
 `compose.prod.yaml` должны завершать запуск при попытке включить bypass.
 
@@ -161,9 +166,11 @@ Database dump и media archive вместе содержат персональ�
 - проверяйте checksum и restore в изолированном окружении;
 - удаляйте просроченные копии контролируемо, а не случайным `rm` по вычисленному пути.
 
-Restore-скрипты требуют явного подтверждения, останавливают пишущие процессы и не продолжают
-запуск приложения после ошибки. Media archive проверяется на absolute/parent traversal paths
-и не должен содержать symbolic/hard links.
+Restore-скрипты сначала проверяют manifest SHA-256 для database dump и media
+archive. При mismatch они fail-fast до остановки сервисов и замены данных.
+После явного подтверждения restore останавливает пишущие процессы и не
+продолжает запуск приложения после ошибки. Media archive проверяется на
+absolute/parent traversal paths и не должен содержать symbolic/hard links.
 
 ## Incident response
 
@@ -198,8 +205,8 @@ Owner/admin перевыпускает карту; старая становит
 - Telegram availability и delivery не транзакционны: outbox/retry сохраняет результат после
   commit, но не гарантирует мгновенную доставку;
 - сложная компенсация уже погашенной награды требует admin review;
-- Loyalty V2 с FIFO-партиями и частичным expiry ещё не прошла release gate;
-  deployable Phase 1 не должна имитировать это массовым списанием.
+- legacy loyalty operations, созданные до lot ledger без allocation lineage,
+  не отменяются автоматически; нужна admin correction с reason и audit.
 
 ## Production checklist
 

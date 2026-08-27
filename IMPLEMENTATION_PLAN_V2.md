@@ -278,11 +278,11 @@ gate и фазового отчёта.
 
 ### Phase 9 — Hardening и передача
 
-- [ ] Full lint/format/typecheck/tests/build/dependency audits.
-- [ ] Clean and `0007 -> head` migration tests plus seed.
-- [ ] Concurrency/idempotency/IDOR/privacy suite.
-- [ ] Compose images/startup/health and backup/restore rehearsal where environment permits.
-- [ ] Обновить все docs и финальный manual test plan.
+- [x] Full lint/format/typecheck/tests/build/dependency audits.
+- [x] Clean and `0007 -> head` migration tests plus seed.
+- [x] Concurrency/idempotency/IDOR/privacy suite.
+- [x] Compose images/startup/health and backup/restore rehearsal where environment permits.
+- [x] Обновить все docs и финальный manual test plan.
 
 ## Baseline GitHub Actions
 
@@ -443,3 +443,20 @@ gate и фазового отчёта.
 - Добавлены desktop help, управление отзывом staff sessions и расширенные admin shortcuts.
   Backend Ruff/format/mypy и `258 passed`; frontend Prettier/ESLint/TypeScript, `50 passed`,
   `npm audit = 0` и production build прошли.
+
+### 2026-08-28 — Phase 9 Hardening
+
+- Backend повторно прошёл Ruff, format, mypy и `258 passed`; frontend —
+  Prettier, ESLint, TypeScript, `50 passed`, production build и `npm audit = 0`.
+  Linux `pip-audit` после обновления pip до 26.2.1 не нашёл известных уязвимостей.
+- Clean `0001 -> 0016` и legacy `0007 -> 0016` прошли Alembic upgrade/check и
+  двойной seed на отдельных PostgreSQL базах. Временные базы удалены.
+- Изолированный production Compose прошёл migrations, seed, frontend `200` и
+  backend readiness. На нём реальный backup/restore вернул БД к исходному
+  состоянию; повреждённая копия dump отклонена по SHA-256 до остановки
+  сервисов. Временные containers, volumes и images удалены.
+- PowerShell restore исправлен для Windows Docker CLI: shell program передаётся
+  в helper container как UTF-8 base64, не теряя regex quoting. `make test` больше
+  не наследует development debug/auth env и монтирует seed по CI-compatible пути.
+- PowerShell/POSIX scripts, demo JSON, development/production Compose и `git diff --check`
+  прошли проверку; основной development stack остался healthy.

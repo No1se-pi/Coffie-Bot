@@ -197,3 +197,34 @@ status/cancel metadata и оставляет исходный чек и исто
 `ReceiptRiskSettings` хранит пороги установки. Сервис пишет объяснимые flags для высокой
 суммы, частоты сотрудника/клиента, одинаковых сумм, повторного номера, отсутствующего фото
 и частых отмен. Это сигналы владельцу для проверки, а не автоматический ML-вердикт.
+
+## Публичные отзывы
+
+`PublicReview` не заменяет private `FeedbackItem`. Customer может связать отзыв с заведением,
+своим заказом и optional сотрудником; связь order проверяется backend по canonical owner и
+venue, поэтому чужой UUID не раскрывает заказ. Новый отзыв всегда `pending`. В публичный feed
+попадают только `approved`; `rejected` и `hidden` остаются доступны модератору и автору.
+Approve/reject/hide сохраняют moderator, UTC timestamp, optional note и audit event.
+
+## Абонементы
+
+`PassTemplate` — не банковская подписка и не платёж: это неизменяемое правило количества,
+срока и optional allowed venues/categories/items. При выдаче `CustomerPass` фиксирует имя,
+описание, изображение, total uses и expires_at. Issue/cancel требуют idempotency key.
+
+Использование блокирует pass через `SELECT FOR UPDATE`, повторно проверяет active/expiry,
+trusted venue и menu item, затем уменьшает остаток ровно на один. `PassUsage` append-only
+хранит actor, customer, pass, venue, item, before/after и собственный idempotency key.
+Последнее использование атомарно переводит pass в `exhausted`; два concurrent staff не могут
+успешно списать единственный остаток дважды.
+
+## Массовый бонус
+
+Bulk bonus — admin/owner preview/confirm. Preview возвращает ordered audience snapshot,
+recipient count, total points и hash. Confirm повторно вычисляет eligible audience, требует
+тот же hash, блокирует user/loyalty state в порядке UUID и выполняется одной транзакцией.
+
+`BulkBonusBatch` объясняет общую команду, `BulkBonusItem` связывает каждого получателя с
+отдельной `LoyaltyOperation`. Для каждого клиента создаются `PointTransaction`, отдельный
+`PointLot` с expiry policy и notification outbox; snapshot баланса обновляется только через
+общий point ledger. Batch и операции защищены PostgreSQL unique constraints и advisory lock.

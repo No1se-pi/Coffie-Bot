@@ -36,6 +36,8 @@ class PermissionCode(StrEnum):
     COURIER_ORDERS_UPDATE = "courier.orders.update"
     RECEIPTS_READ = "receipts.read"
     RECEIPTS_MANAGE = "receipts.manage"
+    SUBSCRIPTIONS_READ = "subscriptions.read"
+    SUBSCRIPTIONS_MANAGE = "subscriptions.manage"
     ADMIN_USERS_READ = "admin.users.read"
     ADMIN_USERS_MANAGE = "admin.users.manage"
     ADMIN_STAFF_MANAGE = "admin.staff.manage"
@@ -44,6 +46,8 @@ class PermissionCode(StrEnum):
     ADMIN_CONTENT_MANAGE = "admin.content.manage"
     ADMIN_BROADCASTS_MANAGE = "admin.broadcasts.manage"
     ADMIN_FEEDBACK_MANAGE = "admin.feedback.manage"
+    ADMIN_REVIEWS_MANAGE = "admin.reviews.manage"
+    ADMIN_BULK_BONUS_MANAGE = "admin.bulk_bonus.manage"
     ADMIN_DELIVERY_MANAGE = "admin.delivery.manage"
     OWNER_ADMINS_MANAGE = "owner.admins.manage"
     OWNER_EXPORT_DATA = "owner.export_data"
@@ -77,6 +81,7 @@ class LoyaltyOperationType(StrEnum):
     POINTS_PRODUCT_PURCHASE = "points_product_purchase"
     WELCOME_BONUS = "welcome_bonus"
     ADMIN_ADJUSTMENT = "admin_adjustment"
+    BULK_BONUS = "bulk_bonus"
     OPERATION_REVERSAL = "operation_reversal"
     POINTS_EXPIRATION = "points_expiration"
     VISIT_MARK = "visit_mark"
@@ -103,6 +108,7 @@ class PointLotSourceType(StrEnum):
     WELCOME_BONUS = "welcome_bonus"
     REWARD_BONUS = "reward_bonus"
     ADMIN_ADJUSTMENT = "admin_adjustment"
+    BULK_BONUS = "bulk_bonus"
     REVERSAL = "reversal"
     WALLET_TRANSFER = "wallet_transfer"
     ACCOUNT_MERGE = "account_merge"
@@ -200,6 +206,24 @@ class ReceiptSource(StrEnum):
 class ReceiptStatus(StrEnum):
     ACTIVE = "active"
     CANCELLED = "cancelled"
+
+
+class ReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    HIDDEN = "hidden"
+
+
+class PassStatus(StrEnum):
+    ACTIVE = "active"
+    EXHAUSTED = "exhausted"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class BulkBonusStatus(StrEnum):
+    COMPLETED = "completed"
 
 
 class TipProfileStatus(StrEnum):

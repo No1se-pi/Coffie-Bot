@@ -705,6 +705,8 @@ const staffPermissionLabels: Record<OperationalPermission, string> = {
   "orders.manage": "Изменение статусов и назначение курьеров",
   "receipts.read": "Просмотр ручных чеков",
   "receipts.manage": "Создание, дополнение и отмена чеков",
+  "subscriptions.read": "Просмотр абонементов клиента",
+  "subscriptions.manage": "Использование абонементов",
 };
 
 const operationalPermissions = Object.keys(

@@ -295,6 +295,21 @@ class PromotionSeed(SeedModel):
         return self
 
 
+class SubscriptionTemplateSeed(SeedModel):
+    """Synthetic reusable pass definition; issuing a pass remains an admin action."""
+
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=4_000)
+    image_media_key: str | None = None
+    total_uses: int = Field(gt=0, le=10_000)
+    validity_days: int = Field(gt=0, le=3_650)
+    venue_slugs: list[str] = Field(default_factory=list)
+    category_slugs: list[str] = Field(default_factory=list)
+    menu_item_slugs: list[str] = Field(default_factory=list)
+    is_active: bool = True
+
+
 class DevelopmentStaffSeed(SeedModel):
     telegram_id: int = Field(gt=0)
     display_name: str = Field(min_length=1, max_length=128)
@@ -327,6 +342,7 @@ class SeedDocument(SeedModel):
     reward_templates: list[RewardTemplateSeed] = Field(default_factory=list)
     menu: MenuSeed
     promotions: list[PromotionSeed] = Field(default_factory=list)
+    subscription_templates: list[SubscriptionTemplateSeed] = Field(default_factory=list)
     development_only: DevelopmentOnlySeed = Field(default_factory=DevelopmentOnlySeed)
 
     @model_validator(mode="after")
@@ -394,6 +410,17 @@ class SeedDocument(SeedModel):
                     raise ValueError(f"unknown promotion menu item slug: {slug}")
                 if item_venues[slug] != promotion.venue_slug:
                     raise ValueError("promotion menu item belongs to another venue")
+        _unique([item.slug for item in self.subscription_templates], "subscription template slug")
+        for template in self.subscription_templates:
+            for slug in template.venue_slugs:
+                if venue_set and slug not in venue_set:
+                    raise ValueError(f"unknown subscription venue slug: {slug}")
+            for slug in template.category_slugs:
+                if slug not in category_set:
+                    raise ValueError(f"unknown subscription category slug: {slug}")
+            for slug in template.menu_item_slugs:
+                if slug not in item_slugs:
+                    raise ValueError(f"unknown subscription menu item slug: {slug}")
         if sum(location.is_default for location in self.locations) > 1:
             raise ValueError("only one location may be the default")
         return self
@@ -465,6 +492,17 @@ class SeedRepositoryPort(Protocol):
         menu_item_ids: list[UUID],
     ) -> None: ...
 
+    async def upsert_pass_template(self, entity_id: UUID, values: dict[str, Any]) -> UUID: ...
+
+    async def replace_pass_template_access(
+        self,
+        template_id: UUID,
+        *,
+        venue_ids: list[UUID],
+        category_ids: list[UUID],
+        item_ids: list[UUID],
+    ) -> None: ...
+
     async def find_active_staff_id(self) -> UUID | None: ...
 
     async def upsert_seed_staff(
@@ -488,6 +526,7 @@ class SeedReport:
     menu_categories: int
     menu_items: int
     promotions: int
+    subscription_templates: int
     development_staff: int
 
 
@@ -765,7 +804,7 @@ class SeedService:
                     sort_order=group.sort_order,
                 )
 
-            if document.promotions and creator_id is None:
+            if (document.promotions or document.subscription_templates) and creator_id is None:
                 raise SeedConfigurationError(
                     "An active staff member is required before importing promotions; "
                     "run create-owner first"
@@ -817,6 +856,34 @@ class SeedService:
                     menu_item_ids=[item_ids[slug] for slug in promotion.menu_item_slugs],
                 )
 
+            imported_subscription_templates = 0
+            for pass_template in document.subscription_templates:
+                # Schema-v1 documents without a Venue section are supported for
+                # upgrades, but cannot safely invent scoped pass destinations.
+                if any(slug not in venue_ids for slug in pass_template.venue_slugs):
+                    continue
+                template_id = await self._repository.upsert_pass_template(
+                    _stable_id(entity_ids, f"pass-template:{pass_template.slug}"),
+                    {
+                        "name": pass_template.name,
+                        "description": pass_template.description,
+                        "image_media_id": await self._repository.find_media_id(
+                            pass_template.image_media_key
+                        ),
+                        "total_uses": pass_template.total_uses,
+                        "validity_days": pass_template.validity_days,
+                        "is_active": pass_template.is_active,
+                        "created_by_staff_id": creator_id,
+                    },
+                )
+                await self._repository.replace_pass_template_access(
+                    template_id,
+                    venue_ids=[venue_ids[slug] for slug in pass_template.venue_slugs],
+                    category_ids=[category_ids[slug] for slug in pass_template.category_slugs],
+                    item_ids=[item_ids[slug] for slug in pass_template.menu_item_slugs],
+                )
+                imported_subscription_templates += 1
+
             await self._repository.save_seed_entity_ids(entity_ids)
 
         return SeedReport(
@@ -826,6 +893,7 @@ class SeedService:
             menu_categories=len(document.menu.categories),
             menu_items=len(document.menu.items),
             promotions=len(document.promotions),
+            subscription_templates=imported_subscription_templates,
             development_staff=development_staff,
         )
 

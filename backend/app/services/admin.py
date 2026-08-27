@@ -74,6 +74,8 @@ STAFF_OVERRIDE_PERMISSIONS = frozenset(
         PermissionCode.ORDERS_MANAGE,
         PermissionCode.RECEIPTS_READ,
         PermissionCode.RECEIPTS_MANAGE,
+        PermissionCode.SUBSCRIPTIONS_READ,
+        PermissionCode.SUBSCRIPTIONS_MANAGE,
     }
 )
 PRIVILEGED_ROLES = frozenset({Role.ADMIN, Role.OWNER})

@@ -18,6 +18,17 @@ from app.models.content import (
 )
 from app.models.customers import CustomerIdentity, CustomerMerge
 from app.models.delivery import Broadcast, BroadcastDelivery, NotificationOutbox
+from app.models.engagement import (
+    BulkBonusBatch,
+    BulkBonusItem,
+    CustomerPass,
+    PassTemplate,
+    PassTemplateCategory,
+    PassTemplateItem,
+    PassTemplateVenue,
+    PassUsage,
+    PublicReview,
+)
 from app.models.loyalty import (
     LoyaltyOperation,
     LoyaltySettings,
@@ -60,9 +71,12 @@ __all__ = [
     "BirthdayPromotionVenue",
     "Broadcast",
     "BroadcastDelivery",
+    "BulkBonusBatch",
+    "BulkBonusItem",
     "CustomerIdentity",
     "CustomerMerge",
     "CustomerOrder",
+    "CustomerPass",
     "DeliverySettings",
     "DeliveryZone",
     "FeedbackItem",
@@ -83,6 +97,11 @@ __all__ = [
     "OrderLineModifier",
     "OrderPointRedemption",
     "OrderSuborder",
+    "PassTemplate",
+    "PassTemplateCategory",
+    "PassTemplateItem",
+    "PassTemplateVenue",
+    "PassUsage",
     "PointAllocation",
     "PointLot",
     "PointLotRoute",
@@ -90,6 +109,7 @@ __all__ = [
     "Promotion",
     "PromotionMenuCategory",
     "PromotionMenuItem",
+    "PublicReview",
     "Receipt",
     "ReceiptRevision",
     "ReceiptRiskFlag",

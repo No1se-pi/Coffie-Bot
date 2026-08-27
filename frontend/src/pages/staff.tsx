@@ -27,6 +27,7 @@ import { useResource } from "../hooks/useResource";
 import { closeTelegramScanner, scanQrWithTelegram } from "../telegram";
 import { formatDateTime, formatMoney, rublesToMinor } from "../utils/format";
 import { ReceiptQuickForm } from "./receipts";
+import { StaffPassPanel } from "./engagement";
 import {
   Avatar,
   Badge,
@@ -599,6 +600,10 @@ export function ClientPreviewPage() {
     >
       <StaffLocationSelector />
       <ReceiptQuickForm
+        userId={client.user_id}
+        venueId={selectedLocation?.venue_id ?? null}
+      />
+      <StaffPassPanel
         userId={client.user_id}
         venueId={selectedLocation?.venue_id ?? null}
       />

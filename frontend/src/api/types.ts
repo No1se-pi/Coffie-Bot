@@ -193,6 +193,7 @@ export type HistoryType =
   | "reward_redeemed"
   | "reward_cancelled"
   | "admin_adjustment"
+  | "bulk_bonus"
   | "operation_reversal";
 
 export interface HistoryItem {
@@ -916,7 +917,9 @@ export type OperationalPermission =
   | "orders.read"
   | "orders.manage"
   | "receipts.read"
-  | "receipts.manage";
+  | "receipts.manage"
+  | "subscriptions.read"
+  | "subscriptions.manage";
 
 export interface PermissionOverride {
   permission: OperationalPermission;
@@ -1070,4 +1073,97 @@ export interface AdjustmentPreview {
   reason: string;
   venue_id: string | null;
   scope_label: string;
+}
+
+export type ReviewStatus = "pending" | "approved" | "rejected" | "hidden";
+
+export interface PublicReview {
+  id: string;
+  venue_id: string;
+  venue_name: string;
+  order_id: string | null;
+  employee_staff_id: string | null;
+  employee_name: string | null;
+  rating: number;
+  text: string;
+  author_display_name: string;
+  status: ReviewStatus;
+  moderation_note: string | null;
+  created_at: string;
+  moderated_at: string | null;
+}
+
+export interface PassTemplate {
+  id: string;
+  name: string;
+  description: string;
+  image_media_id: string | null;
+  total_uses: number;
+  validity_days: number;
+  venue_ids: string[];
+  category_ids: string[];
+  item_ids: string[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export type CustomerPassStatus =
+  "active" | "exhausted" | "expired" | "cancelled";
+
+export interface CustomerPass {
+  id: string;
+  template_id: string;
+  user_id: string;
+  name: string;
+  description: string;
+  image_media_id: string | null;
+  total_uses: number;
+  remaining_uses: number;
+  status: CustomerPassStatus;
+  issued_at: string;
+  expires_at: string;
+  usage_count: number;
+  replay: boolean;
+}
+
+export interface PassUsage {
+  id: string;
+  pass_id: string;
+  venue_id: string;
+  item_id: string;
+  uses_before: number;
+  uses_after: number;
+  created_at: string;
+  replay: boolean;
+}
+
+export interface BulkBonusDraft {
+  customer_ids: string[];
+  points_per_user: number;
+  reason: string;
+  venue_id: string | null;
+}
+
+export interface BulkBonusPreview extends BulkBonusDraft {
+  recipient_count: number;
+  total_points: number;
+  preview_hash: string;
+}
+
+export interface BulkBonusResult {
+  id: string;
+  recipient_count: number;
+  points_per_user: number;
+  total_points: number;
+  reason: string;
+  venue_id: string | null;
+  created_at: string;
+  replay: boolean;
+  items: Array<{
+    user_id: string;
+    operation_id: string;
+    points: number;
+    balance_before: number;
+    balance_after: number;
+  }>;
 }

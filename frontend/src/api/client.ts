@@ -20,6 +20,9 @@ import type {
   AuditEvent,
   AuthSession,
   BirthdayValue,
+  BulkBonusDraft,
+  BulkBonusPreview,
+  BulkBonusResult,
   CardData,
   CartPriceRequest,
   CartPriceResponse,
@@ -32,6 +35,7 @@ import type {
   CustomerMergePreviewRequest,
   CustomerMergeResult,
   CustomerBirthday,
+  CustomerPass,
   CustomerWalletSummary,
   HistoryItem,
   HomeData,
@@ -67,6 +71,10 @@ import type {
   StaffProfile,
   TipProfile,
   PendingTipProfile,
+  PassTemplate,
+  PassUsage,
+  PublicReview,
+  ReviewStatus,
   Venue,
   WalletModeChangeResult,
   WalletModeConfirmRequest,
@@ -474,6 +482,7 @@ const operationDescriptions: Record<HistoryItem["type"], string> = {
   reward_redeemed: "Погашена награда",
   reward_cancelled: "Награда отменена",
   admin_adjustment: "Корректировка администратором",
+  bulk_bonus: "Массовый бонус",
   operation_reversal: "Отмена операции",
 };
 
@@ -1461,4 +1470,104 @@ export const coffeeApi = {
             idempotencyKey: uuid(),
           },
         ).then(normalizeOperationResult),
+  getReviews: (venueId?: string): Promise<{ items: PublicReview[] }> =>
+    isDemoMode
+      ? Promise.resolve({ items: [] })
+      : request(`/reviews${queryString({ venue_id: venueId, limit: 100 })}`),
+  getMyReviews: (): Promise<{ items: PublicReview[] }> =>
+    isDemoMode ? Promise.resolve({ items: [] }) : request("/me/reviews"),
+  createReview: (payload: {
+    venue_id: string;
+    order_id: string | null;
+    employee_staff_id: string | null;
+    rating: number;
+    text: string;
+    author_display_name: string | null;
+  }): Promise<PublicReview> =>
+    request("/reviews", { method: "POST", body: jsonBody(payload) }),
+  getAdminReviews: (
+    status?: ReviewStatus,
+  ): Promise<{ items: PublicReview[] }> =>
+    request(`/admin/reviews${queryString({ status, limit: 200 })}`),
+  moderateReview: (
+    id: string,
+    status: Exclude<ReviewStatus, "pending">,
+    moderationNote: string | null,
+  ): Promise<PublicReview> =>
+    request(`/admin/reviews/${encodeURIComponent(id)}/moderate`, {
+      method: "POST",
+      body: jsonBody({ status, moderation_note: moderationNote }),
+    }),
+  getMyPasses: (): Promise<{ items: CustomerPass[] }> =>
+    isDemoMode ? Promise.resolve({ items: [] }) : request("/me/subscriptions"),
+  getCustomerPasses: (userId: string): Promise<{ items: CustomerPass[] }> =>
+    request(`/staff/customers/${encodeURIComponent(userId)}/subscriptions`),
+  usePass: (
+    passId: string,
+    venueId: string,
+    itemId: string,
+    idempotencyKey = uuid(),
+  ): Promise<PassUsage> =>
+    request(`/staff/subscriptions/${encodeURIComponent(passId)}/use`, {
+      method: "POST",
+      body: jsonBody({ venue_id: venueId, item_id: itemId }),
+      idempotencyKey,
+    }),
+  getPassTemplates: (activeOnly = false): Promise<{ items: PassTemplate[] }> =>
+    request(
+      `/admin/subscriptions/templates${queryString({ active_only: activeOnly })}`,
+    ),
+  createPassTemplate: (payload: {
+    name: string;
+    description: string;
+    image_media_id: string | null;
+    total_uses: number;
+    validity_days: number;
+    venue_ids: string[];
+    category_ids: string[];
+    item_ids: string[];
+  }): Promise<PassTemplate> =>
+    request("/admin/subscriptions/templates", {
+      method: "POST",
+      body: jsonBody(payload),
+    }),
+  archivePassTemplate: (id: string): Promise<PassTemplate> =>
+    request(
+      `/admin/subscriptions/templates/${encodeURIComponent(id)}/archive`,
+      { method: "POST" },
+    ),
+  issuePass: (
+    userId: string,
+    templateId: string,
+    idempotencyKey = uuid(),
+  ): Promise<CustomerPass> =>
+    request("/admin/subscriptions/issue", {
+      method: "POST",
+      body: jsonBody({ user_id: userId, template_id: templateId }),
+      idempotencyKey,
+    }),
+  cancelPass: (
+    id: string,
+    reason: string,
+    idempotencyKey = uuid(),
+  ): Promise<CustomerPass> =>
+    request(`/admin/subscriptions/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: jsonBody({ reason }),
+      idempotencyKey,
+    }),
+  previewBulkBonus: (payload: BulkBonusDraft): Promise<BulkBonusPreview> =>
+    request("/admin/bulk-bonus/preview", {
+      method: "POST",
+      body: jsonBody(payload),
+    }),
+  confirmBulkBonus: (
+    payload: BulkBonusDraft & { preview_hash: string },
+    idempotencyKey: string,
+  ): Promise<BulkBonusResult> =>
+    request("/admin/bulk-bonus/confirm", {
+      method: "POST",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
 };

@@ -264,9 +264,9 @@ gate и фазового отчёта.
 
 ### Phase 7 — Reviews / Subscriptions / Bulk bonus
 
-- [ ] Public review creation and moderation.
-- [ ] Pass templates, issue/cancel/use and concurrent idempotent usage.
-- [ ] Bulk bonus preview/confirm with per-customer operations.
+- [x] Public review creation and moderation.
+- [x] Pass templates, issue/cancel/use and concurrent idempotent usage.
+- [x] Bulk bonus preview/confirm with per-customer operations.
 
 ### Phase 8 — Web Admin
 
@@ -411,3 +411,20 @@ gate и фазового отчёта.
   повтор суммы/номера, отсутствие фото и частые отмены — без ML antifraud.
 - Backend gates: Ruff/format, mypy и `250 passed`; clean `0001 -> 0015`, двойной seed и
   Alembic parity прошли. Frontend: Prettier/ESLint/TypeScript, `45 passed`, build и audit=0.
+
+### 2026-08-27 — Phase 7 Reviews / Subscriptions / Bulk bonus
+
+- Private feedback сохранён отдельно. Customer создаёт public review с venue и optional
+  order/employee; order ID проверяется по владельцу и venue. Публично выдаются только
+  approved, а approve/reject/hide и moderation note фиксируются в audit.
+- Pass template задаёт uses, validity и optional venue/category/item scope. Выдача и отмена
+  идемпотентны, issued snapshot не зависит от будущих изменений. Staff usage блокирует pass,
+  валидирует trusted menu item/venue и добавляет неизменяемую usage operation before/after.
+- Bulk bonus использует preview hash и explicit confirm. Audience пересчитывается и блокируется
+  в стабильном порядке; каждому клиенту создаются отдельные LoyaltyOperation, PointTransaction,
+  PointLot и notification outbox, массового UPDATE баланса нет.
+- Migration `0016` прошла clean `0001 -> 0016`, Alembic parity и двойной seed; seed содержит
+  один synthetic pass template и остаётся идемпотентным. Backend suite: `252 passed`.
+- Frontend добавляет customer reviews/passes, staff pass usage, review moderation, template
+  create/issue/archive с выбором заведений, категорий и позиций, а также bulk preview/confirm.
+  Prettier/TypeScript/ESLint и `48 passed` прошли.

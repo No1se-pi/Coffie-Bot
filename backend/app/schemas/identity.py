@@ -314,6 +314,7 @@ def _operation_description(operation_type: LoyaltyOperationType) -> str:
         LoyaltyOperationType.POINTS_PRODUCT_PURCHASE: "Покупка за баллы",
         LoyaltyOperationType.WELCOME_BONUS: "Приветственный бонус",
         LoyaltyOperationType.ADMIN_ADJUSTMENT: "Корректировка баланса",
+        LoyaltyOperationType.BULK_BONUS: "Массовый бонус",
         LoyaltyOperationType.OPERATION_REVERSAL: "Отмена операции",
         LoyaltyOperationType.POINTS_EXPIRATION: "Истечение баллов",
         LoyaltyOperationType.VISIT_MARK: "Отметка посещения",

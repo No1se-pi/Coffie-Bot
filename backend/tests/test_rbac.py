@@ -37,6 +37,8 @@ def test_staff_override_can_deny_but_cannot_grant_admin_permission() -> None:
     assert PermissionCode.ADMIN_SETTINGS_MANAGE not in permissions
     assert PermissionCode.RECEIPTS_READ in permissions
     assert PermissionCode.RECEIPTS_MANAGE in permissions
+    assert PermissionCode.SUBSCRIPTIONS_READ in permissions
+    assert PermissionCode.SUBSCRIPTIONS_MANAGE in permissions
 
 
 def test_admin_does_not_receive_owner_only_permissions() -> None:

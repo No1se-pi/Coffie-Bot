@@ -48,6 +48,13 @@ import {
   CourierOrderPage,
 } from "./pages/courier";
 import { ReceiptDetailPage, ReceiptsPage } from "./pages/receipts";
+import {
+  AdminBulkBonusPage,
+  AdminReviewsPage,
+  AdminSubscriptionsPage,
+  MySubscriptionsPage,
+  ReviewsPage,
+} from "./pages/engagement";
 
 export { AccrualPanel };
 
@@ -80,6 +87,11 @@ export default function App() {
                   <Route path="checkout" element={<CheckoutPage />} />
                   <Route path="orders" element={<OrdersPage />} />
                   <Route path="orders/:orderId" element={<OrderDetailPage />} />
+                  <Route path="reviews" element={<ReviewsPage />} />
+                  <Route
+                    path="subscriptions"
+                    element={<MySubscriptionsPage />}
+                  />
                   <Route path="more" element={<MorePage />} />
                 </Route>
                 <Route
@@ -141,6 +153,12 @@ export default function App() {
                   />
                   <Route path="events" element={<AdminEventsPage />} />
                   <Route path="feedback" element={<AdminFeedbackPage />} />
+                  <Route path="reviews" element={<AdminReviewsPage />} />
+                  <Route
+                    path="subscriptions"
+                    element={<AdminSubscriptionsPage />}
+                  />
+                  <Route path="bulk-bonus" element={<AdminBulkBonusPage />} />
                   <Route path="settings" element={<AdminSettingsPage />} />
                   <Route path="menu" element={<AdminMenuPage />} />
                   <Route path="promotions" element={<AdminPromotionsPage />} />

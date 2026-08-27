@@ -50,6 +50,7 @@ from app.models.orders import (
     OrderPointRedemption,
     OrderSuborder,
 )
+from app.models.receipts import Receipt, ReceiptRevision, ReceiptRiskFlag, ReceiptRiskSettings
 from app.models.staff import FeedbackItem, StaffTipProfile
 
 __all__ = [
@@ -89,6 +90,10 @@ __all__ = [
     "Promotion",
     "PromotionMenuCategory",
     "PromotionMenuItem",
+    "Receipt",
+    "ReceiptRevision",
+    "ReceiptRiskFlag",
+    "ReceiptRiskSettings",
     "Reward",
     "RewardTemplate",
     "Session",

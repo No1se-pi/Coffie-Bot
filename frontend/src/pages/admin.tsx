@@ -701,6 +701,10 @@ const staffPermissionLabels: Record<OperationalPermission, string> = {
   "rewards.redeem": "Погашение наград",
   "operations.reverse_own": "Отмена собственных операций",
   "tip_profile.manage_own": "Редактирование профиля и чаевых",
+  "orders.read": "Просмотр заказов",
+  "orders.manage": "Изменение статусов и назначение курьеров",
+  "receipts.read": "Просмотр ручных чеков",
+  "receipts.manage": "Создание, дополнение и отмена чеков",
 };
 
 const operationalPermissions = Object.keys(

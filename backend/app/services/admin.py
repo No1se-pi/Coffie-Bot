@@ -72,6 +72,8 @@ STAFF_OVERRIDE_PERMISSIONS = frozenset(
         PermissionCode.OWN_TIP_PROFILE_MANAGE,
         PermissionCode.ORDERS_READ,
         PermissionCode.ORDERS_MANAGE,
+        PermissionCode.RECEIPTS_READ,
+        PermissionCode.RECEIPTS_MANAGE,
     }
 )
 PRIVILEGED_ROLES = frozenset({Role.ADMIN, Role.OWNER})
@@ -118,6 +120,7 @@ class MediaDownload:
     media_type: str
     sha256: str
     filename: str
+    kind: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -1753,6 +1756,7 @@ class AdminService:
             media_type=media.detected_mime,
             sha256=media.sha256,
             filename=f"{media.id}{extension}",
+            kind=media.kind,
         )
 
     async def _require_category(self, category_id: UUID) -> MenuCategory:

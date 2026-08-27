@@ -35,6 +35,8 @@ STAFF_DEFAULT_PERMISSIONS = frozenset(
         PermissionCode.OWN_TIP_PROFILE_MANAGE,
         PermissionCode.ORDERS_READ,
         PermissionCode.ORDERS_MANAGE,
+        PermissionCode.RECEIPTS_READ,
+        PermissionCode.RECEIPTS_MANAGE,
     }
 )
 ADMIN_PERMISSIONS = STAFF_DEFAULT_PERMISSIONS | frozenset(

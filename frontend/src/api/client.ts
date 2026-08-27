@@ -57,6 +57,7 @@ import type {
   PublicMoreData,
   PurchasePreview,
   RedemptionPreview,
+  Receipt,
   Reward,
   Role,
   StaffClient,
@@ -674,6 +675,58 @@ export const coffeeApi = {
     }),
   getCourierOptions: (): Promise<{ items: CourierOption[] }> =>
     request("/staff/couriers"),
+  uploadReceiptMedia: async (file: File): Promise<MediaUpload> => {
+    const body = new FormData();
+    body.append("upload", file);
+    return request<MediaUpload>("/staff/receipts/media", {
+      method: "POST",
+      body,
+    });
+  },
+  createReceipt: (
+    payload: {
+      user_id: string;
+      venue_id: string;
+      amount_minor: number;
+      image_media_id: string;
+      receipt_number: string | null;
+      external_id: string | null;
+      fiscal_data: Record<string, unknown>;
+      note: string | null;
+      source: "manual";
+    },
+    idempotencyKey = uuid(),
+  ): Promise<Receipt> =>
+    request("/staff/receipts", {
+      method: "POST",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
+  getReceipts: (): Promise<{ items: Receipt[] }> =>
+    request("/staff/receipts?limit=100"),
+  getReceipt: (id: string): Promise<Receipt> =>
+    request(`/staff/receipts/${encodeURIComponent(id)}`),
+  editReceipt: (
+    id: string,
+    payload: {
+      image_media_id: string | null;
+      receipt_number: string | null;
+      external_id: string | null;
+      fiscal_data: Record<string, unknown>;
+      note: string | null;
+    },
+    idempotencyKey = uuid(),
+  ): Promise<Receipt> =>
+    request(`/staff/receipts/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
+  cancelReceipt: (id: string, idempotencyKey = uuid()): Promise<Receipt> =>
+    request(`/staff/receipts/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      idempotencyKey,
+    }),
   getPostPurchase: (operationId: string): Promise<PostPurchase> =>
     isDemoMode
       ? Promise.resolve({

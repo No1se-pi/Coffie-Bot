@@ -258,9 +258,9 @@ gate и фазового отчёта.
 
 ### Phase 6 — Receipts
 
-- [ ] Fast manual receipt flow via existing secure media.
-- [ ] Optional later metadata, immutable revisions and source/external ID.
-- [ ] Simple suspicious flags, staff UI and audit tests.
+- [x] Fast manual receipt flow via existing secure media.
+- [x] Optional later metadata, immutable revisions and source/external ID.
+- [x] Simple suspicious flags, staff UI and audit tests.
 
 ### Phase 7 — Reviews / Subscriptions / Bulk bonus
 
@@ -396,3 +396,18 @@ gate и фазового отчёта.
   вручную. Claim, assignment, decline и статусы фиксируются в audit/order events и outbox.
 - Backend: Ruff/format/mypy и `249 passed` на PostgreSQL 17. Frontend: Prettier/ESLint/
   TypeScript, `44 passed` и production build прошли.
+
+### 2026-08-27 — Phase 6 Manual Receipts
+
+- В карточку клиента добавлен быстрый staff flow: venue берётся из выбранной точки,
+  сотрудник вводит сумму, прикладывает JPEG/PNG/WebP и сохраняет ручной чек.
+- Фото проходит существующую проверку сигнатуры/MIME/размера, получает случайное имя и
+  выдаётся только через staff-authenticated URL; публичный media endpoint скрывает его 404.
+- Receipt хранит customer, venue, сумму, автора, фото и `source`; модель заранее допускает
+  rkeeper/other_pos и уникальный external ID, но текущий API разрешает только manual.
+- Номер, fiscal data, note, external ID и фото дополняются полной append-only ревизией.
+  Create/edit/cancel требуют idempotency key; все действия создают structured audit events.
+- Простые настраиваемые DB-сигналы отмечают высокую сумму, объём сотрудника/клиента,
+  повтор суммы/номера, отсутствие фото и частые отмены — без ML antifraud.
+- Backend gates: Ruff/format, mypy и `250 passed`; clean `0001 -> 0015`, двойной seed и
+  Alembic parity прошли. Frontend: Prettier/ESLint/TypeScript, `45 passed`, build и audit=0.

@@ -34,6 +34,8 @@ class PermissionCode(StrEnum):
     COURIER_ORDERS_READ = "courier.orders.read"
     COURIER_ORDERS_CLAIM = "courier.orders.claim"
     COURIER_ORDERS_UPDATE = "courier.orders.update"
+    RECEIPTS_READ = "receipts.read"
+    RECEIPTS_MANAGE = "receipts.manage"
     ADMIN_USERS_READ = "admin.users.read"
     ADMIN_USERS_MANAGE = "admin.users.manage"
     ADMIN_STAFF_MANAGE = "admin.staff.manage"
@@ -186,6 +188,17 @@ class PaymentMethod(StrEnum):
 class PaymentStatus(StrEnum):
     UNPAID = "unpaid"
     PAID_EXTERNALLY = "paid_externally"
+    CANCELLED = "cancelled"
+
+
+class ReceiptSource(StrEnum):
+    MANUAL = "manual"
+    RKEEPER = "rkeeper"
+    OTHER_POS = "other_pos"
+
+
+class ReceiptStatus(StrEnum):
+    ACTIVE = "active"
     CANCELLED = "cancelled"
 
 

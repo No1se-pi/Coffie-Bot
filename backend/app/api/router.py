@@ -22,6 +22,7 @@ from app.api.routes.menu_pricing_admin import router as menu_pricing_admin_route
 from app.api.routes.orders import router as orders_router
 from app.api.routes.pricing import router as pricing_router
 from app.api.routes.public import router as public_router
+from app.api.routes.receipts import router as receipts_router
 from app.api.routes.staff import router as staff_router
 from app.api.routes.staff_profile import router as staff_profile_router
 from app.api.routes.venues import router as venues_router
@@ -46,6 +47,7 @@ api_v1_router.include_router(admin_venues_router)
 api_v1_router.include_router(menu_pricing_admin_router)
 api_v1_router.include_router(orders_router)
 api_v1_router.include_router(couriers_router)
+api_v1_router.include_router(receipts_router)
 api_v1_router.include_router(loyalty_v2_admin_router)
 api_v1_router.include_router(customer_merges_router)
 api_v1_router.include_router(delivery_admin_router)

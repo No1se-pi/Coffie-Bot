@@ -178,3 +178,22 @@ Broadcast имеет draft/preview/confirmed/running/completed/failed status и 
 ## Media
 
 Backend ограничивает размер, читает сигнатуру разрешённых JPEG/PNG/WebP, генерирует random storage key и пишет файл без execute permissions в выделенный volume. Исходное имя используется только как необязательные безопасные metadata. Публичная выдача использует known storage key, `nosniff` и attachment/appropriate image headers.
+
+Receipt images используют тот же pipeline, но не публичную выдачу: общий media endpoint
+возвращает для kind `receipt` нейтральный 404, а чтение доступно только staff с
+`receipts.manage` через отдельный authenticated route.
+
+## Ручные чеки
+
+`Receipt` хранит текущий оптимизированный snapshot и future-compatible source
+`manual/rkeeper/other_pos`; `(source, external_id)` уникален, когда внешний ID задан.
+Текущий staff transport создаёт исключительно manual receipt и требует проверенное фото.
+
+Создание сериализуется advisory lock и защищено `(created_by_staff_id, idempotency_key)`.
+Каждое дополнение номера, fiscal data, note, external ID или фото создаёт полный неизменяемый
+`ReceiptRevision`; повтор с тем же ключом возвращает ту же ревизию. Отмена меняет только
+status/cancel metadata и оставляет исходный чек и историю.
+
+`ReceiptRiskSettings` хранит пороги установки. Сервис пишет объяснимые flags для высокой
+суммы, частоты сотрудника/клиента, одинаковых сумм, повторного номера, отсутствующего фото
+и частых отмен. Это сигналы владельцу для проверки, а не автоматический ML-вердикт.

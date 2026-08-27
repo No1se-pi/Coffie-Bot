@@ -589,6 +589,42 @@ export interface CourierOption {
   display_name: string;
 }
 
+export interface Receipt {
+  id: string;
+  user_id: string;
+  customer_name: string;
+  venue_id: string;
+  venue_name: string;
+  amount_minor: number;
+  image_media_id: string | null;
+  source: "manual" | "rkeeper" | "other_pos";
+  external_id: string | null;
+  receipt_number: string | null;
+  fiscal_data: Record<string, unknown>;
+  note: string | null;
+  status: "active" | "cancelled";
+  current_revision: number;
+  created_at: string;
+  updated_at: string;
+  idempotent_replay: boolean;
+  revisions: Array<{
+    revision: number;
+    image_media_id: string | null;
+    receipt_number: string | null;
+    external_id: string | null;
+    fiscal_data: Record<string, unknown>;
+    note: string | null;
+    changed_fields: string[];
+    created_at: string;
+  }>;
+  risk_flags: Array<{
+    code: string;
+    details: Record<string, unknown>;
+    created_at: string;
+    resolved_at: string | null;
+  }>;
+}
+
 export interface AdminDeliverySettings {
   id: string;
   delivery_enabled: boolean;
@@ -876,7 +912,11 @@ export type OperationalPermission =
   | "stamps.add"
   | "rewards.redeem"
   | "operations.reverse_own"
-  | "tip_profile.manage_own";
+  | "tip_profile.manage_own"
+  | "orders.read"
+  | "orders.manage"
+  | "receipts.read"
+  | "receipts.manage";
 
 export interface PermissionOverride {
   permission: OperationalPermission;

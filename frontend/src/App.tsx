@@ -47,6 +47,7 @@ import {
   CourierMinePage,
   CourierOrderPage,
 } from "./pages/courier";
+import { ReceiptDetailPage, ReceiptsPage } from "./pages/receipts";
 
 export { AccrualPanel };
 
@@ -112,6 +113,11 @@ export default function App() {
                   />
                   <Route path="recent" element={<RecentOperationsPage />} />
                   <Route path="orders" element={<StaffOrdersPage />} />
+                  <Route path="receipts" element={<ReceiptsPage />} />
+                  <Route
+                    path="receipts/:receiptId"
+                    element={<ReceiptDetailPage />}
+                  />
                   <Route path="profile" element={<StaffProfilePage />} />
                 </Route>
                 <Route

@@ -46,6 +46,7 @@ const navItems: Record<
     { to: "/staff/scan", label: "Сканер", icon: "◎" },
     { to: "/staff/recent", label: "Операции", icon: "↻" },
     { to: "/staff/orders", label: "Заказы", icon: "▣" },
+    { to: "/staff/receipts", label: "Чеки", icon: "▤" },
     { to: "/staff/profile", label: "Профиль", icon: "○" },
   ],
   courier: [
@@ -61,6 +62,7 @@ const navItems: Record<
     { to: "/admin/settings", label: "Настройки", icon: "⚙" },
     { to: "/admin/menu", label: "Контент", icon: "☕" },
     { to: "/admin/delivery", label: "Доставка", icon: "▣" },
+    { to: "/staff/receipts", label: "Чеки", icon: "▤" },
   ],
 };
 

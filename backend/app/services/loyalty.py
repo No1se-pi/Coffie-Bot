@@ -2714,6 +2714,43 @@ class LoyaltyService:
             allow_blocked=True,
         )
 
+    async def update_user_internal_note(
+        self,
+        actor: Actor,
+        *,
+        user_id: UUID,
+        internal_note: str | None,
+        metadata: RequestMetadata = EMPTY_REQUEST_METADATA,
+        now: datetime | None = None,
+    ) -> LoyaltyContext:
+        _require_permission(actor, PermissionCode.ADMIN_USERS_MANAGE)
+        normalized_note = internal_note.strip() if internal_note else ""
+        note = _truncate(normalized_note, 4_000) or None
+        current_time = _aware_now(now)
+        async with self._repository.transaction():
+            context = await self._require_context(
+                user_id,
+                for_update=True,
+                allow_blocked=True,
+            )
+            context.user.internal_note = note
+            context.user.updated_at = current_time
+            self._repository.add_all(
+                [
+                    _audit_event(
+                        actor=actor,
+                        subject_user_id=user_id,
+                        object_type="user",
+                        object_id=user_id,
+                        event_type="customer.internal_note_updated",
+                        event_metadata={"has_note": note is not None},
+                        metadata=metadata,
+                    )
+                ]
+            )
+            await self._repository.flush()
+            return context
+
     async def list_user_history(
         self,
         actor: Actor,

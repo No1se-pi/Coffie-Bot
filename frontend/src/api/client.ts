@@ -3,6 +3,7 @@ import type {
   Actor,
   AdminModifierGroup,
   AdminModifierGroupDraft,
+  AdminAnalytics,
   AdminCustomerBirthday,
   AdminStaffMember,
   AdminOverview,
@@ -34,6 +35,7 @@ import type {
   CustomerMergePreview,
   CustomerMergePreviewRequest,
   CustomerMergeResult,
+  CustomerIdentity,
   CustomerBirthday,
   CustomerPass,
   CustomerWalletSummary,
@@ -70,6 +72,7 @@ import type {
   StaffMemberDraft,
   StaffProfile,
   TipProfile,
+  TelegramWebLoginData,
   PendingTipProfile,
   PassTemplate,
   PassUsage,
@@ -198,11 +201,22 @@ async function request<T>(
 }
 
 function queryString(
-  values: Record<string, string | number | boolean | undefined>,
+  values: Record<
+    string,
+    | string
+    | number
+    | boolean
+    | readonly (string | number | boolean)[]
+    | undefined
+  >,
 ): string {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") params.set(key, String(value));
+    if (Array.isArray(value)) {
+      value.forEach((item) => params.append(key, String(item)));
+    } else if (value !== undefined && value !== "") {
+      params.set(key, String(value));
+    }
   });
   const value = params.toString();
   return value ? `?${value}` : "";
@@ -298,6 +312,10 @@ async function bootstrapAuth(initData: string): Promise<AuthSession> {
     method: "POST",
     body: jsonBody({ init_data: initData }),
   });
+  return normalizeAuth(raw);
+}
+
+function normalizeAuth(raw: RawAuthResponse): AuthSession {
   const staffRole = raw.staff?.role;
   const role = staffRole ?? raw.user.role ?? "customer";
   const availableRoles =
@@ -319,6 +337,16 @@ async function bootstrapAuth(initData: string): Promise<AuthSession> {
   };
   setSessionToken(session.access_token);
   return session;
+}
+
+async function telegramWebLogin(
+  payload: TelegramWebLoginData,
+): Promise<AuthSession> {
+  const raw = await request<RawAuthResponse>("/auth/telegram/web", {
+    method: "POST",
+    body: jsonBody(payload),
+  });
+  return normalizeAuth(raw);
 }
 
 async function getHome(): Promise<HomeData> {
@@ -355,26 +383,14 @@ async function getMore(): Promise<PublicMoreData> {
 
 async function getAdminOverview(): Promise<AdminOverview> {
   if (isDemoMode) return demoApi.getAdminOverview();
-  const [users, blocked, events, suspicious, promotions] = await Promise.all([
-    request<ListResponse<AdminUserListItem>>("/admin/users?page=1&page_size=1"),
-    request<ListResponse<AdminUserListItem>>(
-      "/admin/users?status=blocked&page=1&page_size=1",
-    ),
+  const [dashboard, events] = await Promise.all([
+    request<Omit<AdminOverview, "recent_events">>("/admin/dashboard"),
     request<ListResponse<BackendAuditEvent>>(
       "/admin/events?page=1&page_size=5",
     ),
-    request<ListResponse<BackendAuditEvent>>(
-      "/admin/events?suspicious=true&page=1&page_size=1",
-    ),
-    request<ListResponse<Promotion>>(
-      "/admin/promotions?status=published&page=1&page_size=1",
-    ),
   ]);
   return {
-    users_total: users.total,
-    blocked_users: blocked.total,
-    suspicious_events: suspicious.total,
-    active_promotions: promotions.total,
+    ...dashboard,
     recent_events: events.items.map(normalizeAuditEvent),
   };
 }
@@ -576,6 +592,7 @@ function normalizeAuditEvent(event: BackendAuditEvent): AuditEvent {
 export const coffeeApi = {
   isDemo: isDemoMode,
   bootstrapAuth,
+  telegramWebLogin,
   async logout(): Promise<void> {
     if (!isDemoMode) await request<void>("/auth/logout", { method: "POST" });
     setSessionToken(null);
@@ -630,20 +647,34 @@ export const coffeeApi = {
       method: "POST",
       body: jsonBody({ reason }),
     }),
-  getStaffOrders: (): Promise<{ items: CustomerOrder[] }> =>
-    request("/staff/orders?limit=200"),
-  transitionOrder: (id: string, status: OrderStatus): Promise<CustomerOrder> =>
+  getStaffOrders: (
+    venueId?: string,
+    statuses?: OrderStatus[],
+  ): Promise<{ items: CustomerOrder[] }> =>
+    request(
+      `/staff/orders${queryString({ venue_id: venueId, statuses, limit: 200 })}`,
+    ),
+  getStaffOrder: (id: string): Promise<CustomerOrder> =>
+    request(`/staff/orders/${encodeURIComponent(id)}`),
+  transitionOrder: (
+    id: string,
+    status: OrderStatus,
+    reason: string | null = null,
+    comment: string | null = null,
+  ): Promise<CustomerOrder> =>
     request(`/staff/orders/${encodeURIComponent(id)}/transition`, {
       method: "POST",
-      body: jsonBody({ status, reason: null, comment: null }),
+      body: jsonBody({ status, reason, comment }),
     }),
   transitionSuborder: (
     id: string,
     status: OrderStatus,
+    reason: string | null = null,
+    comment: string | null = null,
   ): Promise<CustomerOrder> =>
     request(`/staff/suborders/${encodeURIComponent(id)}/transition`, {
       method: "POST",
-      body: jsonBody({ status, reason: null, comment: null }),
+      body: jsonBody({ status, reason, comment }),
     }),
   getAvailableCourierOrders: (): Promise<{ items: CourierOrder[] }> =>
     request("/courier/orders/available?limit=100"),
@@ -994,6 +1025,10 @@ export const coffeeApi = {
     return request<MediaUpload>("/staff/me/media", { method: "POST", body });
   },
   getAdminOverview,
+  getAdminAnalytics: (days = 30): Promise<AdminAnalytics> =>
+    isDemoMode
+      ? demoApi.getAdminAnalytics(days)
+      : request(`/admin/analytics${queryString({ days })}`),
   getAdminUsers: (
     query?: string,
     status?: string,
@@ -1011,6 +1046,63 @@ export const coffeeApi = {
             `/admin/users/${encodeURIComponent(id)}`,
           ),
         ),
+  getAdminUserHistory: async (
+    id: string,
+  ): Promise<ListResponse<HistoryItem>> => {
+    if (isDemoMode) return demoApi.getHistory();
+    const response = await request<ListResponse<BackendOperation>>(
+      `/admin/users/${encodeURIComponent(id)}/history?page=1&page_size=50`,
+    );
+    return {
+      ...response,
+      items: response.items.map(normalizeHistoryOperation),
+    };
+  },
+  getAdminCustomerIdentities: (
+    id: string,
+  ): Promise<{ items: CustomerIdentity[] }> =>
+    isDemoMode
+      ? Promise.resolve({ items: [] })
+      : request(`/admin/users/${encodeURIComponent(id)}/identities`),
+  updateAdminUserNote: async (
+    id: string,
+    internalNote: string | null,
+  ): Promise<AdminUser> =>
+    isDemoMode
+      ? demoApi.getAdminUser(id)
+      : normalizeAdminUser(
+          await request<BackendAdminUser>(
+            `/admin/users/${encodeURIComponent(id)}/note`,
+            {
+              method: "PATCH",
+              body: jsonBody({ internal_note: internalNote }),
+            },
+          ),
+        ),
+  setAdminUserBlocked: async (
+    id: string,
+    blocked: boolean,
+    reason: string,
+  ): Promise<{ status: string; blocked: boolean }> => {
+    if (isDemoMode) return { status: blocked ? "blocked" : "active", blocked };
+    return request(
+      `/admin/users/${encodeURIComponent(id)}/${blocked ? "block" : "unblock"}`,
+      {
+        method: "POST",
+        body: blocked ? jsonBody({ reason }) : undefined,
+        idempotencyKey: uuid(),
+      },
+    );
+  },
+  reissueAdminUserCard: (
+    id: string,
+  ): Promise<{ card_id: string; short_code: string }> =>
+    isDemoMode
+      ? Promise.resolve({ card_id: uuid(), short_code: "DEMO-CARD" })
+      : request(`/admin/users/${encodeURIComponent(id)}/cards/reissue`, {
+          method: "POST",
+          idempotencyKey: uuid(),
+        }),
   previewCustomerMerge: (
     payload: CustomerMergePreviewRequest,
   ): Promise<CustomerMergePreview> =>

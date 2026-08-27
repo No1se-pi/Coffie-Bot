@@ -513,6 +513,23 @@ a:focus-visible {
   color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
 }
+.app-shell--admin .bottom-nav {
+  justify-content: flex-start;
+  overflow-x: auto;
+}
+.app-shell--admin .bottom-nav__item {
+  flex: 0 0 76px;
+}
+.browser-login {
+  width: min(100%, 430px);
+}
+.telegram-login {
+  min-height: 48px;
+  margin: 1rem 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
 
 .page {
   display: flex;
@@ -1348,6 +1365,127 @@ a:focus-visible {
 }
 .action-row > * {
   flex: 1 1 140px;
+}
+.analytics-grid,
+.help-grid {
+  display: grid;
+  gap: 1rem;
+}
+.analytics-bars {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+.analytics-bars__row > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.8rem;
+}
+.analytics-bars__row span {
+  color: var(--color-muted);
+}
+.analytics-bars__track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+}
+.analytics-bars__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+.daily-chart {
+  height: 220px;
+  display: flex;
+  align-items: stretch;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  overflow-x: auto;
+}
+.daily-chart__column {
+  min-width: 18px;
+  flex: 1 0 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.35rem;
+}
+.daily-chart__column > span {
+  width: min(100%, 26px);
+  min-height: 3px;
+  border-radius: 7px 7px 2px 2px;
+  background: linear-gradient(
+    180deg,
+    var(--color-primary),
+    var(--color-accent)
+  );
+}
+.daily-chart__column small {
+  color: var(--color-muted);
+  font-size: 0.58rem;
+  writing-mode: vertical-rl;
+}
+.help-grid .panel p {
+  margin: 0.6rem 0 0.85rem;
+  color: var(--color-muted);
+}
+
+@media (min-width: 960px) {
+  .app-shell--admin {
+    width: min(100%, 1440px);
+    padding-left: 240px;
+  }
+  .app-shell--admin .content {
+    padding-bottom: 2rem;
+  }
+  .app-shell--admin .bottom-nav {
+    top: 0;
+    left: max(0px, calc((100vw - 1440px) / 2));
+    bottom: 0;
+    transform: none;
+    width: 240px;
+    min-height: 100dvh;
+    padding: 88px 0.75rem 1rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border-top: 0;
+    border-right: 1px solid var(--color-border);
+  }
+  .app-shell--admin .bottom-nav__item {
+    min-height: 44px;
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 0.7rem;
+    padding: 0.55rem 0.75rem;
+  }
+  .app-shell--admin .bottom-nav__item > span {
+    width: 24px;
+    min-height: auto;
+    text-align: center;
+  }
+  .app-shell--admin .bottom-nav__item small {
+    font-size: 0.78rem;
+  }
+  .app-shell--admin .page {
+    max-width: 1180px;
+    padding-inline: 2rem;
+  }
+  .app-shell--admin .metrics-grid--admin {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .analytics-grid,
+  .help-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .staff-public-card {
   display: grid;

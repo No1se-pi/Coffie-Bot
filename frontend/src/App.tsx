@@ -40,6 +40,7 @@ import {
   CheckoutPage,
   OrderDetailPage,
   OrdersPage,
+  StaffOrderDetailPage,
   StaffOrdersPage,
 } from "./pages/orders";
 import {
@@ -48,6 +49,7 @@ import {
   CourierOrderPage,
 } from "./pages/courier";
 import { ReceiptDetailPage, ReceiptsPage } from "./pages/receipts";
+import { AdminAnalyticsPage, AdminHelpPage } from "./pages/web-admin";
 import {
   AdminBulkBonusPage,
   AdminReviewsPage,
@@ -125,6 +127,10 @@ export default function App() {
                   />
                   <Route path="recent" element={<RecentOperationsPage />} />
                   <Route path="orders" element={<StaffOrdersPage />} />
+                  <Route
+                    path="orders/:orderId"
+                    element={<StaffOrderDetailPage />}
+                  />
                   <Route path="receipts" element={<ReceiptsPage />} />
                   <Route
                     path="receipts/:receiptId"
@@ -141,6 +147,8 @@ export default function App() {
                   }
                 >
                   <Route index element={<AdminOverviewPage />} />
+                  <Route path="analytics" element={<AdminAnalyticsPage />} />
+                  <Route path="help" element={<AdminHelpPage />} />
                   <Route path="users" element={<AdminUsersPage />} />
                   <Route
                     path="customer-merge"

@@ -35,11 +35,18 @@ const nextStaffStatus: Partial<Record<OrderStatus, OrderStatus>> = {
   preparing: "ready",
 };
 
-function getNextStaffStatus(order: CustomerOrder): OrderStatus | undefined {
-  if (order.status === "ready" && order.fulfillment_mode === "pickup") {
+function getNextStaffStatusFor(
+  status: OrderStatus,
+  fulfillmentMode: FulfillmentMode,
+): OrderStatus | undefined {
+  if (status === "ready" && fulfillmentMode === "pickup") {
     return "delivered";
   }
-  return nextStaffStatus[order.status];
+  return nextStaffStatus[status];
+}
+
+function getNextStaffStatus(order: CustomerOrder): OrderStatus | undefined {
+  return getNextStaffStatusFor(order.status, order.fulfillment_mode);
 }
 
 function statusTone(
@@ -51,9 +58,15 @@ function statusTone(
   return "neutral";
 }
 
-function OrderSummary({ order }: { order: CustomerOrder }) {
-  return (
-    <Panel className="order-card">
+function OrderSummary({
+  order,
+  embedded = false,
+}: {
+  order: CustomerOrder;
+  embedded?: boolean;
+}) {
+  const content = (
+    <>
       <div className="order-card__head">
         <div>
           <small>{formatDateTime(order.created_at)}</small>
@@ -69,7 +82,12 @@ function OrderSummary({ order }: { order: CustomerOrder }) {
         позиций
       </p>
       <strong>{formatMoney(order.total_minor)}</strong>
-    </Panel>
+    </>
+  );
+  return embedded ? (
+    <div className="order-summary">{content}</div>
+  ) : (
+    <Panel className="order-card">{content}</Panel>
   );
 }
 
@@ -596,7 +614,10 @@ export function OrderDetailPage() {
 export function StaffOrdersPage() {
   const resource = useResource(coffeeApi.getStaffOrders);
   const couriers = useResource(coffeeApi.getCourierOptions);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<OrderStatus | "">("");
   const [busy, setBusy] = useState("");
+  const [actionError, setActionError] = useState<Error | null>(null);
   const [courierByOrder, setCourierByOrder] = useState<Record<string, string>>(
     {},
   );
@@ -604,9 +625,14 @@ export function StaffOrdersPage() {
     const target = getNextStaffStatus(order);
     if (!target) return;
     setBusy(order.id);
+    setActionError(null);
     try {
       await coffeeApi.transitionOrder(order.id, target);
       await resource.reload();
+    } catch (value) {
+      setActionError(
+        value instanceof Error ? value : new Error("Не удалось изменить заказ"),
+      );
     } finally {
       setBusy("");
     }
@@ -615,26 +641,79 @@ export function StaffOrdersPage() {
     const courierId = courierByOrder[orderId];
     if (!courierId) return;
     setBusy(orderId);
+    setActionError(null);
     try {
       await coffeeApi.assignCourier(orderId, courierId);
       await resource.reload();
+    } catch (value) {
+      setActionError(
+        value instanceof Error
+          ? value
+          : new Error("Не удалось назначить курьера"),
+      );
     } finally {
       setBusy("");
     }
   };
-  const groups = useMemo(() => resource.data?.items ?? [], [resource.data]);
+  const groups = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return (resource.data?.items ?? []).filter((order) => {
+      if (status && order.status !== status) return false;
+      if (!normalized) return true;
+      return [
+        String(order.number),
+        order.contact_phone,
+        order.delivery_address,
+        ...order.suborders.flatMap((suborder) => [
+          suborder.venue_name,
+          ...suborder.lines.map((line) => line.name),
+        ]),
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalized));
+    });
+  }, [query, resource.data, status]);
   return (
     <Page title="Заказы" eyebrow="Очередь кухни и выдачи">
+      <Panel>
+        <div className="filter-grid">
+          <Field label="Поиск">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Номер, телефон, адрес, заведение или товар"
+            />
+          </Field>
+          <Field label="Статус">
+            <select
+              value={status}
+              onChange={(event) =>
+                setStatus(event.target.value as OrderStatus | "")
+              }
+            >
+              <option value="">Все</option>
+              {Object.entries(statusLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </Panel>
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
       )}
+      {actionError && <ErrorState error={actionError} compact />}
       {resource.data &&
         (groups.length ? (
           <div className="card-list">
             {groups.map((order) => (
               <Panel className="order-card" key={order.id}>
-                <OrderSummary order={order} />
+                <Link className="plain-link" to={`/staff/orders/${order.id}`}>
+                  <OrderSummary order={order} embedded />
+                </Link>
                 {order.suborders.map((suborder) => (
                   <p key={suborder.id}>
                     {suborder.venue_name}: {statusLabels[suborder.status]}
@@ -685,6 +764,141 @@ export function StaffOrdersPage() {
             text="Новые заказы появятся здесь автоматически."
           />
         ))}
+    </Page>
+  );
+}
+
+export function StaffOrderDetailPage() {
+  const { orderId = "" } = useParams();
+  const resource = useResource(
+    () => coffeeApi.getStaffOrder(orderId),
+    [orderId],
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const transition = async (
+    target: OrderStatus,
+    suborderId?: string,
+    reason: string | null = null,
+  ) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const comment =
+        window.prompt("Комментарий к изменению (необязательно)")?.trim() ||
+        null;
+      if (suborderId) {
+        await coffeeApi.transitionSuborder(suborderId, target, reason, comment);
+      } else {
+        await coffeeApi.transitionOrder(orderId, target, reason, comment);
+      }
+      await resource.reload();
+    } catch (value) {
+      setError(
+        value instanceof Error ? value : new Error("Не удалось изменить заказ"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cancel = () => {
+    const reason = window.prompt("Причина отмены заказа")?.trim();
+    if (reason) void transition("cancelled", undefined, reason);
+  };
+  const order = resource.data;
+  return (
+    <Page
+      title={order ? `Заказ №${order.number}` : "Заказ"}
+      eyebrow="Состав, подзаказы и история"
+      action={
+        <Link className="button button--secondary" to="/staff/orders">
+          К списку
+        </Link>
+      }
+    >
+      {resource.loading && <Loader />}
+      {resource.error && (
+        <ErrorState error={resource.error} onRetry={resource.reload} />
+      )}
+      {error && <ErrorState error={error} compact />}
+      {order && (
+        <>
+          <OrderSummary order={order} />
+          <Panel>
+            <h2>Клиент и получение</h2>
+            <p>{order.contact_phone}</p>
+            <p>
+              {order.delivery_address ??
+                order.pickup_address ??
+                order.pickup_name}
+            </p>
+            {order.customer_comment && (
+              <p className="muted">{order.customer_comment}</p>
+            )}
+          </Panel>
+          {order.suborders.map((suborder) => {
+            const next = getNextStaffStatusFor(
+              suborder.status,
+              order.fulfillment_mode,
+            );
+            return (
+              <Panel key={suborder.id}>
+                <div className="order-card__head">
+                  <h2>{suborder.venue_name}</h2>
+                  <Badge tone={statusTone(suborder.status)}>
+                    {statusLabels[suborder.status]}
+                  </Badge>
+                </div>
+                {suborder.lines.map((line) => (
+                  <div className="order-line-snapshot" key={line.id}>
+                    <span>
+                      {line.quantity} × {line.name}
+                      <small>
+                        {line.modifiers.map((value) => value.name).join(", ")}
+                      </small>
+                    </span>
+                    <strong>{formatMoney(line.total_minor)}</strong>
+                  </div>
+                ))}
+                {next && (
+                  <Button
+                    disabled={busy}
+                    onClick={() => void transition(next, suborder.id)}
+                  >
+                    Подзаказ: {statusLabels[next]}
+                  </Button>
+                )}
+              </Panel>
+            );
+          })}
+          <Panel>
+            <h2>История статусов</h2>
+            {order.events.map((event) => (
+              <div className="order-event" key={event.id}>
+                <span>
+                  {statusLabels[event.to_status]}
+                  {event.reason ? ` · ${event.reason}` : ""}
+                  {event.comment ? ` · ${event.comment}` : ""}
+                </span>
+                <small>{formatDateTime(event.created_at)}</small>
+              </div>
+            ))}
+          </Panel>
+          {getNextStaffStatus(order) && (
+            <Button
+              disabled={busy}
+              onClick={() => void transition(getNextStaffStatus(order)!)}
+            >
+              Весь заказ: {statusLabels[getNextStaffStatus(order)!]}
+            </Button>
+          )}
+          {!["delivered", "cancelled"].includes(order.status) && (
+            <Button variant="danger" disabled={busy} onClick={cancel}>
+              Отменить заказ
+            </Button>
+          )}
+        </>
+      )}
     </Page>
   );
 }

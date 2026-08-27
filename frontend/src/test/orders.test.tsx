@@ -100,7 +100,9 @@ describe("order flows", () => {
     );
 
     expect(transition).toHaveBeenCalledWith("order-1", "confirmed");
-    expect(await screen.findByText("Подтверждён")).toBeInTheDocument();
+    expect((await screen.findAllByText("Подтверждён")).length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("lets staff manually assign an active courier", async () => {

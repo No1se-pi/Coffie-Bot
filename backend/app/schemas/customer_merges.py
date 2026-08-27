@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -132,7 +132,11 @@ def customer_merge_confirm_response(
         sessions_revoked=merge.sessions_revoked,
         cards_revoked=merge.cards_revoked,
         feedback_moved=merge.feedback_moved,
-        birthday_resolution=merge.birthday_resolution,
+        # PostgreSQL constrains this string to the same two public API values.
+        birthday_resolution=cast(
+            Literal["keep_canonical", "use_source"] | None,
+            merge.birthday_resolution,
+        ),
         source_staff_rebound=merge.source_staff_rebound,
         idempotent_replay=result.idempotent_replay,
     )

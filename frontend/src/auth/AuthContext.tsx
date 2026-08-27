@@ -8,7 +8,12 @@ import {
   type ReactNode,
 } from "react";
 import { coffeeApi, setSessionToken } from "../api/client";
-import type { Actor, AuthSession, Role } from "../api/types";
+import type {
+  Actor,
+  AuthSession,
+  Role,
+  TelegramWebLoginData,
+} from "../api/types";
 import { getTelegramInitData, initializeTelegram } from "../telegram";
 
 interface AuthContextValue {
@@ -20,6 +25,7 @@ interface AuthContextValue {
   isDemo: boolean;
   setActiveRole: (role: Role) => void;
   retry: () => void;
+  loginWithTelegram: (payload: TelegramWebLoginData) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -52,6 +58,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const acceptSession = useCallback((session: AuthSession) => {
+    setSessionToken(session.access_token);
+    setActor(session.actor);
+    setActiveRoleState(preferredRole(session));
+    setError(null);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -67,9 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .bootstrapAuth(initData)
       .then((session) => {
         if (!alive) return;
-        setSessionToken(session.access_token);
-        setActor(session.actor);
-        setActiveRoleState(preferredRole(session));
+        acceptSession(session);
       })
       .catch((reason: unknown) => {
         if (alive)
@@ -85,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       alive = false;
       cleanupTelegram();
     };
-  }, [attempt]);
+  }, [acceptSession, attempt]);
 
   const availableRoles = useMemo<Role[]>(
     () => (actor ? operationalRoles(actor) : ["customer"]),
@@ -110,12 +120,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isDemo: coffeeApi.isDemo,
       setActiveRole,
       retry: () => setAttempt((value) => value + 1),
+      loginWithTelegram: async (payload) => {
+        setLoading(true);
+        setError(null);
+        try {
+          acceptSession(await coffeeApi.telegramWebLogin(payload));
+        } catch (reason: unknown) {
+          setError(
+            reason instanceof Error ? reason : new Error("Не удалось войти"),
+          );
+          throw reason;
+        } finally {
+          setLoading(false);
+        }
+      },
       logout: async () => {
         await coffeeApi.logout();
         setActor(null);
       },
     }),
-    [actor, activeRole, availableRoles, loading, error, setActiveRole],
+    [
+      actor,
+      activeRole,
+      availableRoles,
+      loading,
+      error,
+      setActiveRole,
+      acceptSession,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

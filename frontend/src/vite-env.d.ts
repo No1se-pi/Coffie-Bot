@@ -8,6 +8,7 @@ interface ImportMetaEnv {
   readonly VITE_BRAND_SHORT_NAME?: string;
   readonly VITE_BRAND_GREETING?: string;
   readonly VITE_CURRENCY_NAME?: string;
+  readonly VITE_TELEGRAM_BOT_USERNAME?: string;
 }
 
 interface ImportMeta {

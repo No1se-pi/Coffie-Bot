@@ -270,11 +270,11 @@ gate и фазового отчёта.
 
 ### Phase 8 — Web Admin
 
-- [ ] Standalone safe Telegram web login over existing session model.
-- [ ] Desktop shell/sidebar/tables/forms/dialogs.
-- [ ] Dashboard, orders, customers/merge, menu, loyalty, promotions, staff/couriers,
+- [x] Standalone safe Telegram web login over existing session model.
+- [x] Desktop shell/sidebar/tables/forms/dialogs.
+- [x] Dashboard, orders, customers/merge, menu, loyalty, promotions, staff/couriers,
   receipts, reviews, analytics and help.
-- [ ] Mobile admin remains available.
+- [x] Mobile admin remains available.
 
 ### Phase 9 — Hardening и передача
 
@@ -428,3 +428,18 @@ gate и фазового отчёта.
 - Frontend добавляет customer reviews/passes, staff pass usage, review moderation, template
   create/issue/archive с выбором заведений, категорий и позиций, а также bulk preview/confirm.
   Prettier/TypeScript/ESLint и `48 passed` прошли.
+
+### 2026-08-28 — Phase 8 Web Admin
+
+- Добавлен отдельный Telegram Login Widget flow для обычного браузера. Backend независимо
+  проверяет Login Widget HMAC/TTL и выдаёт ту же hash-only session, что и Mini App; доверенные
+  Telegram ID или роль от frontend не принимаются.
+- Responsive admin shell сохраняет мобильную навигацию и включает desktop sidebar. Dashboard
+  показывает операционные метрики, а PostgreSQL analytics — заказы, выручку, заведения,
+  товары, акции, сотрудников, loyalty, клиентов, абонементы, чеки и доставку без внешнего SaaS.
+- Очередь заказов получила поиск/фильтр и полную карточку с suborders, modifiers, историей,
+  разрешёнными переходами и причиной отмены. Карточка клиента объединяет identities, историю,
+  абонементы, блокировку, перевыпуск QR и audit-safe внутреннюю заметку.
+- Добавлены desktop help, управление отзывом staff sessions и расширенные admin shortcuts.
+  Backend Ruff/format/mypy и `258 passed`; frontend Prettier/ESLint/TypeScript, `50 passed`,
+  `npm audit = 0` и production build прошли.

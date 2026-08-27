@@ -14,6 +14,7 @@ from app.repositories.loyalty import LoyaltyRepository
 from app.schemas.loyalty import (
     AdjustmentRequest,
     AdminUserListResponse,
+    AdminUserNoteUpdate,
     AdminUserResponse,
     CardReissueResponse,
     OperationListResponse,
@@ -74,6 +75,23 @@ async def get_user(
     actor: ReadActor,
 ) -> AdminUserResponse:
     return admin_user_response(await _service(session).get_admin_user(actor, user_id))
+
+
+@router.patch("/{user_id}/note", response_model=AdminUserResponse)
+async def update_user_note(
+    user_id: UUID,
+    payload: AdminUserNoteUpdate,
+    request: Request,
+    session: DatabaseSession,
+    actor: ManageActor,
+) -> AdminUserResponse:
+    value = await _service(session).update_user_internal_note(
+        actor,
+        user_id=user_id,
+        internal_note=payload.internal_note,
+        metadata=_request_metadata(request),
+    )
+    return admin_user_response(value)
 
 
 @router.get("/{user_id}/history", response_model=OperationListResponse)

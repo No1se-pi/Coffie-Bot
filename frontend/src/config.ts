@@ -4,3 +4,7 @@ export const brand = {
   greeting: import.meta.env.VITE_BRAND_GREETING ?? "Программа лояльности",
   currencyName: import.meta.env.VITE_CURRENCY_NAME ?? "баллы",
 };
+
+export const telegramBotUsername = (
+  import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? ""
+).replace(/^@/, "");

@@ -34,6 +34,16 @@ class TelegramAuthRequest(ApiSchema):
     init_data: str = Field(max_length=65_536)
 
 
+class TelegramWebLoginRequest(ApiSchema):
+    id: int = Field(gt=0)
+    first_name: str = Field(min_length=1, max_length=256)
+    last_name: str | None = Field(default=None, max_length=256)
+    username: str | None = Field(default=None, max_length=64)
+    photo_url: str | None = Field(default=None, max_length=2048)
+    auth_date: int = Field(gt=0)
+    hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+
+
 class CurrentUserResponse(ApiSchema):
     id: UUID
     telegram_id: int | None

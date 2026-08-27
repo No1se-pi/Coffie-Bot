@@ -13,6 +13,7 @@ customer profile ID, identities выносятся отдельно, `Venue` п�
 
 ```text
 Telegram client ── initData ──> React Mini App ── HTTPS /api/v1 ──> FastAPI
+Browser ── signed Telegram Login ──> desktop Web Admin ──────────┤
        │                                                        │
        └──────── messages <── aiogram bot <── notification outbox
                                                                 │
@@ -68,6 +69,12 @@ Transport не выполняет расчёты и не меняет модел
 4. Подтверждённый Telegram user ID сопоставляется с локальным `user`; первый вход атомарно создаёт пользователя, карту и welcome operation.
 5. Backend выдаёт случайный короткоживущий session token. В `sessions` хранится только SHA-256 hash, TTL и revocation data.
 6. Каждый запрос загружает actor, его active status, role и granular permissions. Объектные проверки выполняются после RBAC.
+
+Для входа в Web Admin вне Mini App используется Telegram Login Widget. Backend принимает
+только подписанный Telegram payload, отдельно проверяет HMAC и TTL по алгоритму Login Widget,
+после чего вызывает тот же identity/session service. Алгоритм Mini App `initData` не
+переиспользуется: у этих двух Telegram flows разные derivation keys. В обоих случаях frontend
+получает одинаковый opaque session token, а в БД хранится только его hash.
 
 Development bypass разрешён только при явных `APP_ENV=development` и `DEV_AUTH_ENABLED=true`; production-конфигурация с bypass должна завершать запуск ошибкой.
 
@@ -168,6 +175,18 @@ Staff/admin с `orders.manage` может назначить активного 
 `audit_events` хранит type, actor, subject/object, UTC timestamp, severity, suspicious flag, IP/user-agent subset и JSON metadata. Готовая человекочитаемая строка не является источником данных: formatter строит её из type и metadata с безопасным fallback для неизвестных версий.
 
 Технические JSON logs и audit events разделены. В логи не попадают секреты, init data, session tokens и полные приватные payloads.
+
+## Web Admin и аналитика
+
+Мобильная админка и desktop Web Admin — два responsive представления одного React-приложения
+и того же `/api/v1`. Desktop shell добавляет боковую навигацию, но не создаёт отдельный backend
+или набор привилегий. Карточка клиента, заказ, меню, loyalty, акции, сотрудники/курьеры, чеки,
+отзывы и абонементы используют существующие application services и RBAC.
+
+Dashboard и analytics читают агрегаты напрямую из PostgreSQL через отдельный read-only
+repository/service. Клиент не получает сырые телефоны, адреса или Telegram ID для построения
+графиков; сторонний analytics SaaS не используется. Business-day метрики рассчитываются с
+timezone и границей дня из настроек loyalty.
 
 ## Уведомления и рассылки
 

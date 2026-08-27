@@ -1,6 +1,7 @@
 import { ApiError } from "./client";
 import type {
   AccrualPreview,
+  AdminAnalytics,
   AdminCustomerBirthday,
   AdminFeedback,
   AdminLoyaltyV2Settings,
@@ -1139,14 +1140,63 @@ export const demoApi = {
   async getAdminOverview(): Promise<AdminOverview> {
     await wait();
     return {
-      users_total: adminUsers.length,
-      blocked_users: adminUsers.filter((item) => item.status === "blocked")
-        .length,
+      generated_at: now(),
+      orders_today: 3,
+      active_orders: 2,
+      customers: adminUsers.length,
+      new_customers_today: 1,
+      loyalty_accrual_today: 180,
+      loyalty_redemption_today: 40,
+      manual_receipts_today: 2,
       suspicious_events: events.filter((item) => item.suspicious).length,
       active_promotions: promotions.filter(
         (item) => item.status === "published",
       ).length,
+      reviews_waiting_moderation: 1,
+      courier_orders: 1,
       recent_events: events.slice(0, 5),
+    };
+  },
+  async getAdminAnalytics(days = 30): Promise<AdminAnalytics> {
+    await wait();
+    const generatedAt = new Date();
+    const ordersByDay = Array.from({ length: days }, (_, index) => {
+      const day = new Date(generatedAt);
+      day.setUTCDate(day.getUTCDate() - (days - index - 1));
+      return {
+        day: day.toISOString().slice(0, 10),
+        orders: (index * 3) % 9,
+        revenue_minor: ((index * 3) % 9) * 28_000,
+      };
+    });
+    return {
+      generated_at: generatedAt.toISOString(),
+      days,
+      started_at: ordersByDay[0]?.day ?? generatedAt.toISOString(),
+      ended_at: generatedAt.toISOString(),
+      orders_by_day: ordersByDay,
+      orders_by_venue: [
+        { id: "venue-1", name: "Кофейня", count: 42, amount_minor: 1_120_000 },
+      ],
+      popular_items: [
+        { id: "item-1", name: "Капучино", count: 31, amount_minor: 806_000 },
+      ],
+      promotion_usage: [
+        {
+          id: "promo-1",
+          name: "Утренний кофе",
+          count: 8,
+          amount_minor: 64_000,
+        },
+      ],
+      employee_activity: [
+        { id: "staff-1", name: "Анна", count: 27, amount_minor: 0 },
+      ],
+      loyalty: { accrued_points: 980, redeemed_points: 410 },
+      customers: { active_customers: 34, repeat_customers: 18 },
+      subscriptions: { issued: 6, uses: 23, active: 14 },
+      receipts: { created: 51, amount_minor: 1_420_000, suspicious: 2 },
+      delivery: { orders: 19, completed: 16, cancelled: 1 },
     };
   },
   async getAdminUsers(query?: string, status?: string) {

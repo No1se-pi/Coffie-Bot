@@ -11,6 +11,7 @@ import { useAuth } from "../auth/AuthContext";
 import { brand } from "../config";
 import { appThemes, applyTheme, readTheme, type AppTheme } from "../theme";
 import { Avatar, Button, ErrorState, Loader } from "./ui";
+import { TelegramLogin } from "./TelegramLogin";
 
 const roleLabels: Record<Role, string> = {
   customer: "Гость",
@@ -57,6 +58,7 @@ const navItems: Record<
   ],
   admin: [
     { to: "/admin", label: "Обзор", icon: "⌂", end: true },
+    { to: "/staff/orders", label: "Заказы", icon: "▣" },
     { to: "/admin/users", label: "Клиенты", icon: "○" },
     { to: "/admin/staff", label: "Сотрудники", icon: "◇" },
     { to: "/admin/events", label: "События", icon: "↻" },
@@ -64,10 +66,14 @@ const navItems: Record<
     { to: "/admin/reviews", label: "Отзывы", icon: "★" },
     { to: "/admin/subscriptions", label: "Абонементы", icon: "◇" },
     { to: "/admin/bulk-bonus", label: "Бонусы", icon: "+" },
-    { to: "/admin/settings", label: "Настройки", icon: "⚙" },
-    { to: "/admin/menu", label: "Контент", icon: "☕" },
+    { to: "/admin/settings", label: "Лояльность", icon: "⚙" },
+    { to: "/admin/menu", label: "Меню", icon: "☕" },
+    { to: "/admin/promotions", label: "Акции", icon: "%" },
+    { to: "/admin/pricing", label: "Цены", icon: "₽" },
     { to: "/admin/delivery", label: "Доставка", icon: "▣" },
     { to: "/staff/receipts", label: "Чеки", icon: "▤" },
+    { to: "/admin/analytics", label: "Аналитика", icon: "⌁" },
+    { to: "/admin/help", label: "Помощь", icon: "?" },
   ],
 };
 
@@ -89,7 +95,18 @@ export function AuthGate() {
   if (auth.error)
     return (
       <div className="bootstrap">
-        <ErrorState error={auth.error} onRetry={auth.retry} />
+        <div className="state state--card browser-login">
+          <span className="state__icon">TG</span>
+          <h1>Вход через Telegram</h1>
+          <p>
+            Откройте Mini App внутри Telegram или войдите здесь через защищённый
+            Telegram Login.
+          </p>
+          <TelegramLogin onLogin={auth.loginWithTelegram} />
+          <button className="text-link" type="button" onClick={auth.retry}>
+            Повторить вход через Mini App
+          </button>
+        </div>
       </div>
     );
   if (!auth.actor)
@@ -127,7 +144,7 @@ function AppShell() {
     appThemes.find((item) => item.id === theme) ?? appThemes[0];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell app-shell--${navRole}`}>
       <header className="topbar">
         <button
           className="brand"

@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.db.session import get_db_session
 from app.repositories.identity import IdentityRepository
-from app.schemas.identity import AuthResponse, TelegramAuthRequest, auth_response
+from app.schemas.identity import (
+    AuthResponse,
+    TelegramAuthRequest,
+    TelegramWebLoginRequest,
+    auth_response,
+)
 from app.security.rbac import Actor, get_current_actor
 from app.services.identity import IdentityService
 
@@ -34,6 +39,28 @@ async def telegram_auth(
     )
     result = await service.authenticate(
         payload.init_data,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
+    return auth_response(result)
+
+
+@router.post(
+    "/telegram/web",
+    response_model=AuthResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def telegram_web_auth(
+    payload: TelegramWebLoginRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> AuthResponse:
+    settings = cast(Settings, request.app.state.settings)
+    result = await IdentityService(
+        settings=settings,
+        repository=IdentityRepository(session),
+    ).authenticate_web_login(
+        payload.model_dump(),
         ip_address=_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
     )

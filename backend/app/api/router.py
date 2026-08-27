@@ -8,6 +8,7 @@ from app.api.routes.admin_events import router as admin_events_router
 from app.api.routes.admin_staff import router as admin_staff_router
 from app.api.routes.admin_users import router as admin_users_router
 from app.api.routes.admin_venues import router as admin_venues_router
+from app.api.routes.analytics import router as analytics_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.bulk_bonus import router as bulk_bonus_router
 from app.api.routes.couriers import router as couriers_router
@@ -43,6 +44,7 @@ api_v1_router.include_router(venues_router)
 api_v1_router.include_router(staff_router)
 api_v1_router.include_router(staff_profile_router)
 api_v1_router.include_router(admin_users_router)
+api_v1_router.include_router(analytics_router)
 api_v1_router.include_router(admin_events_router)
 api_v1_router.include_router(admin_broadcasts_router)
 api_v1_router.include_router(admin_content_router)

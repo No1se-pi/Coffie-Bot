@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import pytest
 
 from app.core.errors import AppError
-from app.security.telegram import TelegramInitDataVerifier
+from app.security.telegram import TelegramInitDataVerifier, TelegramLoginVerifier
 
 BOT_TOKEN = "123456789:development-test-token"
 
@@ -38,6 +38,19 @@ def signed_init_data(*, auth_date: datetime, user_id: int = 42) -> str:
 
 def verifier() -> TelegramInitDataVerifier:
     return TelegramInitDataVerifier(bot_token=BOT_TOKEN, ttl=timedelta(minutes=15))
+
+
+def signed_web_login(*, auth_date: datetime, user_id: int = 42) -> dict[str, str | int]:
+    fields: dict[str, str | int] = {
+        "id": user_id,
+        "first_name": "Ярослав",
+        "username": "coffee_owner",
+        "auth_date": int(auth_date.timestamp()),
+    }
+    check_string = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    secret = hashlib.sha256(BOT_TOKEN.encode()).digest()
+    fields["hash"] = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
+    return fields
 
 
 def test_verifies_signature_freshness_and_user() -> None:
@@ -79,3 +92,24 @@ def test_rejects_naive_reference_time() -> None:
 
     with pytest.raises(ValueError, match="timezone-aware"):
         verifier().verify(signed_init_data(auth_date=naive_now.replace(tzinfo=UTC)), now=naive_now)
+
+
+def test_verifies_browser_login_with_its_distinct_signature_algorithm() -> None:
+    now = datetime(2026, 8, 27, 12, tzinfo=UTC)
+    verifier = TelegramLoginVerifier(bot_token=BOT_TOKEN, ttl=timedelta(minutes=10))
+
+    user = verifier.verify(signed_web_login(auth_date=now), now=now)
+
+    assert (user.id, user.first_name, user.username) == (42, "Ярослав", "coffee_owner")
+
+
+def test_browser_login_rejects_tampering_and_expiration() -> None:
+    now = datetime(2026, 8, 27, 12, tzinfo=UTC)
+    verifier = TelegramLoginVerifier(bot_token=BOT_TOKEN, ttl=timedelta(minutes=10))
+    tampered = signed_web_login(auth_date=now)
+    tampered["username"] = "attacker"
+
+    with pytest.raises(AppError):
+        verifier.verify(tampered, now=now)
+    with pytest.raises(AppError):
+        verifier.verify(signed_web_login(auth_date=now - timedelta(minutes=11)), now=now)

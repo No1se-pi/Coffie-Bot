@@ -17,6 +17,16 @@ export interface AuthSession {
   actor: Actor;
 }
 
+export interface TelegramWebLoginData {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
+}
+
 export interface ListResponse<T> {
   items: T[];
   page: number;
@@ -871,6 +881,15 @@ export interface AdminUser extends AdminUserListItem {
   active_card?: boolean;
   birthday?: BirthdayValue | null;
   birthday_locked?: boolean;
+  internal_note?: string | null;
+}
+
+export interface CustomerIdentity {
+  id: string;
+  provider: CustomerIdentityProvider;
+  subject: string;
+  verified: boolean;
+  verified_at: string | null;
 }
 
 export interface AuditEvent {
@@ -1057,11 +1076,49 @@ export type LoyaltyRewardConfig =
   | { kind: "points"; points: number };
 
 export interface AdminOverview {
-  users_total: number;
-  blocked_users: number;
+  generated_at: string;
+  orders_today: number;
+  active_orders: number;
+  customers: number;
+  new_customers_today: number;
+  loyalty_accrual_today: number;
+  loyalty_redemption_today: number;
+  manual_receipts_today: number;
   suspicious_events: number;
   active_promotions: number;
+  reviews_waiting_moderation: number;
+  courier_orders: number;
   recent_events: AuditEvent[];
+}
+
+export interface DailyOrderMetric {
+  day: string;
+  orders: number;
+  revenue_minor: number;
+}
+
+export interface NamedMetric {
+  id: string | null;
+  name: string;
+  count: number;
+  amount_minor: number;
+}
+
+export interface AdminAnalytics {
+  generated_at: string;
+  days: number;
+  started_at: string;
+  ended_at: string;
+  orders_by_day: DailyOrderMetric[];
+  orders_by_venue: NamedMetric[];
+  popular_items: NamedMetric[];
+  promotion_usage: NamedMetric[];
+  employee_activity: NamedMetric[];
+  loyalty: { accrued_points: number; redeemed_points: number };
+  customers: { active_customers: number; repeat_customers: number };
+  subscriptions: { issued: number; uses: number; active: number };
+  receipts: { created: number; amount_minor: number; suspicious: number };
+  delivery: { orders: number; completed: number; cancelled: number };
 }
 
 export interface AdjustmentPreview {

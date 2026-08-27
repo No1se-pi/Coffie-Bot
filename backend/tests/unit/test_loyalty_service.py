@@ -317,6 +317,62 @@ def customer_actor(user_id: UUID) -> Actor:
 
 
 @pytest.mark.asyncio
+async def test_admin_updates_internal_note_under_lock_and_writes_audit() -> None:
+    context = loyalty_context()
+    context.user.status = UserStatus.BLOCKED
+    repository = FakeRepository(context)
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, repository))
+
+    result = await service.update_user_internal_note(
+        staff_actor(PermissionCode.ADMIN_USERS_MANAGE),
+        user_id=context.user.id,
+        internal_note="  Предпочитает звонок после 12:00  ",
+        now=NOW,
+    )
+
+    assert result.user.internal_note == "Предпочитает звонок после 12:00"
+    assert result.user.updated_at == NOW
+    assert repository.for_update_calls == [True]
+    audit = next(iter(repository.audits.values()))
+    assert audit.event_type == "customer.internal_note_updated"
+    assert audit.event_metadata["has_note"] is True
+
+
+@pytest.mark.asyncio
+async def test_internal_note_requires_customer_manage_permission() -> None:
+    context = loyalty_context()
+    service = LoyaltyService(cast(LoyaltyRepositoryPort, FakeRepository(context)))
+
+    with pytest.raises(AppError) as denied:
+        await service.update_user_internal_note(
+            staff_actor(PermissionCode.ADMIN_USERS_READ),
+            user_id=context.user.id,
+            internal_note="Скрытая заметка",
+            now=NOW,
+        )
+
+    assert denied.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_blank_internal_note_clears_the_value() -> None:
+    context = loyalty_context()
+    context.user.internal_note = "Старая заметка"
+    service = LoyaltyService(
+        cast(LoyaltyRepositoryPort, FakeRepository(context)),
+    )
+
+    result = await service.update_user_internal_note(
+        staff_actor(PermissionCode.ADMIN_USERS_MANAGE),
+        user_id=context.user.id,
+        internal_note="   ",
+        now=NOW,
+    )
+
+    assert result.user.internal_note is None
+
+
+@pytest.mark.asyncio
 async def test_lookup_card_returns_operational_customer_summary() -> None:
     context = loyalty_context(points_balance=37)
     repository = FakeRepository(context)

@@ -331,6 +331,11 @@ class AdminUserResponse(AdminUserListItemResponse):
     active_card: bool
     birthday: AdminUserBirthdayResponse | None
     birthday_locked: bool
+    internal_note: str | None
+
+
+class AdminUserNoteUpdate(ApiSchema):
+    internal_note: str | None = Field(default=None, max_length=4_000)
 
 
 class AuditEventResponse(ApiSchema):
@@ -609,6 +614,7 @@ def admin_user_response(value: LoyaltyContext) -> AdminUserResponse:
         active_card=value.card.status.value == "active",
         birthday=birthday,
         birthday_locked=birthday is not None,
+        internal_note=value.user.internal_note,
     )
 
 

@@ -39,6 +39,17 @@ from app.models.loyalty_v2 import (
     WalletTransfer,
 )
 from app.models.media import MediaFile
+from app.models.orders import (
+    CustomerOrder,
+    DeliverySettings,
+    DeliveryZone,
+    OrderAppliedPromotion,
+    OrderEvent,
+    OrderLine,
+    OrderLineModifier,
+    OrderPointRedemption,
+    OrderSuborder,
+)
 from app.models.staff import FeedbackItem, StaffTipProfile
 
 __all__ = [
@@ -50,6 +61,9 @@ __all__ = [
     "BroadcastDelivery",
     "CustomerIdentity",
     "CustomerMerge",
+    "CustomerOrder",
+    "DeliverySettings",
+    "DeliveryZone",
     "FeedbackItem",
     "Location",
     "LoyaltyOperation",
@@ -62,6 +76,12 @@ __all__ = [
     "ModifierGroup",
     "ModifierOption",
     "NotificationOutbox",
+    "OrderAppliedPromotion",
+    "OrderEvent",
+    "OrderLine",
+    "OrderLineModifier",
+    "OrderPointRedemption",
+    "OrderSuborder",
     "PointAllocation",
     "PointLot",
     "PointLotRoute",

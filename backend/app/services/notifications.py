@@ -218,6 +218,22 @@ def render_notification(
         text = f"Вам доступна награда: {name}." if name else "Вам доступна новая награда."
     elif event_type == "feedback.created":
         text = "Спасибо. Ваше обращение принято."
+    elif event_type.startswith("order."):
+        order_number = _integer(payload.get("order_number"))
+        label = {
+            "order.created": "принят",
+            "order.confirmed": "подтверждён",
+            "order.preparing": "готовится",
+            "order.ready": "готов к выдаче",
+            "order.waiting_for_courier": "ожидает курьера",
+            "order.courier_assigned": "передан курьерской службе",
+            "order.picked_up": "забран курьером",
+            "order.in_transit": "в пути",
+            "order.delivered": "доставлен",
+            "order.cancelled": "отменён",
+        }.get(event_type, "обновлён")
+        prefix = f"Заказ №{order_number}" if order_number else "Ваш заказ"
+        text = f"{prefix} {label}."
     else:
         text = "В программе лояльности появилось обновление."
 
@@ -234,12 +250,18 @@ def render_notification(
         if webapp_url and operation_id and post_purchase_event
         else None
     )
+    order_id = _short_text(payload.get("order_id"))
+    order_url = (
+        f"{webapp_url.rstrip('/')}/orders/{order_id}"
+        if webapp_url and order_id and event_type.startswith("order.")
+        else None
+    )
     return OutboundMessage(
         text=text,
         button_label=("Оценить бариста" if post_purchase_url else "Открыть приложение")
         if webapp_url
         else None,
-        button_url=post_purchase_url or webapp_url,
+        button_url=post_purchase_url or order_url or webapp_url,
         open_as_web_app=bool(webapp_url),
     )
 

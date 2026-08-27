@@ -115,6 +115,29 @@ Development bypass разрешён только при явных `APP_ENV=deve
   даже для уже полностью израсходованного lot, чтобы поздний reversal оставался
   однозначным.
 
+## Заказы, выдача и доставка
+
+`CustomerOrder` — один заказ для клиента; товары каждого `Venue` сохраняются в
+`OrderSuborder`. При создании backend повторно загружает меню и правила pricing,
+фиксирует денежные значения, названия, модификаторы и применённые акции. Изменение
+каталога после commit не меняет исторический заказ.
+
+Создание заказа требует idempotency key. PostgreSQL advisory lock сериализует повторы
+одного пользователя и ключа, а unique constraint не допускает дубль. Списание баллов,
+FIFO allocations, order/suborders, snapshots, первый event и notification outbox
+записываются в одной транзакции. Отмена возвращает баллы связанной компенсирующей
+операцией; исходные операции и события не переписываются.
+
+Pickup location и delivery zone выбираются только из активной конфигурации. Стоимость,
+минимум, бесплатный порог, доступность scheduling и часы работы рассчитывает backend.
+Простая зона — явный выбор пользователя, а не неподтверждённое GIS-сопоставление.
+Адресные данные доступны customer/staff order DTO; courier privacy DTO вводится отдельно
+в Phase 5.
+
+Разрешённые переходы задаёт state machine. Venue-suborders проходят приготовление,
+общий customer status выводится из всех частей; каждый переход создаёт append-only
+`OrderEvent`, audit event и, при изменении общего статуса, outbox notification.
+
 ## Посещения, штампы и награды
 
 - Business date вычисляется на backend по timezone и configurable day-boundary.

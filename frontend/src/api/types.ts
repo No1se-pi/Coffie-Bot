@@ -422,12 +422,186 @@ export interface CartPriceResponse {
       total_minor: number;
     }>;
     promotions: Array<{
-      promotion_id: string;
+      promotion_id: string | null;
       title: string;
       priority: number;
       discount_minor: number;
     }>;
   }>;
+}
+
+export type FulfillmentMode = "pickup" | "delivery";
+export type OrderStatus =
+  | "new"
+  | "confirmed"
+  | "preparing"
+  | "ready"
+  | "waiting_for_courier"
+  | "courier_assigned"
+  | "picked_up"
+  | "in_transit"
+  | "delivered"
+  | "cancelled";
+
+export interface CartLineDraft {
+  line_id: string;
+  menu_item_id: string;
+  quantity: number;
+  modifiers: Array<{ option_id: string; quantity: number }>;
+}
+
+export interface OrderCreateRequest {
+  fulfillment_mode: FulfillmentMode;
+  lines: CartLineDraft[];
+  point_redemptions: Array<{ venue_id: string; points: number }>;
+  pickup_location_id: string | null;
+  delivery_zone_id: string | null;
+  contact_phone: string;
+  delivery_address: string | null;
+  entrance: string | null;
+  apartment: string | null;
+  floor: string | null;
+  customer_comment: string | null;
+  desired_delivery_at: string | null;
+  payment_method: "cash" | "card_on_receipt";
+}
+
+export interface OrderOptions {
+  delivery_enabled: boolean;
+  minimum_order_minor: number;
+  fixed_fee_minor: number;
+  free_delivery_threshold_minor: number | null;
+  scheduling_allowed: boolean;
+  earliest_preparation_minutes: number;
+  pickup_locations: Array<{
+    id: string;
+    name: string;
+    address: string;
+    opening_hours: Record<string, unknown>;
+    comment: string | null;
+    preparation_minutes: number;
+  }>;
+  delivery_zones: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    fee_minor: number;
+    minimum_order_minor: number | null;
+  }>;
+}
+
+export interface CustomerOrder {
+  id: string;
+  number: number;
+  fulfillment_mode: FulfillmentMode;
+  status: OrderStatus;
+  status_version: number;
+  contact_phone: string;
+  delivery_address: string | null;
+  entrance: string | null;
+  apartment: string | null;
+  floor: string | null;
+  customer_comment: string | null;
+  desired_delivery_at: string | null;
+  pickup_name: string | null;
+  pickup_address: string | null;
+  delivery_zone_name: string | null;
+  subtotal_minor: number;
+  promotion_discount_minor: number;
+  points_discount_minor: number;
+  delivery_fee_minor: number;
+  total_minor: number;
+  payment_method: "cash" | "card_on_receipt";
+  payment_status: "unpaid" | "paid_externally" | "cancelled";
+  created_at: string;
+  updated_at: string;
+  idempotent_replay: boolean;
+  suborders: Array<{
+    id: string;
+    venue_id: string;
+    venue_name: string;
+    status: OrderStatus;
+    subtotal_minor: number;
+    promotion_discount_minor: number;
+    points_discount_minor: number;
+    total_minor: number;
+    lines: Array<{
+      id: string;
+      menu_item_id: string | null;
+      name: string;
+      quantity: number;
+      unit_base_price_minor: number;
+      unit_modifiers_price_minor: number;
+      subtotal_minor: number;
+      promotion_discount_minor: number;
+      points_discount_minor: number;
+      total_minor: number;
+      modifiers: Array<{
+        id: string;
+        option_id: string | null;
+        group_name: string;
+        name: string;
+        quantity: number;
+        unit_price_delta_minor: number;
+        total_price_delta_minor: number;
+      }>;
+    }>;
+    promotions: Array<{
+      id: string;
+      promotion_id: string | null;
+      title: string;
+      priority: number;
+      discount_minor: number;
+    }>;
+  }>;
+  events: Array<{
+    id: string;
+    suborder_id: string | null;
+    from_status: OrderStatus | null;
+    to_status: OrderStatus;
+    reason: string | null;
+    comment: string | null;
+    created_at: string;
+  }>;
+}
+
+export interface AdminDeliverySettings {
+  id: string;
+  delivery_enabled: boolean;
+  minimum_order_minor: number;
+  fixed_fee_minor: number;
+  free_delivery_threshold_minor: number | null;
+  scheduling_allowed: boolean;
+  earliest_preparation_minutes: number;
+  operating_hours: Record<string, unknown>;
+  default_pickup_location_id: string | null;
+  consolidation_location_id: string | null;
+}
+
+export type AdminDeliverySettingsDraft = Omit<AdminDeliverySettings, "id">;
+
+export interface AdminDeliveryZone {
+  id: string;
+  name: string;
+  description: string | null;
+  fee_minor: number;
+  minimum_order_minor: number | null;
+  is_active: boolean;
+  sort_order: number;
+  archived: boolean;
+}
+
+export type AdminDeliveryZoneDraft = Omit<AdminDeliveryZone, "id" | "archived">;
+
+export interface AdminFulfillmentLocation {
+  id: string;
+  name: string;
+  address: string;
+  is_active: boolean;
+  pickup_enabled: boolean;
+  consolidation_enabled: boolean;
+  pickup_comment: string | null;
+  preparation_minutes: number;
 }
 
 export interface ContactLocation {

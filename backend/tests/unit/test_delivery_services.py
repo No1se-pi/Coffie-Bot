@@ -254,6 +254,24 @@ async def test_generic_notification_opens_the_main_mini_app() -> None:
     assert button.url is None
 
 
+async def test_order_notification_opens_order_details() -> None:
+    order_id = uuid4()
+    job = NotificationJob(
+        id=uuid4(),
+        telegram_id=101,
+        event_type="order.ready",
+        payload={"order_id": str(order_id), "order_number": 42},
+        attempts=1,
+        lease_until=LEASE,
+    )
+
+    message = render_notification(job, webapp_url="https://coffee.example/")
+
+    assert message.text == "Заказ №42 готов к выдаче."
+    assert message.button_url == f"https://coffee.example/orders/{order_id}"
+    assert message.open_as_web_app is True
+
+
 @pytest.mark.parametrize(
     ("event_type", "payload", "expected"),
     [

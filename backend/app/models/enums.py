@@ -28,6 +28,8 @@ class PermissionCode(StrEnum):
     REWARDS_REDEEM = "rewards.redeem"
     OWN_OPERATIONS_REVERSE = "operations.reverse_own"
     OWN_TIP_PROFILE_MANAGE = "tip_profile.manage_own"
+    ORDERS_READ = "orders.read"
+    ORDERS_MANAGE = "orders.manage"
     ADMIN_USERS_READ = "admin.users.read"
     ADMIN_USERS_MANAGE = "admin.users.manage"
     ADMIN_STAFF_MANAGE = "admin.staff.manage"
@@ -36,6 +38,7 @@ class PermissionCode(StrEnum):
     ADMIN_CONTENT_MANAGE = "admin.content.manage"
     ADMIN_BROADCASTS_MANAGE = "admin.broadcasts.manage"
     ADMIN_FEEDBACK_MANAGE = "admin.feedback.manage"
+    ADMIN_DELIVERY_MANAGE = "admin.delivery.manage"
     OWNER_ADMINS_MANAGE = "owner.admins.manage"
     OWNER_EXPORT_DATA = "owner.export_data"
     OWNER_CRITICAL_SETTINGS = "owner.critical_settings"
@@ -151,6 +154,35 @@ class PromotionActionType(StrEnum):
 
     PERCENT_DISCOUNT = "percent_discount"
     FIXED_DISCOUNT = "fixed_discount"
+
+
+class FulfillmentMode(StrEnum):
+    PICKUP = "pickup"
+    DELIVERY = "delivery"
+
+
+class OrderStatus(StrEnum):
+    NEW = "new"
+    CONFIRMED = "confirmed"
+    PREPARING = "preparing"
+    READY = "ready"
+    WAITING_FOR_COURIER = "waiting_for_courier"
+    COURIER_ASSIGNED = "courier_assigned"
+    PICKED_UP = "picked_up"
+    IN_TRANSIT = "in_transit"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+
+
+class PaymentMethod(StrEnum):
+    CASH = "cash"
+    CARD_ON_RECEIPT = "card_on_receipt"
+
+
+class PaymentStatus(StrEnum):
+    UNPAID = "unpaid"
+    PAID_EXTERNALLY = "paid_externally"
+    CANCELLED = "cancelled"
 
 
 class TipProfileStatus(StrEnum):

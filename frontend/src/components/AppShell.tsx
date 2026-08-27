@@ -36,12 +36,14 @@ const navItems: Record<
     { to: "/rewards", label: "Награды", icon: "◇" },
     { to: "/history", label: "История", icon: "↻" },
     { to: "/menu", label: "Меню", icon: "☕" },
+    { to: "/cart", label: "Корзина", icon: "▣" },
     { to: "/more", label: "Ещё", icon: "•••" },
   ],
   staff: [
     { to: "/staff", label: "Работа", icon: "▦", end: true },
     { to: "/staff/scan", label: "Сканер", icon: "◎" },
     { to: "/staff/recent", label: "Операции", icon: "↻" },
+    { to: "/staff/orders", label: "Заказы", icon: "▣" },
     { to: "/staff/profile", label: "Профиль", icon: "○" },
   ],
   admin: [
@@ -52,6 +54,7 @@ const navItems: Record<
     { to: "/admin/feedback", label: "Отзывы", icon: "★" },
     { to: "/admin/settings", label: "Настройки", icon: "⚙" },
     { to: "/admin/menu", label: "Контент", icon: "☕" },
+    { to: "/admin/delivery", label: "Доставка", icon: "▣" },
   ],
 };
 

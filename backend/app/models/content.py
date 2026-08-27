@@ -93,6 +93,10 @@ class Location(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "longitude IS NULL OR (longitude >= -180 AND longitude <= 180)",
             name="valid_longitude",
         ),
+        CheckConstraint(
+            "preparation_minutes >= 0",
+            name="non_negative_preparation_minutes",
+        ),
         Index(
             "uq_locations_one_default",
             "is_default",
@@ -127,6 +131,16 @@ class Location(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    pickup_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    consolidation_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    pickup_comment: Mapped[str | None] = mapped_column(Text)
+    preparation_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=20, server_default="20"
+    )
 
 
 class AppSetting(UUIDPrimaryKeyMixin, TimestampMixin, Base):

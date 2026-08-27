@@ -70,6 +70,8 @@ STAFF_OVERRIDE_PERMISSIONS = frozenset(
         PermissionCode.REWARDS_REDEEM,
         PermissionCode.OWN_OPERATIONS_REVERSE,
         PermissionCode.OWN_TIP_PROFILE_MANAGE,
+        PermissionCode.ORDERS_READ,
+        PermissionCode.ORDERS_MANAGE,
     }
 )
 PRIVILEGED_ROLES = frozenset({Role.ADMIN, Role.OWNER})

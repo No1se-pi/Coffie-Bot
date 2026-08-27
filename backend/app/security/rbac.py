@@ -33,6 +33,8 @@ STAFF_DEFAULT_PERMISSIONS = frozenset(
         PermissionCode.REWARDS_REDEEM,
         PermissionCode.OWN_OPERATIONS_REVERSE,
         PermissionCode.OWN_TIP_PROFILE_MANAGE,
+        PermissionCode.ORDERS_READ,
+        PermissionCode.ORDERS_MANAGE,
     }
 )
 ADMIN_PERMISSIONS = STAFF_DEFAULT_PERMISSIONS | frozenset(
@@ -45,6 +47,7 @@ ADMIN_PERMISSIONS = STAFF_DEFAULT_PERMISSIONS | frozenset(
         PermissionCode.ADMIN_CONTENT_MANAGE,
         PermissionCode.ADMIN_BROADCASTS_MANAGE,
         PermissionCode.ADMIN_FEEDBACK_MANAGE,
+        PermissionCode.ADMIN_DELIVERY_MANAGE,
     }
 )
 OWNER_PERMISSIONS = frozenset(PermissionCode)

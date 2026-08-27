@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
+import { CartProvider } from "../components/CartContext";
 import type {
   AdminFeedback,
   AdminLoyaltyV2Settings,
@@ -517,7 +518,9 @@ describe("critical Mini App flows", () => {
       });
     render(
       <MemoryRouter>
-        <MenuPage />
+        <CartProvider>
+          <MenuPage />
+        </CartProvider>
       </MemoryRouter>,
     );
 

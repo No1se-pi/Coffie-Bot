@@ -244,10 +244,10 @@ gate и фазового отчёта.
 
 ### Phase 4 — Orders
 
-- [ ] Cart reducer/UI and backend repricing.
-- [ ] Order/suborder models, create idempotency and snapshot.
-- [ ] Pickup/delivery settings/zones/fees and checkout.
-- [ ] State machines, event log, outbox notifications and customer tracking/history.
+- [x] Cart reducer/UI and backend repricing.
+- [x] Order/suborder models, create idempotency and snapshot.
+- [x] Pickup/delivery settings/zones/fees and checkout.
+- [x] State machines, event log, outbox notifications and customer tracking/history.
 
 ### Phase 5 — Courier
 
@@ -365,3 +365,21 @@ gate и фазового отчёта.
   PostgreSQL 17. Backend suite: `236 passed`; frontend: `40 passed`, audit/build зелёные.
 - Development images собраны, backend/frontend smoke вернул `200`, а pricing route
   без сессии корректно закрыт `401`. Phase 4 сохраняет этот расчёт как order snapshot.
+
+### 2026-08-27 — Phase 4 Orders
+
+- Добавлен customer order с venue-suborders, неизменяемыми снимками позиций,
+  модификаторов, акций и цен; mixed-venue корзина создаётся одной транзакцией.
+- Создание защищено обязательным idempotency key и PostgreSQL advisory lock;
+  баллы списываются FIFO отдельно по venue-частям и восстанавливаются компенсацией
+  при допустимой отмене без переписывания исходного журнала.
+- Реализованы pickup/delivery, простые выбираемые зоны, server-side fee/minimum/free
+  threshold, расписание в timezone точки, точка выдачи и консолидации.
+- State machine синхронизирует order/suborders, пишет append-only events, audit и
+  notification outbox; клиент получил корзину, checkout, историю/детали, сотрудник —
+  очередь, администратор — настройки доставки, зон и точек.
+- Backend gates: Ruff/format, mypy и `245 passed` на PostgreSQL 17. Clean
+  `0001 -> 0013`, повторный seed и migration head прошли на отдельной базе.
+- Frontend gates: Prettier, TypeScript, ESLint, `42 passed`, production build и
+  `npm audit` без уязвимостей. Development Compose images/startup и health smoke
+  вернули backend live/ready `200` и frontend `200`.

@@ -7,6 +7,11 @@ import type {
   AdminStaffMember,
   AdminOverview,
   AdminFeedback,
+  AdminDeliverySettings,
+  AdminDeliverySettingsDraft,
+  AdminDeliveryZone,
+  AdminDeliveryZoneDraft,
+  AdminFulfillmentLocation,
   AdminLoyaltyV2Settings,
   AdminLoyaltyV2Update,
   AdminUser,
@@ -18,6 +23,7 @@ import type {
   CardData,
   CartPriceRequest,
   CartPriceResponse,
+  CustomerOrder,
   ContactsData,
   CustomerMergeConfirmRequest,
   CustomerMergePreview,
@@ -35,6 +41,9 @@ import type {
   MenuItemDraft,
   MediaUpload,
   OperationResult,
+  OrderCreateRequest,
+  OrderOptions,
+  OrderStatus,
   PhoneCustomer,
   PhoneCustomerCreate,
   Promotion,
@@ -590,6 +599,40 @@ export const coffeeApi = {
   getMenu,
   priceCart: (payload: CartPriceRequest): Promise<CartPriceResponse> =>
     request("/cart/price", { method: "POST", body: jsonBody(payload) }),
+  getOrderOptions: (): Promise<OrderOptions> => request("/order-options"),
+  createOrder: (
+    payload: OrderCreateRequest,
+    idempotencyKey = uuid(),
+  ): Promise<CustomerOrder> =>
+    request("/orders", {
+      method: "POST",
+      body: jsonBody(payload),
+      idempotencyKey,
+    }),
+  getOrders: (active?: boolean): Promise<{ items: CustomerOrder[] }> =>
+    request(`/orders${queryString({ active, limit: 100 })}`),
+  getOrder: (id: string): Promise<CustomerOrder> =>
+    request(`/orders/${encodeURIComponent(id)}`),
+  cancelOrder: (id: string, reason: string): Promise<CustomerOrder> =>
+    request(`/orders/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: jsonBody({ reason }),
+    }),
+  getStaffOrders: (): Promise<{ items: CustomerOrder[] }> =>
+    request("/staff/orders?limit=200"),
+  transitionOrder: (id: string, status: OrderStatus): Promise<CustomerOrder> =>
+    request(`/staff/orders/${encodeURIComponent(id)}/transition`, {
+      method: "POST",
+      body: jsonBody({ status, reason: null, comment: null }),
+    }),
+  transitionSuborder: (
+    id: string,
+    status: OrderStatus,
+  ): Promise<CustomerOrder> =>
+    request(`/staff/suborders/${encodeURIComponent(id)}/transition`, {
+      method: "POST",
+      body: jsonBody({ status, reason: null, comment: null }),
+    }),
   getPostPurchase: (operationId: string): Promise<PostPurchase> =>
     isDemoMode
       ? Promise.resolve({
@@ -1183,6 +1226,53 @@ export const coffeeApi = {
     );
     return value.items;
   },
+  getAdminDelivery: async (): Promise<{
+    settings: AdminDeliverySettings;
+    zones: AdminDeliveryZone[];
+    locations: AdminFulfillmentLocation[];
+  }> => {
+    const [settings, zones, locations] = await Promise.all([
+      request<AdminDeliverySettings>("/admin/delivery/settings"),
+      request<{ items: AdminDeliveryZone[] }>("/admin/delivery/zones"),
+      request<{ items: AdminFulfillmentLocation[] }>(
+        "/admin/delivery/locations",
+      ),
+    ]);
+    return { settings, zones: zones.items, locations: locations.items };
+  },
+  saveAdminDeliverySettings: (
+    payload: AdminDeliverySettingsDraft,
+  ): Promise<AdminDeliverySettings> =>
+    request("/admin/delivery/settings", {
+      method: "PUT",
+      body: jsonBody(payload),
+    }),
+  saveAdminDeliveryZone: (
+    zone: AdminDeliveryZone | null,
+    payload: AdminDeliveryZoneDraft,
+  ): Promise<AdminDeliveryZone> =>
+    request(
+      zone
+        ? `/admin/delivery/zones/${encodeURIComponent(zone.id)}`
+        : "/admin/delivery/zones",
+      { method: zone ? "PUT" : "POST", body: jsonBody(payload) },
+    ),
+  archiveAdminDeliveryZone: (id: string): Promise<AdminDeliveryZone> =>
+    request(`/admin/delivery/zones/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+    }),
+  saveAdminFulfillmentLocation: (
+    location: AdminFulfillmentLocation,
+  ): Promise<AdminFulfillmentLocation> =>
+    request(`/admin/delivery/locations/${encodeURIComponent(location.id)}`, {
+      method: "PUT",
+      body: jsonBody({
+        pickup_enabled: location.pickup_enabled,
+        consolidation_enabled: location.consolidation_enabled,
+        pickup_comment: location.pickup_comment,
+        preparation_minutes: location.preparation_minutes,
+      }),
+    }),
   saveAdminModifierGroup: (
     group: AdminModifierGroup | null,
     payload: AdminModifierGroupDraft,

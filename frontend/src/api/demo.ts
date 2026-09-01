@@ -696,9 +696,20 @@ export const demoApi = {
       status ? rewards.filter((item) => item.status === status) : [...rewards],
     );
   },
-  async getMenu() {
+  async getMenu(venueId?: string | null) {
     await wait();
-    return { categories: [...categories], items: [...menuItems] };
+    return {
+      categories: venueId
+        ? categories.filter(
+            (item) => !item.venue_id || item.venue_id === venueId,
+          )
+        : [...categories],
+      items: venueId
+        ? menuItems.filter(
+            (item) => !item.venue_id || item.venue_id === venueId,
+          )
+        : [...menuItems],
+    };
   },
   async getMore(): Promise<PublicMoreData> {
     await wait();

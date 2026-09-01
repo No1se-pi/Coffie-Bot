@@ -50,8 +50,21 @@ class OrderRepository:
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncIterator[None]:
-        async with self._session.begin():
+        # Loading the authenticated actor uses this same request-scoped session
+        # and may have already started SQLAlchemy's implicit read transaction.
+        # Mutations still need one explicit commit/rollback boundary, but must
+        # not attempt to nest ``session.begin()`` after that authentication read.
+        if not self._session.in_transaction():
+            async with self._session.begin():
+                yield
+            return
+        try:
             yield
+        except BaseException:
+            await self._session.rollback()
+            raise
+        else:
+            await self._session.commit()
 
     async def acquire_idempotency_lock(self, user_id: UUID, key: str) -> None:
         digest = hashlib.sha256(f"order:{user_id}:{key}".encode()).digest()
@@ -273,6 +286,24 @@ class OrderRepository:
         if for_update:
             statement = statement.with_for_update()
         return cast(Location | None, await self._session.scalar(statement))
+
+    async def get_location_by_slug(self, slug: str) -> Location | None:
+        return cast(
+            Location | None,
+            await self._session.scalar(select(Location).where(Location.slug == slug)),
+        )
+
+    async def get_venue(self, venue_id: UUID) -> Venue | None:
+        return cast(
+            Venue | None,
+            await self._session.scalar(
+                select(Venue).where(
+                    Venue.id == venue_id,
+                    Venue.is_active.is_(True),
+                    Venue.archived_at.is_(None),
+                )
+            ),
+        )
 
     async def list_locations(self) -> list[Location]:
         return list(

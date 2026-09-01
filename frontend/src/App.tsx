@@ -34,6 +34,7 @@ import {
 } from "./pages/admin";
 import { AdminPricingPage } from "./pages/admin-pricing";
 import { AdminDeliveryPage } from "./pages/admin-delivery";
+import { AdminVenuesPage } from "./pages/admin-venues";
 import { CartProvider } from "./components/CartContext";
 import {
   CartPage,
@@ -54,7 +55,6 @@ import {
   AdminBulkBonusPage,
   AdminReviewsPage,
   AdminSubscriptionsPage,
-  MySubscriptionsPage,
   ReviewsPage,
 } from "./pages/engagement";
 
@@ -84,16 +84,14 @@ export default function App() {
                   <Route path="rewards" element={<RewardsPage />} />
                   <Route path="history" element={<HistoryPage />} />
                   <Route path="loyalty" element={<LoyaltyPage />} />
+                  <Route path="profile" element={<LoyaltyPage />} />
                   <Route path="menu" element={<MenuPage />} />
                   <Route path="cart" element={<CartPage />} />
                   <Route path="checkout" element={<CheckoutPage />} />
                   <Route path="orders" element={<OrdersPage />} />
                   <Route path="orders/:orderId" element={<OrderDetailPage />} />
                   <Route path="reviews" element={<ReviewsPage />} />
-                  <Route
-                    path="subscriptions"
-                    element={<MySubscriptionsPage />}
-                  />
+                  <Route path="subscriptions" element={<RewardsPage />} />
                   <Route path="more" element={<MorePage />} />
                 </Route>
                 <Route
@@ -172,6 +170,7 @@ export default function App() {
                   <Route path="promotions" element={<AdminPromotionsPage />} />
                   <Route path="pricing" element={<AdminPricingPage />} />
                   <Route path="delivery" element={<AdminDeliveryPage />} />
+                  <Route path="venues" element={<AdminVenuesPage />} />
                 </Route>
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

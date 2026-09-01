@@ -445,7 +445,15 @@ class IdentityRepository:
     ) -> HistoryPageRecord:
         # Merge lineage is intentionally traversed at read time: immutable
         # operations retain their original user_id, including across merge chains.
-        lineage = select(literal(user_id).label("user_id")).cte(
+        # PostgreSQL otherwise infers the recursive CTE anchor parameter as
+        # text, making the recursive ``canonical_user_id = lineage.user_id``
+        # comparison fail with ``uuid = text`` in production.
+        lineage = select(
+            literal(
+                user_id,
+                type_=CustomerMerge.__table__.c.canonical_user_id.type,
+            ).label("user_id")
+        ).cte(
             "customer_history_lineage",
             recursive=True,
         )

@@ -12,6 +12,7 @@ import { brand } from "../config";
 import { appThemes, applyTheme, readTheme, type AppTheme } from "../theme";
 import { Avatar, Button, ErrorState, Loader } from "./ui";
 import { TelegramLogin } from "./TelegramLogin";
+import { useOptionalCart } from "./CartContext";
 
 const roleLabels: Record<Role, string> = {
   customer: "Гость",
@@ -35,14 +36,14 @@ const navItems: Record<
 > = {
   customer: [
     { to: "/", label: "Главная", icon: "⌂", end: true },
-    { to: "/card", label: "Карта", icon: "▦" },
-    { to: "/rewards", label: "Награды", icon: "◇" },
-    { to: "/history", label: "История", icon: "↻" },
     { to: "/menu", label: "Меню", icon: "☕" },
     { to: "/cart", label: "Корзина", icon: "▣" },
-    { to: "/subscriptions", label: "Абонементы", icon: "◇" },
-    { to: "/reviews", label: "Отзывы", icon: "★" },
-    { to: "/more", label: "Ещё", icon: "•••" },
+    { to: "/card", label: "Карта гостя", icon: "▦" },
+    { to: "/rewards", label: "Награды", icon: "◇" },
+    { to: "/history", label: "История", icon: "↻" },
+    { to: "/orders", label: "Мои заказы", icon: "◫" },
+    { to: "/profile", label: "Профиль", icon: "○" },
+    { to: "/more", label: "О кофейне", icon: "⌂" },
   ],
   staff: [
     { to: "/staff", label: "Работа", icon: "▦", end: true },
@@ -60,6 +61,7 @@ const navItems: Record<
     { to: "/admin", label: "Обзор", icon: "⌂", end: true },
     { to: "/staff/orders", label: "Заказы", icon: "▣" },
     { to: "/admin/users", label: "Клиенты", icon: "○" },
+    { to: "/admin/venues", label: "Заведения и точки", icon: "⌖" },
     { to: "/admin/staff", label: "Сотрудники", icon: "◇" },
     { to: "/admin/events", label: "События", icon: "↻" },
     { to: "/admin/feedback", label: "Обращения", icon: "✉" },
@@ -126,6 +128,8 @@ function AppShell() {
     useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const cart = useOptionalCart();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
   const navRole = effectiveNavRole(activeRole);
   const changeRole = (value: Role) => {
@@ -146,6 +150,15 @@ function AppShell() {
   return (
     <div className={`app-shell app-shell--${navRole}`}>
       <header className="topbar">
+        <button
+          className="menu-toggle"
+          type="button"
+          aria-label="Открыть меню"
+          aria-expanded={drawerOpen}
+          onClick={() => setDrawerOpen(true)}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
         <button
           className="brand"
           onClick={() => navigate(roleHome[activeRole])}
@@ -199,23 +212,82 @@ function AppShell() {
       <div className="content">
         <Outlet />
       </div>
-      <nav className="bottom-nav" aria-label="Основная навигация">
-        {navItems[navRole].map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={({ isActive }) =>
-              isActive || (!item.end && location.pathname.startsWith(item.to))
-                ? "bottom-nav__item is-active"
-                : "bottom-nav__item"
-            }
+      {drawerOpen && (
+        <button
+          className="nav-drawer-backdrop"
+          type="button"
+          aria-label="Закрыть меню"
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
+      <aside className={`nav-drawer ${drawerOpen ? "is-open" : ""}`}>
+        <div className="nav-drawer__header">
+          <div>
+            <small>{roleLabels[activeRole]}</small>
+            <strong>{actor?.display_name}</strong>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(false)}
+            aria-label="Закрыть меню"
           >
-            <span aria-hidden="true">{item.icon}</span>
-            <small>{item.label}</small>
-          </NavLink>
-        ))}
-      </nav>
+            ×
+          </button>
+        </div>
+        <nav className="side-nav" aria-label="Основная навигация">
+          {navItems[navRole].map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              onClick={() => setDrawerOpen(false)}
+              className={({ isActive }) =>
+                isActive || (!item.end && location.pathname.startsWith(item.to))
+                  ? "side-nav__item is-active"
+                  : "side-nav__item"
+              }
+            >
+              <span aria-hidden="true">{item.icon}</span>
+              <span>{item.label}</span>
+              {item.to === "/cart" && (cart?.count ?? 0) > 0 && (
+                <b className="nav-badge">{cart?.count}</b>
+              )}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+      {navRole === "customer" && (
+        <nav className="bottom-nav" aria-label="Быстрая навигация">
+          {[
+            { to: "/", label: "Главная", icon: "⌂", end: true },
+            { to: "/menu", label: "Меню", icon: "☕" },
+            { to: "/rewards", label: "Награды", icon: "◇" },
+            { to: "/more", label: "Ещё", icon: "•••" },
+          ].map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                isActive ? "bottom-nav__item is-active" : "bottom-nav__item"
+              }
+            >
+              <span aria-hidden="true">{item.icon}</span>
+              <small>{item.label}</small>
+            </NavLink>
+          ))}
+        </nav>
+      )}
+      {navRole === "customer" && (cart?.count ?? 0) > 0 && (
+        <NavLink
+          className="floating-cart"
+          to="/cart"
+          aria-label={`Корзина: ${cart?.count} позиций`}
+        >
+          <span aria-hidden="true">▣</span>
+          <b>{cart?.count}</b>
+        </NavLink>
+      )}
       <span className="sr-only">Пользователь: {actor?.display_name}</span>
     </div>
   );

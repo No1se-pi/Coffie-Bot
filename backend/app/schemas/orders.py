@@ -75,6 +75,7 @@ class OrderCancelRequest(ApiSchema):
 
 class PickupLocationResponse(ApiSchema):
     id: UUID
+    venue_id: UUID | None
     name: str
     address: str
     opening_hours: dict[str, object]
@@ -203,6 +204,7 @@ def order_options_response(value: OrderOptions) -> OrderOptionsResponse:
         pickup_locations=[
             PickupLocationResponse(
                 id=location.id,
+                venue_id=location.venue_id,
                 name=location.name,
                 address=location.address,
                 opening_hours=location.opening_hours,

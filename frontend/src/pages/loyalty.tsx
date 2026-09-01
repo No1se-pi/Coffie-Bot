@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useContext, useMemo, useState, type FormEvent } from "react";
 import { coffeeApi } from "../api/client";
 import type { CustomerWalletEntry } from "../api/types";
 import {
@@ -18,12 +18,14 @@ import {
 } from "../components/ui";
 import { useResource } from "../hooks/useResource";
 import { formatDate, formatMoney } from "../utils/format";
+import { AuthContext } from "../auth/AuthContext";
 
 function walletName(entry: CustomerWalletEntry): string {
   return entry.venue?.name ?? "Общий кошелёк";
 }
 
 export function LoyaltyPage() {
+  const actor = useContext(AuthContext)?.actor ?? null;
   const wallets = useResource(coffeeApi.getMyWallets);
   const birthday = useResource(coffeeApi.getMyBirthday);
   const [month, setMonth] = useState("");
@@ -80,7 +82,25 @@ export function LoyaltyPage() {
   };
 
   return (
-    <Page title="Баллы и профиль" eyebrow="Программа лояльности">
+    <Page title="Профиль" eyebrow="Личные данные и лояльность">
+      <Panel className="profile-card">
+        <div>
+          <p className="eyebrow">Ваш аккаунт</p>
+          <h2>{actor?.display_name}</h2>
+          <p className="muted">
+            Telegram: {actor?.username ? `@${actor.username}` : "подключён"}
+          </p>
+        </div>
+        <div className="profile-identities">
+          <Badge tone="success">Telegram подключён</Badge>
+          <Badge>Телефон — через сотрудника</Badge>
+          <Badge>MAX — пока недоступен</Badge>
+        </div>
+        <small className="muted">
+          Телефон требует подтверждения и сейчас привязывается сотрудником.
+          Интеграция MAX не включена в эту версию.
+        </small>
+      </Panel>
       {wallets.loading && <Loader label="Загружаем кошельки…" />}
       {wallets.error && (
         <ErrorState error={wallets.error} onRetry={wallets.reload} />

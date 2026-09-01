@@ -5,6 +5,8 @@ import type {
   AdminDeliveryZone,
   AdminDeliveryZoneDraft,
   AdminFulfillmentLocation,
+  AdminFulfillmentLocationDraft,
+  Venue,
 } from "../api/types";
 import {
   Button,
@@ -27,6 +29,21 @@ const emptyZone: AdminDeliveryZoneDraft = {
   sort_order: 0,
 };
 
+const emptyLocation: AdminFulfillmentLocationDraft = {
+  venue_id: null,
+  slug: "",
+  name: "",
+  address: "",
+  phone: null,
+  map_url: null,
+  timezone: "Europe/Moscow",
+  is_active: true,
+  pickup_enabled: true,
+  consolidation_enabled: false,
+  pickup_comment: null,
+  preparation_minutes: 20,
+};
+
 const weekdays = [
   ["monday", "Понедельник"],
   ["tuesday", "Вторник"],
@@ -39,6 +56,7 @@ const weekdays = [
 
 export function AdminDeliveryPage() {
   const resource = useResource(coffeeApi.getAdminDelivery);
+  const venues = useResource(coffeeApi.getVenues);
   const [settings, setSettings] = useState<AdminDeliverySettingsDraft | null>(
     null,
   );
@@ -46,6 +64,7 @@ export function AdminDeliveryPage() {
   const [zoneDraft, setZoneDraft] = useState<AdminDeliveryZoneDraft>(emptyZone);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [newLocation, setNewLocation] = useState(emptyLocation);
   useEffect(() => {
     if (!resource.data) return;
     setSettings(
@@ -103,6 +122,25 @@ export function AdminDeliveryPage() {
         reason instanceof Error
           ? reason
           : new Error("Не удалось сохранить точку"),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createLocation = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await coffeeApi.createAdminFulfillmentLocation(newLocation);
+      setNewLocation(emptyLocation);
+      await resource.reload();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason
+          : new Error("Не удалось добавить точку"),
       );
     } finally {
       setSaving(false);
@@ -282,8 +320,13 @@ export function AdminDeliveryPage() {
             </form>
           </Panel>
 
-          <Panel>
+          <Panel id="locations">
             <h2>Точки</h2>
+            <p className="muted">
+              Точка — физический адрес конкретного заведения. «Выдача» разрешает
+              самовывоз, «консолидация» позволяет собирать здесь доставочные
+              заказы.
+            </p>
             <div className="card-list">
               {resource.data.locations.map((location) => (
                 <LocationEditor
@@ -291,9 +334,77 @@ export function AdminDeliveryPage() {
                   value={location}
                   disabled={saving}
                   onSave={saveLocation}
+                  venues={venues.data?.items ?? []}
                 />
               ))}
             </div>
+            <form
+              className="order-form location-create-form"
+              onSubmit={(event) => void createLocation(event)}
+            >
+              <h3>Новая физическая точка</h3>
+              <Field label="Заведение">
+                <select
+                  required
+                  value={newLocation.venue_id ?? ""}
+                  onChange={(event) =>
+                    setNewLocation({
+                      ...newLocation,
+                      venue_id: event.target.value || null,
+                    })
+                  }
+                >
+                  <option value="">Выберите заведение</option>
+                  {venues.data?.items.map((venue) => (
+                    <option key={venue.id} value={venue.id}>
+                      {venue.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Название">
+                <input
+                  required
+                  value={newLocation.name}
+                  onChange={(event) =>
+                    setNewLocation({ ...newLocation, name: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Slug" hint="Латиница, цифры и дефисы">
+                <input
+                  required
+                  pattern="[a-z0-9][a-z0-9-]*"
+                  value={newLocation.slug}
+                  onChange={(event) =>
+                    setNewLocation({
+                      ...newLocation,
+                      slug: event.target.value.toLowerCase(),
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Адрес">
+                <input
+                  required
+                  value={newLocation.address}
+                  onChange={(event) =>
+                    setNewLocation({
+                      ...newLocation,
+                      address: event.target.value,
+                    })
+                  }
+                />
+              </Field>
+              <div className="action-row">
+                <Button
+                  type="submit"
+                  disabled={saving || !newLocation.venue_id}
+                >
+                  {saving ? "Добавляем…" : "Добавить точку"}
+                </Button>
+              </div>
+            </form>
           </Panel>
 
           <Panel>
@@ -436,10 +547,12 @@ function LocationEditor({
   value,
   disabled,
   onSave,
+  venues,
 }: {
   value: AdminFulfillmentLocation;
   disabled: boolean;
   onSave: (value: AdminFulfillmentLocation) => Promise<void>;
+  venues: Venue[];
 }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
@@ -449,6 +562,64 @@ function LocationEditor({
         <strong>{draft.name}</strong>
         <small>{draft.address}</small>
       </div>
+      <Field label="Заведение">
+        <select
+          value={draft.venue_id ?? ""}
+          onChange={(event) =>
+            setDraft({ ...draft, venue_id: event.target.value || null })
+          }
+        >
+          <option value="">Общая точка организации</option>
+          {venues.map((venue) => (
+            <option key={venue.id} value={venue.id}>
+              {venue.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Название точки">
+        <input
+          value={draft.name}
+          onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+        />
+      </Field>
+      <Field label="Адрес">
+        <input
+          value={draft.address}
+          onChange={(event) =>
+            setDraft({ ...draft, address: event.target.value })
+          }
+        />
+      </Field>
+      <div className="form-grid">
+        <Field label="Телефон">
+          <input
+            value={draft.phone ?? ""}
+            onChange={(event) =>
+              setDraft({ ...draft, phone: event.target.value || null })
+            }
+          />
+        </Field>
+        <Field label="Ссылка на карту">
+          <input
+            type="url"
+            value={draft.map_url ?? ""}
+            onChange={(event) =>
+              setDraft({ ...draft, map_url: event.target.value || null })
+            }
+          />
+        </Field>
+      </div>
+      <label>
+        <input
+          type="checkbox"
+          checked={draft.is_active}
+          onChange={(event) =>
+            setDraft({ ...draft, is_active: event.target.checked })
+          }
+        />{" "}
+        Активна
+      </label>
       <label>
         <input
           type="checkbox"

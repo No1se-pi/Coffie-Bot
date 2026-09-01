@@ -10,15 +10,18 @@ import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from app.api.routes import admin_venues, venues
+from app.api.routes import admin_venues, delivery_admin, venues
 from app.core.errors import AppError
 from app.models.audit import AuditEvent
 from app.models.content import Location, Venue
 from app.models.enums import PermissionCode, Role
+from app.repositories.orders import OrderRepository
 from app.repositories.venues import VenuePage, VenueRepository
+from app.schemas.delivery_admin import LocationCreate
 from app.schemas.public import contacts_response
 from app.schemas.venues import VenueCreate, VenueUpdate, venue_public_response
 from app.security.rbac import Actor
+from app.services.delivery_admin import DeliveryAdminService
 from app.services.venues import VenueRequestMetadata, VenueService
 
 NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
@@ -71,6 +74,30 @@ class RecordingVenueRepository:
         return True
 
 
+class RecordingLocationRepository:
+    def __init__(self) -> None:
+        self.added: list[object] = []
+        self.commits = 0
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[None]:
+        yield
+        self.commits += 1
+
+    def add(self, value: object) -> None:
+        self.added.append(value)
+
+    async def flush(self) -> None:
+        return None
+
+    async def get_location_by_slug(self, slug: str) -> Location | None:
+        del slug
+        return None
+
+    async def get_venue(self, venue_id: UUID) -> Venue:
+        return Venue(id=venue_id, slug="venue", name="Venue", is_active=True, sort_order=0)
+
+
 def _actor() -> Actor:
     return Actor(
         user_id=uuid4(),
@@ -79,6 +106,17 @@ def _actor() -> Actor:
         role=Role.ADMIN,
         staff_member_id=uuid4(),
         permissions=frozenset({PermissionCode.ADMIN_CONTENT_MANAGE}),
+    )
+
+
+def _delivery_actor() -> Actor:
+    return Actor(
+        user_id=uuid4(),
+        telegram_id=42,
+        session_id=uuid4(),
+        role=Role.ADMIN,
+        staff_member_id=uuid4(),
+        permissions=frozenset({PermissionCode.ADMIN_DELIVERY_MANAGE}),
     )
 
 
@@ -156,6 +194,46 @@ def test_location_contract_adds_nullable_venue_id_without_changing_old_fields() 
     venue_column = Location.__table__.c.venue_id
     assert venue_column.nullable is True
     assert next(iter(venue_column.foreign_keys)).ondelete == "SET NULL"
+
+
+def test_delivery_contract_allows_creating_a_location_for_a_venue() -> None:
+    app = FastAPI()
+    app.include_router(delivery_admin.router, prefix="/api/v1")
+
+    paths = app.openapi()["paths"]
+    assert {"get", "post"}.issubset(paths["/api/v1/admin/delivery/locations"])
+    payload = LocationCreate(
+        venue_id=uuid4(),
+        slug="north-point",
+        name="Северная точка",
+        address="ул. Северная, 1",
+    )
+    assert payload.pickup_enabled is True
+    with pytest.raises(ValidationError):
+        LocationCreate(slug="Bad slug", name="Точка", address="Адрес")
+
+
+@pytest.mark.asyncio
+async def test_create_location_writes_an_audit_event_in_one_transaction() -> None:
+    repository = RecordingLocationRepository()
+    service = DeliveryAdminService(cast(OrderRepository, repository))
+    venue_id = uuid4()
+
+    location = await service.create_location(
+        _delivery_actor(),
+        LocationCreate(
+            venue_id=venue_id,
+            slug="north-point",
+            name="Северная точка",
+            address="ул. Северная, 1",
+        ).model_dump(),
+    )
+
+    assert location.venue_id == venue_id
+    assert repository.commits == 1
+    audit = next(item for item in repository.added if isinstance(item, AuditEvent))
+    assert audit.event_type == "delivery.location_created"
+    assert audit.object_id == location.id
 
 
 def test_public_venue_response_does_not_expose_archive_state_or_media_storage() -> None:

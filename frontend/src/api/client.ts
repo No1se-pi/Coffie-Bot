@@ -13,10 +13,13 @@ import type {
   AdminDeliveryZone,
   AdminDeliveryZoneDraft,
   AdminFulfillmentLocation,
+  AdminFulfillmentLocationDraft,
   AdminLoyaltyV2Settings,
   AdminLoyaltyV2Update,
   AdminUser,
   AdminUserListItem,
+  AdminVenue,
+  AdminVenueDraft,
   AdjustmentPreview,
   AuditEvent,
   AuthSession,
@@ -359,14 +362,18 @@ async function getHome(): Promise<HomeData> {
   return { card, active_rewards: rewards.items, promotions: promotions.items };
 }
 
-async function getMenu(): Promise<{
+async function getMenu(venueId?: string | null): Promise<{
   categories: MenuCategory[];
   items: MenuItem[];
 }> {
-  if (isDemoMode) return demoApi.getMenu();
+  if (isDemoMode) return demoApi.getMenu(venueId);
+  const venueQuery = venueId ? `?venue_id=${encodeURIComponent(venueId)}` : "";
+  const itemQuery = venueId
+    ? `?available=true&venue_id=${encodeURIComponent(venueId)}`
+    : "?available=true";
   const [categories, items] = await Promise.all([
-    request<ListResponse<MenuCategory>>("/menu/categories"),
-    request<ListResponse<MenuItem>>("/menu/items?available=true"),
+    request<ListResponse<MenuCategory>>(`/menu/categories${venueQuery}`),
+    request<ListResponse<MenuItem>>(`/menu/items${itemQuery}`),
   ]);
   return { categories: categories.items, items: items.items };
 }
@@ -600,6 +607,28 @@ export const coffeeApi = {
   getHome,
   getVenues: (): Promise<ListResponse<Venue>> =>
     isDemoMode ? demoApi.getVenues() : request("/venues"),
+  getAdminVenues: (
+    includeArchived = false,
+  ): Promise<ListResponse<AdminVenue>> =>
+    request(
+      `/admin/venues${queryString({ page: 1, page_size: 100, include_archived: includeArchived || undefined })}`,
+    ),
+  saveAdminVenue: (
+    venue: AdminVenue | null,
+    payload: AdminVenueDraft,
+  ): Promise<AdminVenue> =>
+    request(
+      venue ? `/admin/venues/${encodeURIComponent(venue.id)}` : "/admin/venues",
+      { method: venue ? "PATCH" : "POST", body: jsonBody(payload) },
+    ),
+  archiveAdminVenue: (venue: AdminVenue): Promise<AdminVenue> =>
+    request(`/admin/venues/${encodeURIComponent(venue.id)}/archive`, {
+      method: "POST",
+    }),
+  restoreAdminVenue: (venue: AdminVenue): Promise<AdminVenue> =>
+    request(`/admin/venues/${encodeURIComponent(venue.id)}/restore`, {
+      method: "POST",
+    }),
   getMyWallets: async (): Promise<CustomerWalletSummary> =>
     isDemoMode
       ? demoApi.getMyWallets()
@@ -1462,11 +1491,24 @@ export const coffeeApi = {
     request(`/admin/delivery/locations/${encodeURIComponent(location.id)}`, {
       method: "PUT",
       body: jsonBody({
+        venue_id: location.venue_id,
+        name: location.name,
+        address: location.address,
+        phone: location.phone,
+        map_url: location.map_url,
+        is_active: location.is_active,
         pickup_enabled: location.pickup_enabled,
         consolidation_enabled: location.consolidation_enabled,
         pickup_comment: location.pickup_comment,
         preparation_minutes: location.preparation_minutes,
       }),
+    }),
+  createAdminFulfillmentLocation: (
+    location: AdminFulfillmentLocationDraft,
+  ): Promise<AdminFulfillmentLocation> =>
+    request("/admin/delivery/locations", {
+      method: "POST",
+      body: jsonBody({ ...location, sort_order: 0 }),
     }),
   saveAdminModifierGroup: (
     group: AdminModifierGroup | null,

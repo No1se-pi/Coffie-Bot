@@ -47,6 +47,25 @@ export interface Venue {
   sort_order: number;
 }
 
+export interface AdminVenue extends Venue {
+  logo_media_id: string | null;
+  active: boolean;
+  archived_at: string | null;
+}
+
+export interface AdminVenueDraft {
+  slug: string;
+  name: string;
+  description: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  telegram: string | null;
+  logo_media_id: string | null;
+  active: boolean;
+  sort_order: number;
+}
+
 export type LoyaltyWalletMode = "shared" | "separate";
 
 export interface LoyaltyVenueRef {
@@ -486,6 +505,7 @@ export interface OrderOptions {
   earliest_preparation_minutes: number;
   pickup_locations: Array<{
     id: string;
+    venue_id: string | null;
     name: string;
     address: string;
     opening_hours: Record<string, unknown>;
@@ -666,14 +686,24 @@ export type AdminDeliveryZoneDraft = Omit<AdminDeliveryZone, "id" | "archived">;
 
 export interface AdminFulfillmentLocation {
   id: string;
+  venue_id: string | null;
+  slug: string;
   name: string;
   address: string;
+  phone: string | null;
+  map_url: string | null;
+  timezone: string;
   is_active: boolean;
   pickup_enabled: boolean;
   consolidation_enabled: boolean;
   pickup_comment: string | null;
   preparation_minutes: number;
 }
+
+export type AdminFulfillmentLocationDraft = Omit<
+  AdminFulfillmentLocation,
+  "id"
+>;
 
 export interface ContactLocation {
   id: string;

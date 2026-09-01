@@ -100,6 +100,31 @@ class DeliveryAdminService:
         _require(actor)
         return await self._repository.list_locations()
 
+    async def create_location(self, actor: Actor, values: dict[str, Any]) -> Location:
+        _require(actor)
+        async with self._repository.transaction():
+            if await self._repository.get_location_by_slug(str(values["slug"])) is not None:
+                _conflict("location_slug_conflict", "Точка с таким slug уже существует")
+            venue_id = values.get("venue_id")
+            if venue_id is not None and await self._repository.get_venue(venue_id) is None:
+                _validation("venue_not_found", "Выбранное заведение не найдено или неактивно")
+            # Location creation lives in the same audited transaction as the
+            # delivery configuration that will reference it.
+            location = Location(
+                id=uuid4(),
+                description=None,
+                latitude=None,
+                longitude=None,
+                business_day_boundary_minutes=0,
+                opening_hours={},
+                is_default=False,
+                **values,
+            )
+            self._repository.add(location)
+            self._audit(actor, "delivery.location_created", location.id)
+            await self._repository.flush()
+            return location
+
     async def update_location(
         self, actor: Actor, location_id: UUID, values: dict[str, Any]
     ) -> Location:
@@ -108,7 +133,12 @@ class DeliveryAdminService:
             location = await self._repository.get_location(location_id, for_update=True)
             if location is None:
                 _not_found("Точка не найдена")
+            venue_id = values.get("venue_id")
+            if venue_id is not None and await self._repository.get_venue(venue_id) is None:
+                _validation("venue_not_found", "Выбранное заведение не найдено или неактивно")
             for field, field_value in values.items():
+                if field_value is None and field in {"name", "address", "is_active"}:
+                    continue
                 setattr(location, field, field_value)
             self._audit(actor, "delivery.location_updated", location.id)
             await self._repository.flush()
@@ -153,3 +183,7 @@ def _validation(code: str, message: str) -> NoReturn:
 
 def _not_found(message: str) -> NoReturn:
     raise AppError(code="not_found", message=message, status_code=status.HTTP_404_NOT_FOUND)
+
+
+def _conflict(code: str, message: str) -> NoReturn:
+    raise AppError(code=code, message=message, status_code=status.HTTP_409_CONFLICT)

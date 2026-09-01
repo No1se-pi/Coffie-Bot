@@ -20,6 +20,7 @@ from app.schemas.delivery_admin import (
     DeliveryZoneCreate,
     DeliveryZoneListResponse,
     DeliveryZoneUpdate,
+    LocationCreate,
     LocationFulfillmentListResponse,
     LocationFulfillmentResponse,
     LocationFulfillmentUpdate,
@@ -70,8 +71,13 @@ def _zone(value: DeliveryZone) -> DeliveryZoneAdminResponse:
 def _location(value: Location) -> LocationFulfillmentResponse:
     return LocationFulfillmentResponse(
         id=value.id,
+        venue_id=value.venue_id,
+        slug=value.slug,
         name=value.name,
         address=value.address,
+        phone=value.phone,
+        map_url=value.map_url,
+        timezone=value.timezone,
         is_active=value.is_active,
         pickup_enabled=value.pickup_enabled,
         consolidation_enabled=value.consolidation_enabled,
@@ -140,6 +146,19 @@ async def list_locations(
     return LocationFulfillmentListResponse(items=[_location(value) for value in values])
 
 
+@router.post(
+    "/locations",
+    response_model=LocationFulfillmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_location(
+    payload: LocationCreate,
+    actor: DeliveryActor,
+    session: DatabaseSession,
+) -> LocationFulfillmentResponse:
+    return _location(await _service(session).create_location(actor, payload.model_dump()))
+
+
 @router.put("/locations/{location_id}", response_model=LocationFulfillmentResponse)
 async def update_location(
     location_id: UUID,
@@ -148,5 +167,7 @@ async def update_location(
     session: DatabaseSession,
 ) -> LocationFulfillmentResponse:
     return _location(
-        await _service(session).update_location(actor, location_id, payload.model_dump())
+        await _service(session).update_location(
+            actor, location_id, payload.model_dump(exclude_unset=True)
+        )
     )

@@ -118,7 +118,14 @@ export function CartPage() {
           <div className="card-list">
             {cart.items.map((item) => (
               <Panel className="cart-line" key={item.line_id}>
-                <div>
+                <div className="cart-line__image">
+                  {item.image_url ? (
+                    <img src={item.image_url} alt="" />
+                  ) : (
+                    <span aria-hidden="true">☕</span>
+                  )}
+                </div>
+                <div className="cart-line__details">
                   <h2>{item.name}</h2>
                   {item.modifier_names.length > 0 && (
                     <p>{item.modifier_names.join(", ")}</p>
@@ -151,6 +158,7 @@ export function CartPage() {
                   </Button>
                 </div>
                 <Button
+                  className="cart-line__remove"
                   variant="danger"
                   onClick={() => cart.remove(item.line_id)}
                 >
@@ -313,16 +321,26 @@ export function CheckoutPage() {
             >
               Самовывоз
             </button>
-            {options.data.delivery_enabled && (
-              <button
-                type="button"
-                className={mode === "delivery" ? "is-active" : ""}
-                onClick={() => setMode("delivery")}
-              >
-                Доставка
-              </button>
-            )}
+            <button
+              type="button"
+              className={mode === "delivery" ? "is-active" : ""}
+              disabled={
+                !options.data.delivery_enabled ||
+                options.data.delivery_zones.length === 0
+              }
+              onClick={() => setMode("delivery")}
+            >
+              Доставка
+            </button>
           </div>
+          {(!options.data.delivery_enabled ||
+            options.data.delivery_zones.length === 0) && (
+            <div className="inline-warning" role="status">
+              {!options.data.delivery_enabled
+                ? "Доставка временно выключена заведением. Самовывоз доступен."
+                : "Для доставки ещё не настроены активные зоны. Самовывоз доступен."}
+            </div>
+          )}
           <Field label="Телефон">
             <input
               value={phone}
@@ -333,19 +351,35 @@ export function CheckoutPage() {
             />
           </Field>
           {mode === "pickup" ? (
-            <Field label="Точка получения">
-              <select
-                value={pickupId}
-                onChange={(event) => setPickupId(event.target.value)}
-                required
-              >
-                {options.data.pickup_locations.map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.name} — {location.address}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <fieldset className="location-choice">
+              <legend>Точка получения</legend>
+              {options.data.pickup_locations.map((location) => (
+                <label
+                  className={pickupId === location.id ? "is-active" : ""}
+                  key={location.id}
+                >
+                  <input
+                    type="radio"
+                    name="pickup-location"
+                    value={location.id}
+                    checked={pickupId === location.id}
+                    onChange={() => setPickupId(location.id)}
+                    required
+                  />
+                  <span aria-hidden="true">⌖</span>
+                  <span>
+                    <strong>{location.name}</strong>
+                    <small>{location.address}</small>
+                  </span>
+                  <b>{location.preparation_minutes} мин.</b>
+                </label>
+              ))}
+              {!options.data.pickup_locations.length && (
+                <div className="inline-warning">
+                  Точки самовывоза пока не настроены.
+                </div>
+              )}
+            </fieldset>
           ) : (
             <>
               <Field label="Зона доставки">

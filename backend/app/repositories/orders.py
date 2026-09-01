@@ -274,6 +274,24 @@ class OrderRepository:
             statement = statement.with_for_update()
         return cast(Location | None, await self._session.scalar(statement))
 
+    async def get_location_by_slug(self, slug: str) -> Location | None:
+        return cast(
+            Location | None,
+            await self._session.scalar(select(Location).where(Location.slug == slug)),
+        )
+
+    async def get_venue(self, venue_id: UUID) -> Venue | None:
+        return cast(
+            Venue | None,
+            await self._session.scalar(
+                select(Venue).where(
+                    Venue.id == venue_id,
+                    Venue.is_active.is_(True),
+                    Venue.archived_at.is_(None),
+                )
+            ),
+        )
+
     async def list_locations(self) -> list[Location]:
         return list(
             await self._session.scalars(

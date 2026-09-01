@@ -804,6 +804,7 @@ function StaffMemberEditor({
   const manageable =
     member.user_id !== currentUserId &&
     (member.role === "staff" ||
+      member.role === "courier" ||
       (canManageAdmins &&
         (member.role === "admin" || member.role === "owner")));
 

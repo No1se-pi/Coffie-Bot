@@ -23,7 +23,9 @@ describe("order flows", () => {
           id: "coffee",
           category_id: "cat",
           name: "Капучино",
+          image_url: "/coffee.webp",
           price_minor: 30000,
+          old_price_minor: 35000,
           available: true,
           visible: true,
           modifier_groups: [
@@ -58,7 +60,8 @@ describe("order flows", () => {
       </MemoryRouter>,
     );
 
-    await user.click(await screen.findByRole("button", { name: "В корзину" }));
+    expect(await screen.findByText("350 ₽", { selector: "del" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "В корзину" }));
     await user.click(screen.getByRole("radio", { name: /Овсяное/ }));
     await user.click(screen.getByRole("button", { name: "Добавить" }));
     await user.click(screen.getByRole("link", { name: "Корзина · 1" }));
@@ -67,6 +70,10 @@ describe("order flows", () => {
       screen.getByRole("heading", { name: "Корзина" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Овсяное")).toBeInTheDocument();
+    expect(document.querySelector(".cart-line__image img")).toHaveAttribute(
+      "src",
+      "/coffee.webp",
+    );
     expect(screen.getAllByText("350 ₽")).toHaveLength(2);
   });
 

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Venue } from "../api/types";
-import { Field, Panel } from "./ui";
 
 export const SELECTED_VENUE_STORAGE_KEY = "coffie.selected-venue-id";
 
@@ -71,22 +70,59 @@ export function VenueSelector({
   );
 
   return (
-    <Panel>
-      <Field label="Заведение">
+    <section className="venue-picker" aria-labelledby="venue-picker-title">
+      <label className="sr-only">
+        Заведение
         <select
           value={selectedVenueId ?? ""}
           onChange={(event) => onSelect(event.target.value)}
         >
           {venues.map((venue) => (
-            <option value={venue.id} key={venue.id}>
+            <option key={venue.id} value={venue.id}>
               {venue.name}
             </option>
           ))}
         </select>
-      </Field>
-      {selectedVenue?.description && (
-        <p className="muted">{selectedVenue.description}</p>
-      )}
-    </Panel>
+      </label>
+      <div className="section-heading">
+        <div>
+          <small className="eyebrow">Сейчас выбрано</small>
+          <h2 id="venue-picker-title">{selectedVenue?.name ?? "Заведение"}</h2>
+        </div>
+      </div>
+      <div
+        className="venue-picker__rail"
+        role="list"
+        aria-label="Выбор заведения"
+      >
+        {venues.map((venue, index) => (
+          <button
+            type="button"
+            role="listitem"
+            key={venue.id}
+            className={`venue-card ${venue.id === selectedVenueId ? "is-active" : ""}`}
+            onClick={() => onSelect(venue.id)}
+            aria-pressed={venue.id === selectedVenueId}
+          >
+            <span
+              className={`venue-card__visual venue-card__visual--${index % 4}`}
+            >
+              {venue.logo_url ? (
+                <img src={venue.logo_url} alt="" />
+              ) : (
+                <b>{venue.name.trim().charAt(0).toLocaleUpperCase()}</b>
+              )}
+            </span>
+            <span className="venue-card__copy">
+              <strong>{venue.name}</strong>
+              <small>
+                {venue.description || "Меню и предложения заведения"}
+              </small>
+            </span>
+            <span aria-hidden="true">›</span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }

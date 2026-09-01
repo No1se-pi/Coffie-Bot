@@ -83,12 +83,39 @@ class LocationFulfillmentUpdate(ApiSchema):
     consolidation_enabled: bool
     pickup_comment: str | None = Field(default=None, max_length=2_000)
     preparation_minutes: int = Field(ge=0, le=1440)
+    venue_id: UUID | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    address: str | None = Field(default=None, min_length=1, max_length=2_000)
+    phone: str | None = Field(default=None, max_length=64)
+    map_url: str | None = Field(default=None, max_length=2_048)
+    is_active: bool | None = None
+
+
+class LocationCreate(ApiSchema):
+    venue_id: UUID | None = None
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    name: str = Field(min_length=1, max_length=160)
+    address: str = Field(min_length=1, max_length=2_000)
+    phone: str | None = Field(default=None, max_length=64)
+    map_url: str | None = Field(default=None, max_length=2_048)
+    timezone: str = Field(default="Europe/Moscow", min_length=1, max_length=64)
+    is_active: bool = True
+    pickup_enabled: bool = True
+    consolidation_enabled: bool = False
+    pickup_comment: str | None = Field(default=None, max_length=2_000)
+    preparation_minutes: int = Field(default=20, ge=0, le=1440)
+    sort_order: int = Field(default=0, ge=-100_000, le=100_000)
 
 
 class LocationFulfillmentResponse(LocationFulfillmentUpdate):
     id: UUID
+    venue_id: UUID | None
+    slug: str
     name: str
     address: str
+    phone: str | None
+    map_url: str | None
+    timezone: str
     is_active: bool
 
 

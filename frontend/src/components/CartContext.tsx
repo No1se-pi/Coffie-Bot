@@ -107,3 +107,7 @@ export function useCart(): CartValue {
   if (!value) throw new Error("useCart must be used inside CartProvider");
   return value;
 }
+
+export function useOptionalCart(): CartValue | null {
+  return useContext(CartContext);
+}

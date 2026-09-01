@@ -1453,7 +1453,7 @@ describe("critical Mini App flows", () => {
     expect(remove).toHaveBeenCalledWith("feedback-archived");
   });
 
-  it("shows phone-only staff actions only in settings and supports disable and delete", async () => {
+  it("keeps courier settings available and supports disable and delete", async () => {
     const user = userEvent.setup();
     const member: AdminStaffMember = {
       id: "staff-1",
@@ -1461,7 +1461,7 @@ describe("critical Mini App flows", () => {
       telegram_id: null,
       display_name: "Анна",
       position: "Бариста",
-      role: "staff",
+      role: "courier",
       is_active: true,
       can_edit_tip_profile: true,
       permissions: [],

@@ -12,6 +12,7 @@ import { useResource } from "../hooks/useResource";
 import { formatDate, formatDateTime, formatMoney } from "../utils/format";
 import { VenueSelector, useVenueSelection } from "../components/VenueSelector";
 import { useCart } from "../components/CartContext";
+import { MySubscriptionsSection } from "./engagement";
 import {
   Avatar,
   Badge,
@@ -414,12 +415,18 @@ export function RewardsPage() {
             text="Продолжайте заглядывать к нам — прогресс уже сохраняется."
           />
         ))}
+      <MySubscriptionsSection />
     </Page>
   );
 }
 
 export function MenuPage() {
-  const resource = useResource(coffeeApi.getMenu);
+  const venues = useResource(coffeeApi.getVenues);
+  const venueSelection = useVenueSelection(venues.data?.items ?? null);
+  const resource = useResource(
+    () => coffeeApi.getMenu(venueSelection.selectedVenueId),
+    [venueSelection.selectedVenueId],
+  );
   const cart = useCart();
   const [category, setCategory] = useState<string>("");
   const [configuring, setConfiguring] = useState<MenuItem | null>(null);
@@ -525,6 +532,19 @@ export function MenuPage() {
   };
   return (
     <Page title="Меню" eyebrow="Что приготовим сегодня">
+      {venues.data && venues.data.items.length > 0 && (
+        <VenueSelector
+          venues={venues.data.items}
+          selectedVenueId={venueSelection.selectedVenueId}
+          onSelect={(venueId) => {
+            venueSelection.selectVenue(venueId);
+            setCategory("");
+          }}
+        />
+      )}
+      {venues.error && (
+        <ErrorState error={venues.error} onRetry={venues.reload} compact />
+      )}
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
@@ -587,7 +607,13 @@ export function MenuPage() {
                   <div className="menu-card__body">
                     <div className="menu-card__title">
                       <h2>{item.name}</h2>
-                      <strong>{formatMoney(item.price_minor)}</strong>
+                      <span className="menu-card__price">
+                        {item.old_price_minor != null &&
+                          item.old_price_minor > item.price_minor && (
+                            <del>{formatMoney(item.old_price_minor)}</del>
+                          )}
+                        <strong>{formatMoney(item.price_minor)}</strong>
+                      </span>
                     </div>
                     <p>{item.description}</p>
                     <div className="tag-row">
@@ -820,6 +846,24 @@ export function PostPurchasePage() {
       )}
       {resource.data && (
         <>
+          <div className="more-shortcuts" aria-label="Разделы">
+            <Link className="more-shortcut" to="/reviews">
+              <span aria-hidden="true">★</span>
+              <span>
+                <strong>Отзывы</strong>
+                <small>Оценить визит и посмотреть отзывы</small>
+              </span>
+              <b aria-hidden="true">›</b>
+            </Link>
+            <Link className="more-shortcut" to="/profile">
+              <span aria-hidden="true">○</span>
+              <span>
+                <strong>Профиль</strong>
+                <small>Дата рождения и способы связи</small>
+              </span>
+              <b aria-hidden="true">›</b>
+            </Link>
+          </div>
           <Panel>
             <div className="profile-heading">
               <Avatar

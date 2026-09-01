@@ -164,9 +164,23 @@ export function ReviewsPage() {
 }
 
 export function MySubscriptionsPage() {
-  const resource = useResource(coffeeApi.getMyPasses);
   return (
     <Page title="Абонементы" eyebrow="Оставшиеся использования">
+      <MySubscriptionsSection />
+    </Page>
+  );
+}
+
+export function MySubscriptionsSection() {
+  const resource = useResource(coffeeApi.getMyPasses);
+  return (
+    <section aria-labelledby="subscriptions-heading">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Абонементы</p>
+          <h2 id="subscriptions-heading">Оставшиеся использования</h2>
+        </div>
+      </div>
       {resource.loading && <Loader />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
@@ -181,10 +195,10 @@ export function MySubscriptionsPage() {
         ) : (
           <EmptyState
             title="Абонементов пока нет"
-            text="Выданные абонементы появятся здесь."
+            text="Выданные администратором абонементы появятся здесь. Покупка в приложении пока недоступна."
           />
         ))}
-    </Page>
+    </section>
   );
 }
 

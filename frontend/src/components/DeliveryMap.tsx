@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import {
+  AttributionControl,
   Circle,
   CircleMarker,
   MapContainer,
@@ -56,7 +57,10 @@ export function DeliveryMap({
         center={[focus.latitude, focus.longitude]}
         zoom={13}
         scrollWheelZoom
+        attributionControl={false}
       >
+        {/* Keep the required map-data credit while hiding Leaflet's optional branded prefix. */}
+        <AttributionControl prefix={false} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

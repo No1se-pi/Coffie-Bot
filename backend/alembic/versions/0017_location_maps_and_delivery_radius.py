@@ -82,9 +82,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("number"),
         sa.UniqueConstraint("customer_pass_id"),
-        sa.UniqueConstraint(
-            "user_id", "idempotency_key", name="user_pass_purchase_key"
-        ),
+        sa.UniqueConstraint("user_id", "idempotency_key", name="user_pass_purchase_key"),
     )
     op.create_index(
         op.f("ix_pass_purchases_status_created"),

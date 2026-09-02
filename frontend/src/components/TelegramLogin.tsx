@@ -16,6 +16,7 @@ export function TelegramLogin({
 }) {
   const target = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [widgetReady, setWidgetReady] = useState(false);
 
   useEffect(() => {
     const container = target.current;
@@ -36,8 +37,20 @@ export function TelegramLogin({
     script.dataset.radius = "12";
     script.dataset.userpic = "false";
     script.dataset.onauth = "window.__coffieTelegramAuth(user)";
+    script.addEventListener("load", () => setWidgetReady(true));
+    script.addEventListener("error", () =>
+      setError(new Error("Telegram Login не загрузился. Откройте приложение через бота.")),
+    );
     container.append(script);
+    // Browser extensions and network filters can silently block the Telegram
+    // iframe without firing a script error. Do not leave an unexplained blank.
+    const timeout = window.setTimeout(() => {
+      if (!container.querySelector("iframe")) {
+        setError(new Error("Telegram Login заблокирован браузером или расширением."));
+      }
+    }, 5000);
     return () => {
+      window.clearTimeout(timeout);
       delete window.__coffieTelegramAuth;
       script.remove();
     };
@@ -53,7 +66,14 @@ export function TelegramLogin({
   return (
     <>
       <div className="telegram-login" ref={target} />
+      {!widgetReady && !error && <p className="muted">Загружаем Telegram Login…</p>}
       {error && <ErrorState error={error} compact />}
+      <a
+        className="button button--primary telegram-login__fallback"
+        href={`https://t.me/${telegramBotUsername}?startapp=admin`}
+      >
+        Открыть админку в Telegram
+      </a>
     </>
   );
 }

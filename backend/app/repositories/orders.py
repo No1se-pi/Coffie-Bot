@@ -322,6 +322,10 @@ class OrderRepository:
         )
 
     async def aggregate(self, order: CustomerOrder) -> OrderAggregate:
+        # Database-generated timestamps may be expired by SQLAlchemy after an
+        # UPDATE flush.  Load them while we are still in the async repository
+        # boundary so response serialization never attempts implicit I/O.
+        await self._session.refresh(order)
         suborders = tuple(await self.list_suborders(order.id))
         suborder_ids = {value.id for value in suborders}
         venue_ids = {value.venue_id for value in suborders}

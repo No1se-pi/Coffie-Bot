@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
 import { CartProvider } from "../components/CartContext";
 import { MenuPage } from "../pages/customer";
-import { CartPage, StaffOrdersPage } from "../pages/orders";
+import { CartPage, OrderDetailPage, StaffOrdersPage } from "../pages/orders";
 import type { CustomerOrder } from "../api/types";
 
 describe("order flows", () => {
@@ -147,5 +147,38 @@ describe("order flows", () => {
     await user.click(screen.getByRole("button", { name: "Назначить" }));
 
     expect(assign).toHaveBeenCalledWith("delivery-2", "courier-1");
+  });
+
+  it("shows a simple pickup number and the customer progress", async () => {
+    const order = {
+      id: "pickup-7",
+      number: 42,
+      status: "preparing",
+      fulfillment_mode: "pickup",
+      total_minor: 30000,
+      created_at: "2026-09-03T10:00:00Z",
+      suborders: [],
+      events: [],
+    } as unknown as CustomerOrder;
+    vi.spyOn(coffeeApi, "getOrder").mockResolvedValue(order);
+
+    render(
+      <MemoryRouter initialEntries={["/orders/pickup-7"]}>
+        <Routes>
+          <Route path="/orders/:orderId" element={<OrderDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Номер для получения")).toBeVisible();
+    expect(
+      screen.getByText("42", { selector: ".pickup-code strong" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Статус заказа")).toHaveTextContent(
+      "Готовится",
+    );
+    expect(screen.getByLabelText("Статус заказа")).toHaveTextContent(
+      "Можно забирать",
+    );
   });
 });

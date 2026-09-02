@@ -61,6 +61,7 @@ class DeliveryAdminService:
     async def create_zone(self, actor: Actor, values: dict[str, Any]) -> DeliveryZone:
         _require(actor)
         async with self._repository.transaction():
+            await self._validate_zone_location(values)
             zone = DeliveryZone(id=uuid4(), **_clean_zone(values))
             self._repository.add(zone)
             self._audit(actor, "delivery.zone_created", zone.id)
@@ -77,6 +78,7 @@ class DeliveryAdminService:
                 _not_found("Зона доставки не найдена")
             if zone.archived_at is not None:
                 _validation("zone_archived", "Архивную зону нельзя изменить")
+            await self._validate_zone_location(values)
             for field, field_value in _clean_zone(values).items():
                 setattr(zone, field, field_value)
             self._audit(actor, "delivery.zone_updated", zone.id)
@@ -113,8 +115,6 @@ class DeliveryAdminService:
             location = Location(
                 id=uuid4(),
                 description=None,
-                latitude=None,
-                longitude=None,
                 business_day_boundary_minutes=0,
                 opening_hours={},
                 is_default=False,
@@ -124,6 +124,23 @@ class DeliveryAdminService:
             self._audit(actor, "delivery.location_created", location.id)
             await self._repository.flush()
             return location
+
+    async def _validate_zone_location(self, values: dict[str, Any]) -> None:
+        location_id = values.get("location_id")
+        radius = values.get("radius_meters")
+        if (location_id is None) != (radius is None):
+            _validation(
+                "delivery_radius_incomplete",
+                "Для зоны одновременно укажите точку и радиус",
+            )
+        if location_id is None:
+            return
+        location = await self._repository.get_location(location_id)
+        if location is None or location.latitude is None or location.longitude is None:
+            _validation(
+                "delivery_location_coordinates_required",
+                "У точки доставки сначала укажите координаты на карте",
+            )
 
     async def update_location(
         self, actor: Actor, location_id: UUID, values: dict[str, Any]

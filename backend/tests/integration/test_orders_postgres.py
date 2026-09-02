@@ -139,6 +139,8 @@ async def test_order_creation_is_idempotent_and_statuses_are_append_only() -> No
         delivery_zone_id=None,
         contact_phone="+79990000000",
         delivery_address=None,
+        delivery_latitude=None,
+        delivery_longitude=None,
         entrance=None,
         apartment=None,
         floor=None,

@@ -61,6 +61,8 @@ class DeliveryZoneCreate(ApiSchema):
     description: str | None = Field(default=None, max_length=2_000)
     fee_minor: int = Field(ge=0)
     minimum_order_minor: int | None = Field(default=None, ge=0)
+    location_id: UUID | None = None
+    radius_meters: int | None = Field(default=None, ge=100, le=100_000)
     is_active: bool = True
     sort_order: int = Field(default=0, ge=0)
 
@@ -88,6 +90,9 @@ class LocationFulfillmentUpdate(ApiSchema):
     address: str | None = Field(default=None, min_length=1, max_length=2_000)
     phone: str | None = Field(default=None, max_length=64)
     map_url: str | None = Field(default=None, max_length=2_048)
+    image_media_id: UUID | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     is_active: bool | None = None
 
 
@@ -98,6 +103,9 @@ class LocationCreate(ApiSchema):
     address: str = Field(min_length=1, max_length=2_000)
     phone: str | None = Field(default=None, max_length=64)
     map_url: str | None = Field(default=None, max_length=2_048)
+    image_media_id: UUID | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     timezone: str = Field(default="Europe/Moscow", min_length=1, max_length=64)
     is_active: bool = True
     pickup_enabled: bool = True
@@ -115,6 +123,9 @@ class LocationFulfillmentResponse(LocationFulfillmentUpdate):
     address: str
     phone: str | None
     map_url: str | None
+    image_media_id: UUID | None
+    latitude: float | None
+    longitude: float | None
     timezone: str
     is_active: bool
 

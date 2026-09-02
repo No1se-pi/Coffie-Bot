@@ -15,6 +15,7 @@ import {
 } from "../components/ui";
 import { useResource } from "../hooks/useResource";
 import { formatDateTime, formatMoney } from "../utils/format";
+import { DeliveryMap, type GeoPoint } from "../components/DeliveryMap";
 
 const statusLabels: Record<OrderStatus, string> = {
   new: "Новый",
@@ -88,6 +89,48 @@ function OrderSummary({
     <div className="order-summary">{content}</div>
   ) : (
     <Panel className="order-card">{content}</Panel>
+  );
+}
+
+function OrderProgress({ order }: { order: CustomerOrder }) {
+  const steps: Array<{ statuses: OrderStatus[]; label: string }> =
+    order.fulfillment_mode === "pickup"
+      ? [
+          { statuses: ["new", "confirmed"], label: "Принят" },
+          { statuses: ["preparing"], label: "Готовится" },
+          { statuses: ["ready"], label: "Можно забирать" },
+          { statuses: ["delivered"], label: "Выдан" },
+        ]
+      : [
+          { statuses: ["new", "confirmed"], label: "Принят" },
+          { statuses: ["preparing", "ready"], label: "Готовится" },
+          {
+            statuses: ["waiting_for_courier", "courier_assigned"],
+            label: "Передаём курьеру",
+          },
+          { statuses: ["picked_up", "in_transit"], label: "В пути" },
+          { statuses: ["delivered"], label: "Доставлен" },
+        ];
+  const activeIndex = steps.findIndex((step) =>
+    step.statuses.includes(order.status),
+  );
+  return (
+    <Panel>
+      <div className="order-progress" aria-label="Статус заказа">
+        {steps.map((step, index) => (
+          <div
+            className={index <= activeIndex ? "is-complete" : ""}
+            key={step.label}
+          >
+            <span>{index < activeIndex ? "✓" : index + 1}</span>
+            <small>{step.label}</small>
+          </div>
+        ))}
+      </div>
+      {order.status === "cancelled" && (
+        <p className="inline-warning">Заказ отменён</p>
+      )}
+    </Panel>
   );
 }
 
@@ -201,6 +244,7 @@ export function CheckoutPage() {
   const [pickupId, setPickupId] = useState("");
   const [zoneId, setZoneId] = useState("");
   const [address, setAddress] = useState("");
+  const [deliveryPoint, setDeliveryPoint] = useState<GeoPoint | null>(null);
   const [entrance, setEntrance] = useState("");
   const [apartment, setApartment] = useState("");
   const [floor, setFloor] = useState("");
@@ -271,6 +315,10 @@ export function CheckoutPage() {
           delivery_zone_id: mode === "delivery" ? zoneId : null,
           contact_phone: phone,
           delivery_address: mode === "delivery" ? address : null,
+          delivery_latitude:
+            mode === "delivery" ? (deliveryPoint?.latitude ?? null) : null,
+          delivery_longitude:
+            mode === "delivery" ? (deliveryPoint?.longitude ?? null) : null,
           entrance: mode === "delivery" ? entrance || null : null,
           apartment: mode === "delivery" ? apartment || null : null,
           floor: mode === "delivery" ? floor || null : null,
@@ -402,6 +450,57 @@ export function CheckoutPage() {
                   required
                 />
               </Field>
+              {(() => {
+                const selectedZone = options.data.delivery_zones.find(
+                  (zone) => zone.id === zoneId,
+                );
+                const center =
+                  selectedZone?.center_latitude != null &&
+                  selectedZone.center_longitude != null
+                    ? {
+                        latitude: selectedZone.center_latitude,
+                        longitude: selectedZone.center_longitude,
+                      }
+                    : null;
+                if (!center) return null;
+                return (
+                  <Panel>
+                    <div className="section-heading">
+                      <div>
+                        <h2>Точка доставки</h2>
+                        <p className="muted">
+                          Поставьте маркер точно у дома. Сервер проверит радиус.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          navigator.geolocation?.getCurrentPosition(
+                            (position) =>
+                              setDeliveryPoint({
+                                latitude: Number(
+                                  position.coords.latitude.toFixed(6),
+                                ),
+                                longitude: Number(
+                                  position.coords.longitude.toFixed(6),
+                                ),
+                              }),
+                          )
+                        }
+                      >
+                        Я здесь
+                      </Button>
+                    </div>
+                    <DeliveryMap
+                      center={center}
+                      marker={deliveryPoint}
+                      radiusMeters={selectedZone?.radius_meters}
+                      onMarkerChange={setDeliveryPoint}
+                    />
+                  </Panel>
+                );
+              })()}
               <div className="order-form__row">
                 <Field label="Подъезд">
                   <input
@@ -602,6 +701,15 @@ export function OrderDetailPage() {
       {resource.data && (
         <div className="card-list">
           <OrderSummary order={resource.data} />
+          {resource.data.fulfillment_mode === "pickup" &&
+            resource.data.status !== "cancelled" && (
+              <Panel className="pickup-code">
+                <span>Номер для получения</span>
+                <strong>{resource.data.number}</strong>
+                <small>Назовите этот номер сотруднику на точке</small>
+              </Panel>
+            )}
+          <OrderProgress order={resource.data} />
           {resource.data.suborders.map((suborder) => (
             <Panel key={suborder.id}>
               <div className="order-card__head">

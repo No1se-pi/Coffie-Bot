@@ -20,6 +20,7 @@ from app.models.engagement import (
     BulkBonusBatch,
     BulkBonusItem,
     CustomerPass,
+    PassPurchase,
     PassTemplate,
     PassTemplateCategory,
     PassTemplateItem,
@@ -30,6 +31,7 @@ from app.models.engagement import (
 from app.models.enums import (
     CardStatus,
     LoyaltyOperationType,
+    PaymentMethod,
     PermissionCode,
     ReviewStatus,
     Role,
@@ -174,6 +176,8 @@ async def test_reviews_pass_usage_race_and_bulk_bonus_are_auditable() -> None:
                 description="Тест конкурентного использования",
                 total_uses=1,
                 validity_days=30,
+                price_minor=15_000,
+                purchase_enabled=True,
                 image_media_id=None,
                 venue_ids=frozenset({venue_id}),
                 category_ids=frozenset({category_id}),
@@ -187,6 +191,17 @@ async def test_reviews_pass_usage_race_and_bulk_bonus_are_auditable() -> None:
             idempotency_key=str(uuid4()),
         )
         pass_id, template_id = issued.value.id, template.template.id
+        purchase = await subscriptions.purchase(
+            customer,
+            template_id=template_id,
+            payment_method=PaymentMethod.CARD_ON_RECEIPT,
+            idempotency_key=str(uuid4()),
+        )
+        confirmed_purchase = await subscriptions.confirm_purchase(admin, purchase.id)
+        assert confirmed_purchase.status == "paid"
+        assert confirmed_purchase.customer_pass_id is not None
+        purchase_id = purchase.id
+        purchased_pass_id = confirmed_purchase.customer_pass_id
 
     async def redeem_once() -> str:
         async with sessions() as session:
@@ -249,10 +264,16 @@ async def test_reviews_pass_usage_race_and_bulk_bonus_are_auditable() -> None:
         await session.execute(
             delete(AuditEvent).where(
                 (AuditEvent.actor_user_id == admin_user_id)
-                | (AuditEvent.object_id.in_({review_id, pass_id, template_id, batch_id}))
+                | (
+                    AuditEvent.object_id.in_(
+                        {review_id, pass_id, template_id, batch_id, purchase_id}
+                    )
+                )
             )
         )
         await session.execute(delete(PassUsage).where(PassUsage.pass_id == pass_id))
+        await session.execute(delete(PassPurchase).where(PassPurchase.id == purchase_id))
+        await session.execute(delete(CustomerPass).where(CustomerPass.id == purchased_pass_id))
         await session.execute(delete(CustomerPass).where(CustomerPass.id == pass_id))
         await session.execute(
             delete(PassTemplateVenue).where(PassTemplateVenue.template_id == template_id)

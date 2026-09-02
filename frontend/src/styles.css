@@ -652,6 +652,248 @@ a:focus-visible {
   align-items: center;
 }
 
+.delivery-map {
+  display: grid;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.delivery-map .leaflet-container {
+  width: 100%;
+  height: min(52vh, 360px);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  overflow: hidden;
+  font-family: inherit;
+}
+
+.pickup-code {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.pickup-code strong {
+  font-size: clamp(3rem, 18vw, 5.5rem);
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.order-progress {
+  display: flex;
+  justify-content: space-between;
+  overflow-x: auto;
+}
+
+.order-progress > div {
+  align-items: center;
+  color: var(--color-muted);
+  display: flex;
+  flex: 1 0 78px;
+  flex-direction: column;
+  gap: 0.4rem;
+  position: relative;
+  text-align: center;
+}
+
+.order-progress > div:not(:last-child)::after {
+  background: var(--color-border);
+  content: "";
+  height: 3px;
+  left: calc(50% + 17px);
+  position: absolute;
+  top: 15px;
+  width: calc(100% - 34px);
+}
+
+.order-progress span {
+  align-items: center;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+  display: flex;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+  z-index: 1;
+}
+
+.order-progress .is-complete {
+  color: var(--color-text);
+}
+
+.order-progress .is-complete span,
+.order-progress .is-complete:not(:last-child)::after {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.current-venue {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: inherit;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto 1fr auto;
+  padding: 0.85rem 1rem;
+  text-decoration: none;
+}
+
+.current-venue > span:first-child {
+  align-items: center;
+  background: var(--color-accent-soft);
+  border-radius: 50%;
+  display: flex;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.current-venue > span:nth-child(2) {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.restaurant-grid,
+.location-catalog {
+  display: grid;
+  gap: 1rem;
+}
+
+.restaurant-card {
+  border-radius: 28px;
+  color: white;
+  min-height: 180px;
+  overflow: hidden;
+  position: relative;
+  text-decoration: none;
+}
+
+.restaurant-card > img:not(.restaurant-card__logo-bg) {
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+  position: absolute;
+  width: 100%;
+}
+
+.restaurant-card__logo-bg {
+  filter: blur(18px);
+  height: 130%;
+  inset: -15%;
+  object-fit: cover;
+  opacity: 0.55;
+  position: absolute;
+  width: 130%;
+}
+
+.restaurant-card--0 {
+  background: #337c69;
+}
+.restaurant-card--1 {
+  background: #252525;
+}
+.restaurant-card--2 {
+  background: #b94c53;
+}
+.restaurant-card--3 {
+  background: #805b3c;
+}
+
+.restaurant-card__shade {
+  background: linear-gradient(90deg, rgb(0 0 0 / 70%), rgb(0 0 0 / 10%));
+  inset: 0;
+  position: absolute;
+}
+
+.restaurant-card__content {
+  align-items: center;
+  bottom: 1.2rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto 1fr auto;
+  left: 1.2rem;
+  position: absolute;
+  right: 1.2rem;
+}
+
+.restaurant-card__content img,
+.restaurant-hero > img {
+  background: white;
+  border-radius: 14px;
+  height: 54px;
+  object-fit: contain;
+  padding: 0.35rem;
+  width: 54px;
+}
+
+.restaurant-card__content > span {
+  display: grid;
+}
+
+.restaurant-card__content strong {
+  font-size: 1.45rem;
+}
+
+.restaurant-hero {
+  align-items: center;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: auto 1fr;
+}
+
+.restaurant-hero .button {
+  grid-column: 1 / -1;
+}
+
+.restaurant-menu-preview {
+  display: grid;
+  gap: 0.8rem;
+  grid-auto-columns: minmax(150px, 42%);
+  grid-auto-flow: column;
+  overflow-x: auto;
+}
+
+.restaurant-menu-preview article {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.restaurant-menu-preview img,
+.restaurant-menu-preview article > span {
+  align-items: center;
+  aspect-ratio: 1;
+  background: var(--color-surface);
+  border-radius: 22px;
+  display: flex;
+  justify-content: center;
+  object-fit: cover;
+  width: 100%;
+}
+
+.location-catalog article {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 24px;
+  overflow: hidden;
+}
+
+.location-catalog article > img {
+  aspect-ratio: 16 / 8;
+  object-fit: cover;
+  width: 100%;
+}
+
+.location-catalog article > div,
+.location-catalog article > a {
+  display: block;
+  padding: 0.8rem 1rem;
+}
+
 .page {
   display: flex;
   flex-direction: column;

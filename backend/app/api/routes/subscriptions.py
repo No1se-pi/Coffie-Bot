@@ -14,12 +14,16 @@ from app.schemas.subscriptions import (
     CustomerPassResponse,
     PassCancelRequest,
     PassIssueRequest,
+    PassPurchaseCreateRequest,
+    PassPurchaseListResponse,
+    PassPurchaseResponse,
     PassTemplateCreateRequest,
     PassTemplateListResponse,
     PassTemplateResponse,
     PassUsageResponse,
     PassUseRequest,
     pass_response,
+    purchase_response,
     template_response,
     usage_response,
 )
@@ -43,6 +47,61 @@ def _service(session: AsyncSession) -> SubscriptionService:
 async def my_passes(actor: CurrentActor, session: DatabaseSession) -> CustomerPassListResponse:
     values = await _service(session).list_mine(actor)
     return CustomerPassListResponse(items=[pass_response(value) for value in values])
+
+
+@router.get("/subscription-products", response_model=PassTemplateListResponse)
+async def subscription_products(
+    actor: CurrentActor, session: DatabaseSession
+) -> PassTemplateListResponse:
+    values = await _service(session).list_storefront(actor)
+    return PassTemplateListResponse(items=[template_response(value) for value in values])
+
+
+@router.post(
+    "/subscription-purchases",
+    response_model=PassPurchaseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def purchase_subscription(
+    payload: PassPurchaseCreateRequest,
+    actor: CurrentActor,
+    session: DatabaseSession,
+    idempotency_key: IdempotencyKey,
+) -> PassPurchaseResponse:
+    return purchase_response(
+        await _service(session).purchase(
+            actor,
+            template_id=payload.template_id,
+            payment_method=payload.payment_method,
+            idempotency_key=str(idempotency_key),
+        )
+    )
+
+
+@router.get("/me/subscription-purchases", response_model=PassPurchaseListResponse)
+async def my_subscription_purchases(
+    actor: CurrentActor, session: DatabaseSession
+) -> PassPurchaseListResponse:
+    values = await _service(session).list_my_purchases(actor)
+    return PassPurchaseListResponse(items=[purchase_response(value) for value in values])
+
+
+@router.get("/staff/subscription-purchases", response_model=PassPurchaseListResponse)
+async def pending_subscription_purchases(
+    actor: PassManager, session: DatabaseSession
+) -> PassPurchaseListResponse:
+    values = await _service(session).list_pending_purchases(actor)
+    return PassPurchaseListResponse(items=[purchase_response(value) for value in values])
+
+
+@router.post(
+    "/staff/subscription-purchases/{purchase_id}/confirm",
+    response_model=PassPurchaseResponse,
+)
+async def confirm_subscription_purchase(
+    purchase_id: UUID, actor: PassManager, session: DatabaseSession
+) -> PassPurchaseResponse:
+    return purchase_response(await _service(session).confirm_purchase(actor, purchase_id))
 
 
 @router.get("/staff/customers/{user_id}/subscriptions", response_model=CustomerPassListResponse)
@@ -98,6 +157,8 @@ async def create_template(
             image_media_id=payload.image_media_id,
             total_uses=payload.total_uses,
             validity_days=payload.validity_days,
+            price_minor=payload.price_minor,
+            purchase_enabled=payload.purchase_enabled,
             venue_ids=frozenset(payload.venue_ids),
             category_ids=frozenset(payload.category_ids),
             item_ids=frozenset(payload.item_ids),

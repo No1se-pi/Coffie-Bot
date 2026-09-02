@@ -36,6 +36,7 @@ const navItems: Record<
 > = {
   customer: [
     { to: "/", label: "Главная", icon: "⌂", end: true },
+    { to: "/restaurants", label: "Рестораны", icon: "⌖" },
     { to: "/menu", label: "Меню", icon: "☕" },
     { to: "/cart", label: "Корзина", icon: "▣" },
     { to: "/card", label: "Карта гостя", icon: "▦" },

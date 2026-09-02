@@ -16,6 +16,7 @@ from app.models.access import User
 from app.models.content import MenuCategory, MenuItem, Venue
 from app.models.engagement import (
     CustomerPass,
+    PassPurchase,
     PassTemplate,
     PassTemplateCategory,
     PassTemplateItem,
@@ -111,6 +112,39 @@ class SubscriptionRepository:
             (await self._session.scalars(statement.order_by(PassTemplate.created_at.desc()))).all()
         )
         return [await self.template_access(value) for value in templates]
+
+    async def find_purchase(self, user_id: UUID, key: str) -> PassPurchase | None:
+        return cast(
+            PassPurchase | None,
+            await self._session.scalar(
+                select(PassPurchase).where(
+                    PassPurchase.user_id == user_id,
+                    PassPurchase.idempotency_key == key,
+                )
+            ),
+        )
+
+    async def get_purchase(
+        self, purchase_id: UUID, *, for_update: bool = False
+    ) -> PassPurchase | None:
+        statement = select(PassPurchase).where(PassPurchase.id == purchase_id)
+        if for_update:
+            statement = statement.with_for_update()
+        return cast(PassPurchase | None, await self._session.scalar(statement))
+
+    async def list_purchases(
+        self, *, user_id: UUID | None = None, status: str | None = None
+    ) -> list[PassPurchase]:
+        statement = select(PassPurchase)
+        if user_id is not None:
+            statement = statement.where(PassPurchase.user_id == user_id)
+        if status is not None:
+            statement = statement.where(PassPurchase.status == status)
+        return list(
+            await self._session.scalars(
+                statement.order_by(PassPurchase.created_at.desc(), PassPurchase.id.desc())
+            )
+        )
 
     async def existing_entity_ids(
         self, *, venue_ids: set[UUID], category_ids: set[UUID], item_ids: set[UUID]

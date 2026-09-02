@@ -24,6 +24,7 @@ import type {
   TipProfile,
 } from "../api/types";
 import { useResource } from "../hooks/useResource";
+import { AuthContext } from "../auth/AuthContext";
 import { closeTelegramScanner, scanQrWithTelegram } from "../telegram";
 import { formatDateTime, formatMoney, rublesToMinor } from "../utils/format";
 import { ReceiptQuickForm } from "./receipts";
@@ -75,7 +76,21 @@ function persistLocationId(locationId: string) {
 
 export function StaffWorkspaceProvider({ children }: { children: ReactNode }) {
   const [client, setClient] = useState<StaffClient | null>(null);
-  const contacts = useResource(coffeeApi.getContacts);
+  const auth = useContext(AuthContext);
+  // The provider surrounds AuthGate, so it must not issue authenticated
+  // content requests until Telegram authentication has produced a session.
+  const contacts = useResource(
+    () =>
+      auth === null || auth.actor
+        ? coffeeApi.getContacts()
+        : Promise.resolve({
+            coffee_shop_name: "",
+            description: "",
+            privacy_policy: "",
+            locations: [],
+          }),
+    [auth?.actor?.id],
+  );
   const [selectedLocationId, setSelectedLocationId] =
     useState(readStoredLocationId);
   const locations = (contacts.data?.locations ?? []).filter(

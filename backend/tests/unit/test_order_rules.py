@@ -15,6 +15,7 @@ from app.services.order_rules import (
     validate_desired_time,
     validate_operating_hours,
 )
+from app.services.orders import _distance_meters
 
 
 def test_mixed_suborders_become_waiting_only_when_every_part_is_ready() -> None:
@@ -86,3 +87,9 @@ def test_overnight_delivery_interval_accepts_late_time() -> None:
         operating_hours={"thursday": "11:00-00:00"},
         timezone="Europe/Moscow",
     )
+
+
+def test_delivery_distance_uses_real_world_meters() -> None:
+    # Roughly one kilometre north at Moscow's latitude.
+    distance = _distance_meters(55.751244, 37.618423, 55.760227, 37.618423)
+    assert 990 <= distance <= 1010

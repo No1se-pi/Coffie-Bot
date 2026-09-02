@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -21,7 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.types import enum_type
-from app.models.enums import BulkBonusStatus, PassStatus, ReviewStatus
+from app.models.enums import BulkBonusStatus, PassStatus, PaymentMethod, ReviewStatus
 
 
 class PublicReview(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -61,12 +62,13 @@ class PublicReview(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class PassTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Immutable commercial-free definition used when a pass is issued."""
+    """Pass definition and its optional pay-at-location storefront offer."""
 
     __tablename__ = "pass_templates"
     __table_args__ = (
         CheckConstraint("total_uses > 0", name="positive_total_uses"),
         CheckConstraint("validity_days > 0", name="positive_validity_days"),
+        CheckConstraint("price_minor >= 0", name="non_negative_price"),
         Index("ix_pass_templates_active_created", "is_active", "created_at"),
     )
 
@@ -77,6 +79,12 @@ class PassTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     total_uses: Mapped[int] = mapped_column(Integer, nullable=False)
     validity_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_minor: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    purchase_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by_staff_id: Mapped[UUID] = mapped_column(
         ForeignKey("staff_members.id", ondelete="RESTRICT")
@@ -161,6 +169,40 @@ class CustomerPass(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     cancellation_reason: Mapped[str | None] = mapped_column(Text)
     cancellation_idempotency_key: Mapped[str | None] = mapped_column(String(128))
     cancellation_request_hash: Mapped[str | None] = mapped_column(String(64))
+
+
+class PassPurchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Pay-at-location pass order; activation requires a staff confirmation."""
+
+    __tablename__ = "pass_purchases"
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="user_pass_purchase_key"),
+        CheckConstraint("price_minor >= 0", name="non_negative_price"),
+        CheckConstraint(
+            "status IN ('pending', 'paid', 'cancelled')",
+            name="valid_status",
+        ),
+        Index("ix_pass_purchases_status_created", "status", "created_at"),
+    )
+
+    number: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False, unique=True)
+    template_id: Mapped[UUID] = mapped_column(ForeignKey("pass_templates.id", ondelete="RESTRICT"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    name_snapshot: Mapped[str] = mapped_column(String(200), nullable=False)
+    price_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    payment_method: Mapped[PaymentMethod] = mapped_column(
+        enum_type(PaymentMethod, name="pass_purchase_payment_method", length=24), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    customer_pass_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("customer_passes.id", ondelete="RESTRICT"), unique=True
+    )
+    confirmed_by_staff_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("staff_members.id", ondelete="RESTRICT")
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PassUsage(UUIDPrimaryKeyMixin, Base):

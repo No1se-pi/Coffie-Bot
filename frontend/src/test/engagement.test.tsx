@@ -30,6 +30,9 @@ describe("engagement workflows", () => {
   it("keeps selected venues, categories and items in a pass template", async () => {
     const user = userEvent.setup();
     vi.spyOn(coffeeApi, "getPassTemplates").mockResolvedValue({ items: [] });
+    vi.spyOn(coffeeApi, "getPendingPassPurchases").mockResolvedValue({
+      items: [],
+    });
     vi.spyOn(coffeeApi, "getVenues").mockResolvedValue({
       items: [
         {
@@ -76,6 +79,8 @@ describe("engagement workflows", () => {
       image_media_id: null,
       total_uses: 20,
       validity_days: 90,
+      price_minor: 0,
+      purchase_enabled: true,
       venue_ids: ["venue-1"],
       category_ids: ["category-1"],
       item_ids: ["item-1"],
@@ -90,6 +95,8 @@ describe("engagement workflows", () => {
     );
     await user.type(screen.getByLabelText("Название"), "Абонемент");
     await user.type(screen.getByLabelText("Описание"), "Тест");
+    await user.clear(screen.getByLabelText("Цена, ₽"));
+    await user.type(screen.getByLabelText("Цена, ₽"), "1490");
     await user.selectOptions(
       await screen.findByLabelText("Заведения (пусто — все)"),
       "venue-1",
@@ -110,6 +117,8 @@ describe("engagement workflows", () => {
           venue_ids: ["venue-1"],
           category_ids: ["category-1"],
           item_ids: ["item-1"],
+          price_minor: 149000,
+          purchase_enabled: true,
         }),
       ),
     );

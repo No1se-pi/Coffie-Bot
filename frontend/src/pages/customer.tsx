@@ -5,12 +5,14 @@ import { coffeeApi } from "../api/client";
 import type {
   HistoryType,
   MenuItem,
+  PassPurchase,
+  PassTemplate,
   PointsMenuPurchase,
   Reward,
 } from "../api/types";
 import { useResource } from "../hooks/useResource";
 import { formatDate, formatDateTime, formatMoney } from "../utils/format";
-import { VenueSelector, useVenueSelection } from "../components/VenueSelector";
+import { useVenueSelection } from "../components/VenueSelector";
 import { useCart } from "../components/CartContext";
 import { MySubscriptionsSection } from "./engagement";
 import {
@@ -63,11 +65,35 @@ export function HomePage() {
         />
       )}
       {venueResource.data && venueResource.data.items.length > 0 && (
-        <VenueSelector
-          venues={venueResource.data.items}
-          selectedVenueId={venueSelection.selectedVenueId}
-          onSelect={venueSelection.selectVenue}
-        />
+        <>
+          <Link className="current-venue" to="/restaurants">
+            <span aria-hidden="true">⌖</span>
+            <span>
+              <small>Сейчас выбрано</small>
+              <strong>
+                {venueResource.data.items.find(
+                  (venue) => venue.id === venueSelection.selectedVenueId,
+                )?.name ?? "Выбрать ресторан"}
+              </strong>
+            </span>
+            <b aria-hidden="true">›</b>
+          </Link>
+          <label className="sr-only">
+            Заведение
+            <select
+              value={venueSelection.selectedVenueId ?? ""}
+              onChange={(event) =>
+                venueSelection.selectVenue(event.target.value)
+              }
+            >
+              {venueResource.data.items.map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
       )}
       {resource.data && (
         <>
@@ -420,6 +446,151 @@ export function RewardsPage() {
   );
 }
 
+export function RestaurantsPage() {
+  const venues = useResource(coffeeApi.getVenues);
+  const contacts = useResource(coffeeApi.getContacts);
+  const selection = useVenueSelection(venues.data?.items ?? null);
+  return (
+    <Page title="Рестораны" eyebrow="Выберите бренд и точку">
+      {venues.loading && <Loader />}
+      {venues.error && (
+        <ErrorState error={venues.error} onRetry={venues.reload} />
+      )}
+      <div className="restaurant-grid">
+        {venues.data?.items.map((venue, index) => {
+          const locations = (contacts.data?.locations ?? []).filter(
+            (location) => location.venue_id === venue.id,
+          );
+          return (
+            <Link
+              className={`restaurant-card restaurant-card--${index % 4}`}
+              key={venue.id}
+              to={`/restaurants/${venue.id}`}
+              onClick={() => selection.selectVenue(venue.id)}
+            >
+              {locations[0]?.image_url ? (
+                <img src={locations[0].image_url} alt="" />
+              ) : venue.logo_url ? (
+                <img
+                  className="restaurant-card__logo-bg"
+                  src={venue.logo_url}
+                  alt=""
+                />
+              ) : null}
+              <span className="restaurant-card__shade" />
+              <span className="restaurant-card__content">
+                {venue.logo_url && <img src={venue.logo_url} alt="" />}
+                <span>
+                  <strong>{venue.name}</strong>
+                  <small>
+                    {locations.length
+                      ? `${locations.length} точек`
+                      : venue.description || "Меню и адреса"}
+                  </small>
+                </span>
+                <b aria-hidden="true">›</b>
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </Page>
+  );
+}
+
+export function VenueDetailPage() {
+  const { venueId = "" } = useParams();
+  const venues = useResource(coffeeApi.getVenues);
+  const contacts = useResource(coffeeApi.getContacts);
+  const menu = useResource(() => coffeeApi.getMenu(venueId), [venueId]);
+  const selection = useVenueSelection(venues.data?.items ?? null);
+  const venue = venues.data?.items.find((value) => value.id === venueId);
+  const locations = (contacts.data?.locations ?? []).filter(
+    (location) => location.venue_id === venueId,
+  );
+  const featured = (menu.data?.items ?? [])
+    .filter((item) => item.visible && item.available)
+    .slice(0, 6);
+  return (
+    <Page
+      title={venue?.name ?? "Ресторан"}
+      eyebrow="Меню и физические точки"
+      action={
+        <Link className="button button--secondary" to="/restaurants">
+          Все рестораны
+        </Link>
+      }
+    >
+      {(venues.loading || contacts.loading || menu.loading) && <Loader />}
+      {venue && (
+        <Panel className="restaurant-hero">
+          {venue.logo_url && <img src={venue.logo_url} alt="" />}
+          <div>
+            <h2>{venue.name}</h2>
+            <p>
+              {venue.description || "Выберите блюда и удобную точку получения."}
+            </p>
+          </div>
+          <Link
+            className="button button--primary"
+            to="/menu"
+            onClick={() => selection.selectVenue(venue.id)}
+          >
+            Открыть меню
+          </Link>
+        </Panel>
+      )}
+      {featured.length > 0 && (
+        <section>
+          <div className="section-heading">
+            <h2>Популярное в меню</h2>
+            <Link to="/menu">Смотреть всё</Link>
+          </div>
+          <div className="restaurant-menu-preview">
+            {featured.map((item) => (
+              <article key={item.id}>
+                {item.image_url ? (
+                  <img src={item.image_url} alt="" />
+                ) : (
+                  <span>☕</span>
+                )}
+                <strong>{item.name}</strong>
+                <small>{formatMoney(item.price_minor)}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      <section>
+        <h2>Точки</h2>
+        <div className="location-catalog">
+          {locations.map((location) => (
+            <article key={location.id}>
+              {location.image_url && <img src={location.image_url} alt="" />}
+              <div>
+                <h3>{location.name}</h3>
+                <p>{location.address}</p>
+                <small>{location.hours}</small>
+              </div>
+              {location.map_url && (
+                <a href={location.map_url} target="_blank" rel="noreferrer">
+                  На карте
+                </a>
+              )}
+            </article>
+          ))}
+        </div>
+        {!locations.length && (
+          <EmptyState
+            title="Точки пока не опубликованы"
+            text="Адреса появятся здесь."
+          />
+        )}
+      </section>
+    </Page>
+  );
+}
+
 export function MenuPage() {
   const venues = useResource(coffeeApi.getVenues);
   const venueSelection = useVenueSelection(venues.data?.items ?? null);
@@ -428,6 +599,7 @@ export function MenuPage() {
     [venueSelection.selectedVenueId],
   );
   const cart = useCart();
+  const passProducts = useResource(coffeeApi.getSubscriptionProducts);
   const [category, setCategory] = useState<string>("");
   const [configuring, setConfiguring] = useState<MenuItem | null>(null);
   const [selectedModifiers, setSelectedModifiers] = useState<
@@ -441,6 +613,11 @@ export function MenuPage() {
   const [purchaseKey, setPurchaseKey] = useState("");
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [purchasing, setPurchasing] = useState(false);
+  const [buyingPass, setBuyingPass] = useState<PassTemplate | null>(null);
+  const [passPurchase, setPassPurchase] = useState<PassPurchase | null>(null);
+  const [passPayment, setPassPayment] = useState<"cash" | "card_on_receipt">(
+    "card_on_receipt",
+  );
   const visibleItems = useMemo(
     () =>
       resource.data?.items.filter(
@@ -530,17 +707,42 @@ export function MenuPage() {
       setPurchasing(false);
     }
   };
+  const confirmPassPurchase = async () => {
+    if (!buyingPass) return;
+    setPurchasing(true);
+    setPurchaseError(null);
+    try {
+      const created = await coffeeApi.purchaseSubscription(
+        buyingPass.id,
+        passPayment,
+      );
+      setPassPurchase(created);
+      setBuyingPass(null);
+    } catch (reason) {
+      setPurchaseError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось оформить абонемент",
+      );
+    } finally {
+      setPurchasing(false);
+    }
+  };
   return (
     <Page title="Меню" eyebrow="Что приготовим сегодня">
       {venues.data && venues.data.items.length > 0 && (
-        <VenueSelector
-          venues={venues.data.items}
-          selectedVenueId={venueSelection.selectedVenueId}
-          onSelect={(venueId) => {
-            venueSelection.selectVenue(venueId);
-            setCategory("");
-          }}
-        />
+        <Link className="current-venue" to="/restaurants">
+          <span aria-hidden="true">⌖</span>
+          <span>
+            <small>Меню ресторана</small>
+            <strong>
+              {venues.data.items.find(
+                (venue) => venue.id === venueSelection.selectedVenueId,
+              )?.name ?? "Выберите ресторан"}
+            </strong>
+          </span>
+          <b aria-hidden="true">Сменить ›</b>
+        </Link>
       )}
       {venues.error && (
         <ErrorState error={venues.error} onRetry={venues.reload} compact />
@@ -551,6 +753,36 @@ export function MenuPage() {
       )}
       {resource.data && (
         <>
+          {(passProducts.data?.items.length ?? 0) > 0 && (
+            <section className="subscription-storefront">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Абонементы</p>
+                  <h2>Выгодные наборы посещений</h2>
+                </div>
+              </div>
+              <div className="horizontal-cards">
+                {passProducts.data?.items.map((pass) => (
+                  <article className="subscription-product" key={pass.id}>
+                    <Badge tone="accent">{pass.validity_days} дней</Badge>
+                    <h3>{pass.name}</h3>
+                    <p>{pass.description}</p>
+                    <strong>{formatMoney(pass.price_minor)}</strong>
+                    <small>{pass.total_uses} использований</small>
+                    <Button
+                      onClick={() => {
+                        setPassPurchase(null);
+                        setPurchaseError(null);
+                        setBuyingPass(pass);
+                      }}
+                    >
+                      Купить
+                    </Button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
           <div
             className="menu-category-row"
             role="group"
@@ -796,6 +1028,65 @@ export function MenuPage() {
               </Panel>
             )
           )}
+        </div>
+      )}
+      {(buyingPass || passPurchase) && (
+        <div className="purchase-sheet-backdrop">
+          <Panel className="purchase-sheet" role="dialog" aria-modal="true">
+            {buyingPass ? (
+              <>
+                <h2>{buyingPass.name}</h2>
+                <p>
+                  {buyingPass.total_uses} использований в течение{" "}
+                  {buyingPass.validity_days} дней.
+                </p>
+                <strong>{formatMoney(buyingPass.price_minor)}</strong>
+                <Field label="Оплата на точке">
+                  <select
+                    value={passPayment}
+                    onChange={(event) =>
+                      setPassPayment(
+                        event.target.value as "cash" | "card_on_receipt",
+                      )
+                    }
+                  >
+                    <option value="card_on_receipt">Картой</option>
+                    <option value="cash">Наличными</option>
+                  </select>
+                </Field>
+                {purchaseError && (
+                  <div className="inline-error">{purchaseError}</div>
+                )}
+                <div className="action-row">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setBuyingPass(null)}
+                  >
+                    Отмена
+                  </Button>
+                  <Button
+                    disabled={purchasing}
+                    onClick={() => void confirmPassPurchase()}
+                  >
+                    {purchasing ? "Оформляем…" : "Оформить"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              passPurchase && (
+                <>
+                  <Badge tone="success">Заказ оформлен</Badge>
+                  <h2>Номер {passPurchase.number}</h2>
+                  <p>
+                    Оплатите {formatMoney(passPurchase.price_minor)} на точке.
+                    После подтверждения сотрудником абонемент появится в
+                    наградах со счётчиком и таймером.
+                  </p>
+                  <Button onClick={() => setPassPurchase(null)}>Понятно</Button>
+                </>
+              )
+            )}
+          </Panel>
         </div>
       )}
     </Page>

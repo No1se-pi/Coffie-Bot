@@ -125,6 +125,9 @@ class Location(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     phone: Mapped[str | None] = mapped_column(String(64))
     map_url: Mapped[str | None] = mapped_column(String(2048))
+    image_media_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("media_files.id", ondelete="SET NULL")
+    )
     opening_hours: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(

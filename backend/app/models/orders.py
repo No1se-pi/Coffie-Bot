@@ -16,6 +16,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -81,7 +82,7 @@ class DeliverySettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class DeliveryZone(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Simple admin-selected delivery zone; no fake GIS matching is implied."""
+    """Delivery radius anchored to a configured physical location."""
 
     __tablename__ = "delivery_zones"
     __table_args__ = (
@@ -90,6 +91,10 @@ class DeliveryZone(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "minimum_order_minor IS NULL OR minimum_order_minor >= 0",
             name="non_negative_minimum_order",
         ),
+        CheckConstraint(
+            "radius_meters IS NULL OR radius_meters > 0",
+            name="positive_radius_meters",
+        ),
         Index("ix_delivery_zones_active_sort", "is_active", "sort_order"),
     )
 
@@ -97,6 +102,10 @@ class DeliveryZone(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     fee_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     minimum_order_minor: Mapped[int | None] = mapped_column(BigInteger)
+    location_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("locations.id", ondelete="RESTRICT")
+    )
+    radius_meters: Mapped[int | None] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -152,6 +161,8 @@ class CustomerOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     contact_phone: Mapped[str] = mapped_column(String(32), nullable=False)
     delivery_address: Mapped[str | None] = mapped_column(Text)
+    delivery_latitude: Mapped[float | None] = mapped_column(Numeric(9, 6))
+    delivery_longitude: Mapped[float | None] = mapped_column(Numeric(9, 6))
     entrance: Mapped[str | None] = mapped_column(String(32))
     apartment: Mapped[str | None] = mapped_column(String(32))
     floor: Mapped[str | None] = mapped_column(String(32))

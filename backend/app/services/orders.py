@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import NoReturn
@@ -84,6 +85,8 @@ class OrderCreateCommand:
     delivery_zone_id: UUID | None
     contact_phone: str
     delivery_address: str | None
+    delivery_latitude: float | None
+    delivery_longitude: float | None
     entrance: str | None
     apartment: str | None
     floor: str | None
@@ -105,6 +108,7 @@ class OrderOptions:
     settings: DeliverySettings
     pickup_locations: tuple[Location, ...]
     delivery_zones: tuple[DeliveryZone, ...]
+    zone_locations: dict[UUID, Location]
 
 
 class OrderService:
@@ -123,10 +127,18 @@ class OrderService:
         settings = await self._repository.get_delivery_settings()
         if settings is None:
             _conflict("delivery_settings_missing", "Настройки получения не созданы")
+        zones = tuple(await self._repository.list_delivery_zones())
+        zone_location_ids = {zone.location_id for zone in zones if zone.location_id is not None}
+        zone_locations = {
+            location.id: location
+            for location_id in zone_location_ids
+            if (location := await self._repository.get_location(location_id)) is not None
+        }
         return OrderOptions(
             settings=settings,
             pickup_locations=tuple(await self._repository.list_pickup_locations()),
-            delivery_zones=tuple(await self._repository.list_delivery_zones()),
+            delivery_zones=zones,
+            zone_locations=zone_locations,
         )
 
     async def create(
@@ -177,6 +189,8 @@ class OrderService:
                 delivery_zone_id=command.delivery_zone_id,
                 contact_phone=normalized_phone,
                 delivery_address=_clean(command.delivery_address),
+                delivery_latitude=command.delivery_latitude,
+                delivery_longitude=command.delivery_longitude,
                 entrance=_clean(command.entrance),
                 apartment=_clean(command.apartment),
                 floor=_clean(command.floor),
@@ -542,6 +556,26 @@ class OrderService:
         zone = await self._repository.get_delivery_zone(command.delivery_zone_id)
         if zone is None:
             _validation("delivery_zone_unavailable", "Зона доставки недоступна")
+        if zone.location_id is not None and zone.radius_meters is not None:
+            if command.delivery_latitude is None or command.delivery_longitude is None:
+                _validation("delivery_coordinates_required", "Поставьте точку адреса на карте")
+            center = await self._repository.get_location(zone.location_id)
+            if center is None or center.latitude is None or center.longitude is None:
+                _conflict(
+                    "delivery_zone_not_configured",
+                    "У зоны доставки не настроен центр на карте",
+                )
+            distance = _distance_meters(
+                float(center.latitude),
+                float(center.longitude),
+                command.delivery_latitude,
+                command.delivery_longitude,
+            )
+            if distance > zone.radius_meters:
+                _validation(
+                    "address_outside_delivery_zone",
+                    "Адрес находится за пределами выбранной зоны доставки",
+                )
         policy = DeliveryPolicy(
             enabled=settings.delivery_enabled,
             minimum_order_minor=settings.minimum_order_minor,
@@ -938,3 +972,18 @@ def _conflict(code: str, message: str) -> NoReturn:
 
 def _not_found(message: str) -> NoReturn:
     raise AppError(code="not_found", message=message, status_code=status.HTTP_404_NOT_FOUND)
+
+
+def _distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance used for authoritative delivery-radius checks."""
+
+    earth_radius_meters = 6_371_000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    haversine = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return 2 * earth_radius_meters * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))

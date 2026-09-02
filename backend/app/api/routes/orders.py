@@ -89,6 +89,8 @@ async def create_order(
         delivery_zone_id=payload.delivery_zone_id,
         contact_phone=payload.contact_phone,
         delivery_address=payload.delivery_address,
+        delivery_latitude=payload.delivery_latitude,
+        delivery_longitude=payload.delivery_longitude,
         entrance=payload.entrance,
         apartment=payload.apartment,
         floor=payload.floor,

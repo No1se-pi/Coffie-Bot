@@ -34,8 +34,8 @@ from app.models.orders import (
 from app.repositories.loyalty_v2 import PointLedgerRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.pricing import PricingRepository
-from app.security.rbac import Actor
 from app.schemas.orders import order_response
+from app.security.rbac import Actor
 from app.services.orders import OrderCreateCommand, OrderLineCommand, OrderService
 from app.services.pricing import CartPricingService
 
@@ -139,6 +139,8 @@ async def test_order_creation_is_idempotent_and_statuses_are_append_only() -> No
         delivery_zone_id=None,
         contact_phone="+79990000000",
         delivery_address=None,
+        delivery_latitude=None,
+        delivery_longitude=None,
         entrance=None,
         apartment=None,
         floor=None,

@@ -39,14 +39,20 @@ export function TelegramLogin({
     script.dataset.onauth = "window.__coffieTelegramAuth(user)";
     script.addEventListener("load", () => setWidgetReady(true));
     script.addEventListener("error", () =>
-      setError(new Error("Telegram Login не загрузился. Откройте приложение через бота.")),
+      setError(
+        new Error(
+          "Telegram Login не загрузился. Откройте приложение через бота.",
+        ),
+      ),
     );
     container.append(script);
     // Browser extensions and network filters can silently block the Telegram
     // iframe without firing a script error. Do not leave an unexplained blank.
     const timeout = window.setTimeout(() => {
       if (!container.querySelector("iframe")) {
-        setError(new Error("Telegram Login заблокирован браузером или расширением."));
+        setError(
+          new Error("Telegram Login заблокирован браузером или расширением."),
+        );
       }
     }, 5000);
     return () => {
@@ -66,7 +72,9 @@ export function TelegramLogin({
   return (
     <>
       <div className="telegram-login" ref={target} />
-      {!widgetReady && !error && <p className="muted">Загружаем Telegram Login…</p>}
+      {!widgetReady && !error && (
+        <p className="muted">Загружаем Telegram Login…</p>
+      )}
       {error && <ErrorState error={error} compact />}
       <a
         className="button button--primary telegram-login__fallback"

@@ -41,6 +41,8 @@ class OrderCreateRequest(ApiSchema):
     delivery_zone_id: UUID | None = None
     contact_phone: str = Field(min_length=8, max_length=32)
     delivery_address: str | None = Field(default=None, max_length=1_000)
+    delivery_latitude: float | None = Field(default=None, ge=-90, le=90)
+    delivery_longitude: float | None = Field(default=None, ge=-180, le=180)
     entrance: str | None = Field(default=None, max_length=32)
     apartment: str | None = Field(default=None, max_length=32)
     floor: str | None = Field(default=None, max_length=32)
@@ -81,6 +83,9 @@ class PickupLocationResponse(ApiSchema):
     opening_hours: dict[str, object]
     comment: str | None
     preparation_minutes: int
+    latitude: float | None
+    longitude: float | None
+    image_url: str | None
 
 
 class DeliveryZoneResponse(ApiSchema):
@@ -89,6 +94,10 @@ class DeliveryZoneResponse(ApiSchema):
     description: str | None
     fee_minor: int
     minimum_order_minor: int | None
+    location_id: UUID | None
+    center_latitude: float | None
+    center_longitude: float | None
+    radius_meters: int | None
 
 
 class OrderOptionsResponse(ApiSchema):
@@ -165,6 +174,8 @@ class OrderResponse(ApiSchema):
     status_version: int
     contact_phone: str
     delivery_address: str | None
+    delivery_latitude: float | None
+    delivery_longitude: float | None
     entrance: str | None
     apartment: str | None
     floor: str | None
@@ -210,6 +221,11 @@ def order_options_response(value: OrderOptions) -> OrderOptionsResponse:
                 opening_hours=location.opening_hours,
                 comment=location.pickup_comment,
                 preparation_minutes=location.preparation_minutes,
+                latitude=float(location.latitude) if location.latitude is not None else None,
+                longitude=float(location.longitude) if location.longitude is not None else None,
+                image_url=(
+                    f"/api/v1/media/{location.image_media_id}" if location.image_media_id else None
+                ),
             )
             for location in value.pickup_locations
         ],
@@ -220,10 +236,26 @@ def order_options_response(value: OrderOptions) -> OrderOptionsResponse:
                 description=zone.description,
                 fee_minor=zone.fee_minor,
                 minimum_order_minor=zone.minimum_order_minor,
+                location_id=zone.location_id,
+                center_latitude=_zone_coordinate(value, zone.location_id, "latitude"),
+                center_longitude=_zone_coordinate(value, zone.location_id, "longitude"),
+                radius_meters=zone.radius_meters,
             )
             for zone in value.delivery_zones
         ],
     )
+
+
+def _zone_coordinate(
+    options: OrderOptions, location_id: UUID | None, attribute: str
+) -> float | None:
+    if location_id is None:
+        return None
+    location = options.zone_locations.get(location_id)
+    if location is None:
+        return None
+    coordinate = getattr(location, attribute)
+    return float(coordinate) if coordinate is not None else None
 
 
 def order_response(
@@ -281,6 +313,12 @@ def order_response(
         status_version=order.status_version,
         contact_phone=order.contact_phone,
         delivery_address=order.delivery_address,
+        delivery_latitude=(
+            float(order.delivery_latitude) if order.delivery_latitude is not None else None
+        ),
+        delivery_longitude=(
+            float(order.delivery_longitude) if order.delivery_longitude is not None else None
+        ),
         entrance=order.entrance,
         apartment=order.apartment,
         floor=order.floor,

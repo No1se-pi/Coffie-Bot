@@ -118,6 +118,7 @@ class LocationResponse(ApiSchema):
     map_url: str | None
     latitude: float | None
     longitude: float | None
+    image_url: str | None = None
 
 
 class ContactsResponse(ApiSchema):
@@ -336,6 +337,7 @@ def _location_response(item: Location) -> LocationResponse:
         map_url=item.map_url,
         latitude=float(item.latitude) if item.latitude is not None else None,
         longitude=float(item.longitude) if item.longitude is not None else None,
+        image_url=_media_url(item.image_media_id),
     )
 
 

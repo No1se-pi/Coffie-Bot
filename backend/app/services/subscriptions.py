@@ -15,13 +15,14 @@ from app.core.errors import AppError
 from app.models.audit import AuditEvent
 from app.models.engagement import (
     CustomerPass,
+    PassPurchase,
     PassTemplate,
     PassTemplateCategory,
     PassTemplateItem,
     PassTemplateVenue,
     PassUsage,
 )
-from app.models.enums import AuditSeverity, PassStatus, PermissionCode, Role
+from app.models.enums import AuditSeverity, PassStatus, PaymentMethod, PermissionCode, Role
 from app.repositories.subscriptions import PassRecord, SubscriptionRepository, TemplateAccess
 from app.security.rbac import Actor
 
@@ -32,6 +33,8 @@ class TemplateCreateCommand:
     description: str
     total_uses: int
     validity_days: int
+    price_minor: int
+    purchase_enabled: bool
     image_media_id: UUID | None
     venue_ids: frozenset[UUID]
     category_ids: frozenset[UUID]
@@ -76,6 +79,8 @@ class SubscriptionService:
                 image_media_id=command.image_media_id,
                 total_uses=command.total_uses,
                 validity_days=command.validity_days,
+                price_minor=command.price_minor,
+                purchase_enabled=command.purchase_enabled,
                 is_active=True,
                 created_by_staff_id=_staff_id(actor),
             )
@@ -109,6 +114,122 @@ class SubscriptionService:
         if actor.role not in {Role.ADMIN, Role.OWNER, Role.STAFF}:
             _forbidden()
         return await self._repository.list_templates(active_only=active_only)
+
+    async def list_storefront(self, _actor: Actor) -> list[TemplateAccess]:
+        values = await self._repository.list_templates(active_only=True)
+        return [
+            value
+            for value in values
+            if value.template.purchase_enabled and value.template.price_minor >= 0
+        ]
+
+    async def purchase(
+        self,
+        actor: Actor,
+        *,
+        template_id: UUID,
+        payment_method: PaymentMethod,
+        idempotency_key: str,
+    ) -> PassPurchase:
+        request_hash = _hash({"template_id": template_id, "payment_method": payment_method.value})
+        async with self._repository.transaction():
+            await self._repository.acquire_lock(
+                "pass-purchase", f"{actor.user_id}:{idempotency_key}"
+            )
+            existing = await self._repository.find_purchase(actor.user_id, idempotency_key)
+            if existing is not None:
+                _check_hash(existing.request_hash, request_hash)
+                return existing
+            template = await self._repository.get_template(template_id, for_update=True)
+            if template is None or not template.is_active or not template.purchase_enabled:
+                _not_found("Абонемент недоступен для покупки")
+            purchase = PassPurchase(
+                id=uuid4(),
+                template_id=template.id,
+                user_id=actor.user_id,
+                name_snapshot=template.name,
+                price_minor=template.price_minor,
+                payment_method=payment_method,
+                status="pending",
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+            self._repository.add_all(
+                [
+                    purchase,
+                    _audit(
+                        actor,
+                        "subscription.purchase_created",
+                        "pass_purchase",
+                        purchase.id,
+                        subject=actor.user_id,
+                    ),
+                ]
+            )
+            await self._repository.flush()
+            return purchase
+
+    async def list_my_purchases(self, actor: Actor) -> list[PassPurchase]:
+        return await self._repository.list_purchases(user_id=actor.user_id)
+
+    async def list_pending_purchases(self, actor: Actor) -> list[PassPurchase]:
+        if not actor.can(PermissionCode.SUBSCRIPTIONS_MANAGE):
+            _forbidden()
+        return await self._repository.list_purchases(status="pending")
+
+    async def confirm_purchase(
+        self, actor: Actor, purchase_id: UUID, *, now: datetime | None = None
+    ) -> PassPurchase:
+        if not actor.can(PermissionCode.SUBSCRIPTIONS_MANAGE):
+            _forbidden()
+        current_time = now or datetime.now(UTC)
+        staff_id = _staff_id(actor)
+        async with self._repository.transaction():
+            purchase = await self._repository.get_purchase(purchase_id, for_update=True)
+            if purchase is None:
+                _not_found("Покупка абонемента не найдена")
+            if purchase.status == "paid":
+                return purchase
+            if purchase.status != "pending":
+                _conflict("pass_purchase_unavailable", "Покупку уже нельзя подтвердить")
+            template = await self._repository.get_template(purchase.template_id)
+            if template is None:
+                raise RuntimeError("Pass purchase references a missing template")
+            customer_pass = CustomerPass(
+                id=uuid4(),
+                template_id=template.id,
+                user_id=purchase.user_id,
+                name_snapshot=purchase.name_snapshot,
+                description_snapshot=template.description,
+                image_media_id_snapshot=template.image_media_id,
+                total_uses=template.total_uses,
+                remaining_uses=template.total_uses,
+                status=PassStatus.ACTIVE,
+                issued_at=current_time,
+                expires_at=current_time + timedelta(days=template.validity_days),
+                issued_by_staff_id=staff_id,
+                idempotency_key=f"purchase:{purchase.id}",
+                request_hash=purchase.request_hash,
+            )
+            self._repository.add_all([customer_pass])
+            await self._repository.flush()
+            purchase.status = "paid"
+            purchase.customer_pass_id = customer_pass.id
+            purchase.confirmed_by_staff_id = staff_id
+            purchase.paid_at = current_time
+            self._repository.add_all(
+                [
+                    _audit(
+                        actor,
+                        "subscription.purchase_confirmed",
+                        "pass_purchase",
+                        purchase.id,
+                        subject=purchase.user_id,
+                    )
+                ]
+            )
+            await self._repository.flush()
+            return purchase
 
     async def archive_template(self, actor: Actor, template_id: UUID) -> TemplateAccess:
         _require_admin(actor)

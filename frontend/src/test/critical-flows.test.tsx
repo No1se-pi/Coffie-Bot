@@ -597,6 +597,8 @@ describe("critical Mini App flows", () => {
   });
 
   it("centers an active reward QR in a full-width redemption row", async () => {
+    vi.spyOn(coffeeApi, "getMyPasses").mockResolvedValue({ items: [] });
+    vi.spyOn(coffeeApi, "getMyPassPurchases").mockResolvedValue({ items: [] });
     vi.spyOn(coffeeApi, "getRewards").mockResolvedValue({
       items: [
         {

@@ -9,6 +9,8 @@ import {
   MorePage,
   PostPurchasePage,
   RewardsPage,
+  RestaurantsPage,
+  VenueDetailPage,
 } from "./pages/customer";
 import { LoyaltyPage } from "./pages/loyalty";
 import {
@@ -86,6 +88,11 @@ export default function App() {
                   <Route path="loyalty" element={<LoyaltyPage />} />
                   <Route path="profile" element={<LoyaltyPage />} />
                   <Route path="menu" element={<MenuPage />} />
+                  <Route path="restaurants" element={<RestaurantsPage />} />
+                  <Route
+                    path="restaurants/:venueId"
+                    element={<VenueDetailPage />}
+                  />
                   <Route path="cart" element={<CartPage />} />
                   <Route path="checkout" element={<CheckoutPage />} />
                   <Route path="orders" element={<OrdersPage />} />

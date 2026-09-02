@@ -488,6 +488,8 @@ export interface OrderCreateRequest {
   delivery_zone_id: string | null;
   contact_phone: string;
   delivery_address: string | null;
+  delivery_latitude: number | null;
+  delivery_longitude: number | null;
   entrance: string | null;
   apartment: string | null;
   floor: string | null;
@@ -511,6 +513,9 @@ export interface OrderOptions {
     opening_hours: Record<string, unknown>;
     comment: string | null;
     preparation_minutes: number;
+    latitude: number | null;
+    longitude: number | null;
+    image_url: string | null;
   }>;
   delivery_zones: Array<{
     id: string;
@@ -518,6 +523,10 @@ export interface OrderOptions {
     description: string | null;
     fee_minor: number;
     minimum_order_minor: number | null;
+    location_id: string | null;
+    center_latitude: number | null;
+    center_longitude: number | null;
+    radius_meters: number | null;
   }>;
 }
 
@@ -529,6 +538,8 @@ export interface CustomerOrder {
   status_version: number;
   contact_phone: string;
   delivery_address: string | null;
+  delivery_latitude: number | null;
+  delivery_longitude: number | null;
   entrance: string | null;
   apartment: string | null;
   floor: string | null;
@@ -677,6 +688,8 @@ export interface AdminDeliveryZone {
   description: string | null;
   fee_minor: number;
   minimum_order_minor: number | null;
+  location_id: string | null;
+  radius_meters: number | null;
   is_active: boolean;
   sort_order: number;
   archived: boolean;
@@ -692,6 +705,9 @@ export interface AdminFulfillmentLocation {
   address: string;
   phone: string | null;
   map_url: string | null;
+  image_media_id: string | null;
+  latitude: number | null;
+  longitude: number | null;
   timezone: string;
   is_active: boolean;
   pickup_enabled: boolean;
@@ -713,6 +729,9 @@ export interface ContactLocation {
   hours: string;
   phone?: string | null;
   map_url?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  image_url?: string | null;
 }
 
 export interface ContactsData {
@@ -1187,11 +1206,27 @@ export interface PassTemplate {
   image_media_id: string | null;
   total_uses: number;
   validity_days: number;
+  price_minor: number;
+  purchase_enabled: boolean;
   venue_ids: string[];
   category_ids: string[];
   item_ids: string[];
   is_active: boolean;
   created_at: string;
+}
+
+export interface PassPurchase {
+  id: string;
+  number: number;
+  template_id: string;
+  user_id: string;
+  name: string;
+  price_minor: number;
+  payment_method: "cash" | "card_on_receipt";
+  status: "pending" | "paid" | "cancelled";
+  customer_pass_id: string | null;
+  created_at: string;
+  paid_at: string | null;
 }
 
 export type CustomerPassStatus =

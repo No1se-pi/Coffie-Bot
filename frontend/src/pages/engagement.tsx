@@ -8,7 +8,7 @@ import type {
   ReviewStatus,
 } from "../api/types";
 import { useResource } from "../hooks/useResource";
-import { formatDateTime } from "../utils/format";
+import { formatDateTime, formatMoney } from "../utils/format";
 import {
   Badge,
   Button,
@@ -173,6 +173,7 @@ export function MySubscriptionsPage() {
 
 export function MySubscriptionsSection() {
   const resource = useResource(coffeeApi.getMyPasses);
+  const purchases = useResource(coffeeApi.getMyPassPurchases);
   return (
     <section aria-labelledby="subscriptions-heading">
       <div className="section-heading">
@@ -185,6 +186,20 @@ export function MySubscriptionsSection() {
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
       )}
+      {(purchases.data?.items ?? [])
+        .filter((purchase) => purchase.status === "pending")
+        .map((purchase) => (
+          <Panel key={purchase.id}>
+            <div className="row-between">
+              <h2>{purchase.name}</h2>
+              <Badge tone="warning">Ожидает оплаты</Badge>
+            </div>
+            <p>
+              Номер покупки: <strong>{purchase.number}</strong>
+            </p>
+            <p>{formatMoney(purchase.price_minor)} · оплата на точке</p>
+          </Panel>
+        ))}
       {resource.data &&
         (resource.data.items.length ? (
           <div className="card-list">
@@ -386,12 +401,16 @@ export function StaffPassPanel({
 
 export function AdminSubscriptionsPage() {
   const templates = useResource(() => coffeeApi.getPassTemplates(false));
+  const purchases = useResource(coffeeApi.getPendingPassPurchases);
   const venues = useResource(coffeeApi.getVenues);
   const menu = useResource(coffeeApi.getMenu);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [uses, setUses] = useState(20);
   const [days, setDays] = useState(90);
+  const [priceMinor, setPriceMinor] = useState(0);
+  const [purchaseEnabled, setPurchaseEnabled] = useState(true);
+  const [imageMediaId, setImageMediaId] = useState<string | null>(null);
   const [venueIds, setVenueIds] = useState<string[]>([]);
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [itemIds, setItemIds] = useState<string[]>([]);
@@ -406,9 +425,11 @@ export function AdminSubscriptionsPage() {
       await coffeeApi.createPassTemplate({
         name,
         description,
-        image_media_id: null,
+        image_media_id: imageMediaId,
         total_uses: uses,
         validity_days: days,
+        price_minor: priceMinor,
+        purchase_enabled: purchaseEnabled,
         venue_ids: venueIds,
         category_ids: categoryIds,
         item_ids: itemIds,
@@ -418,6 +439,7 @@ export function AdminSubscriptionsPage() {
       setVenueIds([]);
       setCategoryIds([]);
       setItemIds([]);
+      setImageMediaId(null);
       await templates.reload();
     } finally {
       setBusy(false);
@@ -466,6 +488,38 @@ export function AdminSubscriptionsPage() {
               min={1}
               value={days}
               onChange={(event) => setDays(Number(event.target.value))}
+            />
+          </Field>
+          <Field label="Цена, ₽">
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={priceMinor / 100}
+              onChange={(event) =>
+                setPriceMinor(Math.round(Number(event.target.value) * 100))
+              }
+            />
+          </Field>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={purchaseEnabled}
+              onChange={(event) => setPurchaseEnabled(event.target.checked)}
+            />
+            <span>Показывать в меню и разрешить оформление</span>
+          </label>
+          <Field label="Обложка абонемента">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                void coffeeApi
+                  .uploadAdminMedia(file, "pass_template")
+                  .then((media) => setImageMediaId(media.id));
+              }}
             />
           </Field>
           <Field label="Заведения (пусто — все)">
@@ -534,6 +588,44 @@ export function AdminSubscriptionsPage() {
         </form>
       </Panel>
       <Panel>
+        <h2>Ожидают оплаты на точке</h2>
+        {purchases.loading && <Loader />}
+        {purchases.error && (
+          <ErrorState
+            error={purchases.error}
+            onRetry={purchases.reload}
+            compact
+          />
+        )}
+        {(purchases.data?.items ?? []).map((purchase) => (
+          <div className="order-line-snapshot" key={purchase.id}>
+            <span>
+              <strong>
+                №{purchase.number} · {purchase.name}
+              </strong>
+              <small>
+                {formatMoney(purchase.price_minor)} · клиент {purchase.user_id}
+              </small>
+            </span>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void coffeeApi
+                  .confirmPassPurchase(purchase.id)
+                  .then(() => purchases.reload())
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Оплата получена
+            </Button>
+          </div>
+        ))}
+        {!purchases.loading && !purchases.data?.items.length && (
+          <p className="muted">Новых покупок нет.</p>
+        )}
+      </Panel>
+      <Panel>
         <h2>Выдать клиенту</h2>
         <form className="form" onSubmit={(event) => void issue(event)}>
           <Field label="UUID клиента">
@@ -578,6 +670,12 @@ export function AdminSubscriptionsPage() {
             <small>
               {value.total_uses} использований · {value.validity_days} дней
             </small>
+            <strong>{formatMoney(value.price_minor)}</strong>
+            <Badge tone={value.purchase_enabled ? "success" : "neutral"}>
+              {value.purchase_enabled
+                ? "Продаётся в меню"
+                : "Только ручная выдача"}
+            </Badge>
             {value.is_active && (
               <Button
                 variant="secondary"

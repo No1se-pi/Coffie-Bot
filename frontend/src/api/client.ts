@@ -78,6 +78,7 @@ import type {
   TelegramWebLoginData,
   PendingTipProfile,
   PassTemplate,
+  PassPurchase,
   PassUsage,
   PublicReview,
   ReviewStatus,
@@ -1327,7 +1328,12 @@ export const coffeeApi = {
   },
   uploadAdminMedia: async (
     file: File,
-    kind: "menu_category" | "menu_item" | "promotion",
+    kind:
+      | "menu_category"
+      | "menu_item"
+      | "promotion"
+      | "location"
+      | "pass_template",
   ) => {
     validateMediaFile(file);
     if (isDemoMode) return Promise.resolve({ id: uuid(), url: "" });
@@ -1496,6 +1502,9 @@ export const coffeeApi = {
         address: location.address,
         phone: location.phone,
         map_url: location.map_url,
+        image_media_id: location.image_media_id,
+        latitude: location.latitude,
+        longitude: location.longitude,
         is_active: location.is_active,
         pickup_enabled: location.pickup_enabled,
         consolidation_enabled: location.consolidation_enabled,
@@ -1634,6 +1643,33 @@ export const coffeeApi = {
     }),
   getMyPasses: (): Promise<{ items: CustomerPass[] }> =>
     isDemoMode ? Promise.resolve({ items: [] }) : request("/me/subscriptions"),
+  getSubscriptionProducts: (): Promise<{ items: PassTemplate[] }> =>
+    isDemoMode
+      ? Promise.resolve({ items: [] })
+      : request("/subscription-products"),
+  purchaseSubscription: (
+    templateId: string,
+    paymentMethod: "cash" | "card_on_receipt",
+    idempotencyKey = uuid(),
+  ): Promise<PassPurchase> =>
+    request("/subscription-purchases", {
+      method: "POST",
+      body: jsonBody({
+        template_id: templateId,
+        payment_method: paymentMethod,
+      }),
+      idempotencyKey,
+    }),
+  getMyPassPurchases: (): Promise<{ items: PassPurchase[] }> =>
+    isDemoMode
+      ? Promise.resolve({ items: [] })
+      : request("/me/subscription-purchases"),
+  getPendingPassPurchases: (): Promise<{ items: PassPurchase[] }> =>
+    request("/staff/subscription-purchases"),
+  confirmPassPurchase: (id: string): Promise<PassPurchase> =>
+    request(`/staff/subscription-purchases/${encodeURIComponent(id)}/confirm`, {
+      method: "POST",
+    }),
   getCustomerPasses: (userId: string): Promise<{ items: CustomerPass[] }> =>
     request(`/staff/customers/${encodeURIComponent(userId)}/subscriptions`),
   usePass: (
@@ -1657,6 +1693,8 @@ export const coffeeApi = {
     image_media_id: string | null;
     total_uses: number;
     validity_days: number;
+    price_minor: number;
+    purchase_enabled: boolean;
     venue_ids: string[];
     category_ids: string[];
     item_ids: string[];

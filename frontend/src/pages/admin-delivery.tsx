@@ -19,12 +19,15 @@ import {
 } from "../components/ui";
 import { useResource } from "../hooks/useResource";
 import { formatMoney, rublesToMinor } from "../utils/format";
+import { DeliveryMap } from "../components/DeliveryMap";
 
 const emptyZone: AdminDeliveryZoneDraft = {
   name: "",
   description: null,
   fee_minor: 0,
   minimum_order_minor: null,
+  location_id: null,
+  radius_meters: null,
   is_active: true,
   sort_order: 0,
 };
@@ -36,6 +39,9 @@ const emptyLocation: AdminFulfillmentLocationDraft = {
   address: "",
   phone: null,
   map_url: null,
+  image_media_id: null,
+  latitude: null,
+  longitude: null,
   timezone: "Europe/Moscow",
   is_active: true,
   pickup_enabled: true,
@@ -396,6 +402,61 @@ export function AdminDeliveryPage() {
                   }
                 />
               </Field>
+              <div className="form-grid">
+                <Field label="Широта">
+                  <input
+                    type="number"
+                    step="0.000001"
+                    min={-90}
+                    max={90}
+                    value={newLocation.latitude ?? ""}
+                    onChange={(event) =>
+                      setNewLocation({
+                        ...newLocation,
+                        latitude: event.target.value
+                          ? Number(event.target.value)
+                          : null,
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Долгота">
+                  <input
+                    type="number"
+                    step="0.000001"
+                    min={-180}
+                    max={180}
+                    value={newLocation.longitude ?? ""}
+                    onChange={(event) =>
+                      setNewLocation({
+                        ...newLocation,
+                        longitude: event.target.value
+                          ? Number(event.target.value)
+                          : null,
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+              <DeliveryMap
+                marker={
+                  newLocation.latitude !== null &&
+                  newLocation.longitude !== null
+                    ? {
+                        latitude: newLocation.latitude,
+                        longitude: newLocation.longitude,
+                      }
+                    : null
+                }
+                markerLabel="Новая точка"
+                onMarkerChange={(point) =>
+                  setNewLocation({
+                    ...newLocation,
+                    latitude: point.latitude,
+                    longitude: point.longitude,
+                  })
+                }
+              />
               <div className="action-row">
                 <Button
                   type="submit"
@@ -434,6 +495,8 @@ export function AdminDeliveryPage() {
                               description: value.description,
                               fee_minor: value.fee_minor,
                               minimum_order_minor: value.minimum_order_minor,
+                              location_id: value.location_id,
+                              radius_meters: value.radius_meters,
                               is_active: value.is_active,
                               sort_order: value.sort_order,
                             });
@@ -518,6 +581,66 @@ export function AdminDeliveryPage() {
                   }
                 />
               </Field>
+              <Field label="Центр зоны">
+                <select
+                  value={zoneDraft.location_id ?? ""}
+                  onChange={(event) =>
+                    setZoneDraft({
+                      ...zoneDraft,
+                      location_id: event.target.value || null,
+                      radius_meters: event.target.value
+                        ? (zoneDraft.radius_meters ?? 3000)
+                        : null,
+                    })
+                  }
+                >
+                  <option value="">Без проверки по карте</option>
+                  {resource.data.locations
+                    .filter(
+                      (location) =>
+                        location.latitude !== null &&
+                        location.longitude !== null,
+                    )
+                    .map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              {zoneDraft.location_id && (
+                <Field label="Радиус доставки, м">
+                  <input
+                    type="number"
+                    min={100}
+                    max={100000}
+                    step={100}
+                    value={zoneDraft.radius_meters ?? 3000}
+                    onChange={(event) =>
+                      setZoneDraft({
+                        ...zoneDraft,
+                        radius_meters: Number(event.target.value),
+                      })
+                    }
+                  />
+                </Field>
+              )}
+              {(() => {
+                const center = resource.data.locations.find(
+                  (location) => location.id === zoneDraft.location_id,
+                );
+                return center?.latitude !== null &&
+                  center?.latitude !== undefined &&
+                  center.longitude !== null ? (
+                  <DeliveryMap
+                    center={{
+                      latitude: center.latitude,
+                      longitude: center.longitude,
+                    }}
+                    radiusMeters={zoneDraft.radius_meters}
+                  />
+                ) : null;
+              })()}
               <div className="action-row">
                 <Button type="submit" disabled={saving}>
                   {zone ? "Сохранить" : "Добавить зону"}
@@ -555,6 +678,7 @@ function LocationEditor({
   venues: Venue[];
 }) {
   const [draft, setDraft] = useState(value);
+  const [uploading, setUploading] = useState(false);
   useEffect(() => setDraft(value), [value]);
   return (
     <div className="delivery-location">
@@ -610,6 +734,78 @@ function LocationEditor({
           />
         </Field>
       </div>
+      <div className="form-grid">
+        <Field label="Широта">
+          <input
+            type="number"
+            step="0.000001"
+            min={-90}
+            max={90}
+            value={draft.latitude ?? ""}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                latitude: event.target.value
+                  ? Number(event.target.value)
+                  : null,
+              })
+            }
+          />
+        </Field>
+        <Field label="Долгота">
+          <input
+            type="number"
+            step="0.000001"
+            min={-180}
+            max={180}
+            value={draft.longitude ?? ""}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                longitude: event.target.value
+                  ? Number(event.target.value)
+                  : null,
+              })
+            }
+          />
+        </Field>
+      </div>
+      <DeliveryMap
+        marker={
+          draft.latitude !== null && draft.longitude !== null
+            ? { latitude: draft.latitude, longitude: draft.longitude }
+            : null
+        }
+        markerLabel={draft.name}
+        onMarkerChange={(point) =>
+          setDraft({
+            ...draft,
+            latitude: point.latitude,
+            longitude: point.longitude,
+          })
+        }
+      />
+      <Field label="Фотография точки" hint="JPEG, PNG или WebP, до 5 МБ">
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          disabled={disabled || uploading}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            setUploading(true);
+            void coffeeApi
+              .uploadAdminMedia(file, "location")
+              .then((media) =>
+                setDraft((current) => ({
+                  ...current,
+                  image_media_id: media.id,
+                })),
+              )
+              .finally(() => setUploading(false));
+          }}
+        />
+      </Field>
       <label>
         <input
           type="checkbox"

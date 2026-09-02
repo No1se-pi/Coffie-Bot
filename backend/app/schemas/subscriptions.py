@@ -5,8 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.engagement import CustomerPass, PassUsage
-from app.models.enums import PassStatus
+from app.models.engagement import CustomerPass, PassPurchase, PassUsage
+from app.models.enums import PassStatus, PaymentMethod
 from app.repositories.subscriptions import PassRecord, TemplateAccess
 from app.services.subscriptions import PassOutcome, UsageOutcome
 
@@ -21,6 +21,8 @@ class PassTemplateCreateRequest(ApiSchema):
     image_media_id: UUID | None = None
     total_uses: int = Field(ge=1, le=10000)
     validity_days: int = Field(ge=1, le=3650)
+    price_minor: int = Field(default=0, ge=0)
+    purchase_enabled: bool = False
     venue_ids: set[UUID] = Field(default_factory=set)
     category_ids: set[UUID] = Field(default_factory=set)
     item_ids: set[UUID] = Field(default_factory=set)
@@ -47,6 +49,8 @@ class PassTemplateResponse(ApiSchema):
     image_media_id: UUID | None
     total_uses: int
     validity_days: int
+    price_minor: int
+    purchase_enabled: bool
     venue_ids: list[UUID]
     category_ids: list[UUID]
     item_ids: list[UUID]
@@ -89,6 +93,29 @@ class CustomerPassListResponse(ApiSchema):
     items: list[CustomerPassResponse]
 
 
+class PassPurchaseCreateRequest(ApiSchema):
+    template_id: UUID
+    payment_method: PaymentMethod = PaymentMethod.CARD_ON_RECEIPT
+
+
+class PassPurchaseResponse(ApiSchema):
+    id: UUID
+    number: int
+    template_id: UUID
+    user_id: UUID
+    name: str
+    price_minor: int
+    payment_method: PaymentMethod
+    status: str
+    customer_pass_id: UUID | None
+    created_at: datetime
+    paid_at: datetime | None
+
+
+class PassPurchaseListResponse(ApiSchema):
+    items: list[PassPurchaseResponse]
+
+
 def template_response(value: TemplateAccess) -> PassTemplateResponse:
     template = value.template
     return PassTemplateResponse(
@@ -98,11 +125,29 @@ def template_response(value: TemplateAccess) -> PassTemplateResponse:
         image_media_id=template.image_media_id,
         total_uses=template.total_uses,
         validity_days=template.validity_days,
+        price_minor=template.price_minor,
+        purchase_enabled=template.purchase_enabled,
         venue_ids=sorted(value.venue_ids),
         category_ids=sorted(value.category_ids),
         item_ids=sorted(value.item_ids),
         is_active=template.is_active,
         created_at=template.created_at,
+    )
+
+
+def purchase_response(value: PassPurchase) -> PassPurchaseResponse:
+    return PassPurchaseResponse(
+        id=value.id,
+        number=value.number,
+        template_id=value.template_id,
+        user_id=value.user_id,
+        name=value.name_snapshot,
+        price_minor=value.price_minor,
+        payment_method=value.payment_method,
+        status=value.status,
+        customer_pass_id=value.customer_pass_id,
+        created_at=value.created_at,
+        paid_at=value.paid_at,
     )
 
 

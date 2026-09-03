@@ -198,7 +198,6 @@ export function StaffHomePage() {
   const resource = useResource(coffeeApi.getRecentOperations);
   return (
     <Page title="Рабочий экран" eyebrow="Быстрая операция">
-      <StaffLocationSelector />
       <Panel className="scanner-callout">
         <div className="scanner-callout__icon" aria-hidden="true">
           ▦
@@ -252,6 +251,7 @@ export function StaffHomePage() {
             />
           ))}
       </section>
+      <StaffLocationSelector />
     </Page>
   );
 }

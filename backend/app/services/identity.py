@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
@@ -31,6 +32,7 @@ from app.repositories.identity import (
     IdentityAccessRecord,
     RewardPageRecord,
 )
+from app.security.passwords import verify_password
 from app.security.rbac import resolve_permissions
 from app.security.sessions import IssuedSessionToken, issue_session_token
 from app.security.telegram import (
@@ -92,9 +94,17 @@ class IdentityRepositoryPort(Protocol):
         user_agent: str | None,
     ) -> None: ...
 
+    def record_password_auth_failure(
+        self, *, ip_address: str | None, user_agent: str | None
+    ) -> None: ...
+
     async def flush(self) -> None: ...
 
     async def get_identity_access(self, user_id: UUID) -> IdentityAccessRecord | None: ...
+
+    async def get_identity_access_by_telegram_id(
+        self, telegram_id: int
+    ) -> IdentityAccessRecord | None: ...
 
     async def get_card_view(self, user_id: UUID) -> CardViewRecord | None: ...
 
@@ -204,6 +214,94 @@ class IdentityService:
             user_agent=user_agent,
             now=current_time,
         )
+
+    async def authenticate_password(
+        self,
+        username: str,
+        password: str,
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        now: datetime | None = None,
+    ) -> AuthenticationResult:
+        """Issue a normal session for one explicitly configured admin account."""
+
+        configured_username = self._settings.admin_web_username
+        configured_hash = self._settings.admin_web_password_hash
+        telegram_id = self._settings.admin_web_telegram_id
+        # Always calculate the password hash when web auth is configured. This keeps
+        # an unknown login and a wrong password on the same expensive code path and
+        # avoids exposing the configured administrator name through response timing.
+        password_matches = (
+            verify_password(password, configured_hash.get_secret_value())
+            if configured_hash is not None
+            else False
+        )
+        username_matches = (
+            secrets.compare_digest(username.strip(), configured_username)
+            if configured_username is not None
+            else False
+        )
+        valid_credentials = username_matches and password_matches and telegram_id is not None
+        if not valid_credentials or telegram_id is None:
+            await self._record_password_auth_failure(ip_address, user_agent)
+            _raise_invalid_credentials()
+
+        current_time = _aware_now(now)
+        issued = issue_session_token(
+            ttl=timedelta(seconds=self._settings.session_ttl_seconds),
+            pepper=_session_pepper(self._settings),
+            now=current_time,
+        )
+        safe_ip = _truncate(ip_address, 45)
+        safe_user_agent = _truncate(user_agent, 512)
+        invalid_account = False
+        async with self._repository.transaction():
+            access = await self._repository.get_identity_access_by_telegram_id(telegram_id)
+            if (
+                access is None
+                or access.user.status is not UserStatus.ACTIVE
+                or access.staff is None
+                or access.staff.role not in {Role.ADMIN, Role.OWNER}
+            ):
+                invalid_account = True
+                self._repository.record_password_auth_failure(
+                    ip_address=safe_ip, user_agent=safe_user_agent
+                )
+                card = None
+            else:
+                card = await self._repository.get_card_view(access.user.id)
+                if card is None:
+                    raise RuntimeError("Configured web admin has no customer card")
+                self._repository.create_session(
+                    user_id=access.user.id,
+                    issued=issued,
+                    ip_address=safe_ip,
+                    user_agent=safe_user_agent,
+                )
+            await self._repository.flush()
+        if invalid_account or access is None or card is None:
+            await asyncio.sleep(0.15)
+            _raise_invalid_credentials()
+        return AuthenticationResult(
+            access_token=issued.raw_token,
+            expires_at=issued.expires_at,
+            registration=RegistrationResult(
+                identity=_identity_view(access), card=card, created=False
+            ),
+        )
+
+    async def _record_password_auth_failure(
+        self, ip_address: str | None, user_agent: str | None
+    ) -> None:
+        async with self._repository.transaction():
+            self._repository.record_password_auth_failure(
+                ip_address=_truncate(ip_address, 45),
+                user_agent=_truncate(user_agent, 512),
+            )
+            await self._repository.flush()
+        # Equalize the cheapest failure path and slow simple brute-force loops.
+        await asyncio.sleep(0.15)
 
     async def _authenticate_telegram_user(
         self,
@@ -496,4 +594,14 @@ def _raise_not_found(message: str) -> NoReturn:
         code=ErrorCode.NOT_FOUND,
         message=message,
         status_code=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _raise_invalid_credentials() -> NoReturn:
+    # Deliberately do not reveal whether the login, password, or configured
+    # Telegram account was the failing part.
+    raise AppError(
+        code="invalid_credentials",
+        message="Неверный логин или пароль",
+        status_code=status.HTTP_401_UNAUTHORIZED,
     )

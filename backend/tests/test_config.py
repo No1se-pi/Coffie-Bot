@@ -54,6 +54,23 @@ def test_production_accepts_non_placeholder_secrets() -> None:
     assert settings.telegram_init_data_ttl_seconds == 600
 
 
+def test_blank_optional_browser_login_values_disable_it() -> None:
+    settings = Settings(
+        admin_web_username="",
+        admin_web_password_hash="",
+        admin_web_telegram_id="",  # type: ignore[arg-type]
+    )
+
+    assert settings.admin_web_username is None
+    assert settings.admin_web_password_hash is None
+    assert settings.admin_web_telegram_id is None
+
+
+def test_browser_login_configuration_must_be_complete() -> None:
+    with pytest.raises(ValidationError, match="must be set together"):
+        Settings(admin_web_username="owner")
+
+
 def test_cors_origins_accept_comma_separated_environment_shape() -> None:
     settings = Settings(cors_origins="https://one.example, https://two.example")
 

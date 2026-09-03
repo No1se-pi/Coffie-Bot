@@ -109,7 +109,7 @@ describe("engagement workflows", () => {
       screen.getByLabelText("Конкретные позиции (пусто — все)"),
       "item-1",
     );
-    await user.click(screen.getByRole("button", { name: "Создать шаблон" }));
+    await user.click(screen.getByRole("button", { name: "Создать абонемент" }));
 
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith(

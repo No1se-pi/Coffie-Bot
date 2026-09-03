@@ -269,6 +269,27 @@ textarea {
   font: inherit;
   color: inherit;
 }
+input[type="checkbox"],
+input[type="radio"] {
+  width: 1.25rem;
+  min-height: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  flex: 0 0 auto;
+  accent-color: var(--color-primary);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 48px;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-bg));
+  font-weight: 700;
+}
 button,
 a {
   -webkit-tap-highlight-color: transparent;
@@ -581,6 +602,14 @@ a:focus-visible {
   display: grid;
   gap: 0.15rem;
 }
+.side-nav__section {
+  padding: 0.9rem 0.8rem 0.25rem;
+  color: rgb(255 255 255 / 52%);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
 .side-nav__item {
   min-height: 52px;
   padding: 0.7rem 0.8rem;
@@ -650,6 +679,68 @@ a:focus-visible {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.password-login {
+  display: grid;
+  gap: 0.75rem;
+  width: min(100%, 340px);
+  margin: 1.25rem auto 0.25rem;
+  text-align: left;
+}
+
+.password-login label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+
+.password-login input {
+  width: 100%;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: min(100%, 340px);
+  margin: 1.1rem auto;
+  color: var(--color-muted);
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--color-border);
+}
+
+.pass-card {
+  overflow: hidden;
+}
+
+.subscription-product__image {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border-radius: 14px;
+  object-fit: cover;
+}
+
+.pass-card__image {
+  width: calc(100% + 2rem);
+  height: clamp(150px, 38vw, 240px);
+  margin: -1rem -1rem 1rem;
+  object-fit: cover;
+  display: block;
+}
+
+.admin-image-preview {
+  width: 100%;
+  max-height: 240px;
+  margin-top: 0.65rem;
+  border-radius: 16px;
+  object-fit: cover;
 }
 
 .delivery-map {

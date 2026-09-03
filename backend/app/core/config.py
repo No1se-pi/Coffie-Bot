@@ -52,6 +52,9 @@ class Settings(BaseSettings):
 
     session_ttl_seconds: int = Field(default=900, ge=300, le=86_400)
     session_token_pepper: SecretStr | None = None
+    admin_web_username: str | None = Field(default=None, min_length=3, max_length=64)
+    admin_web_password_hash: SecretStr | None = None
+    admin_web_telegram_id: int | None = Field(default=None, gt=0)
     dev_auth_enabled: bool = False
     dev_auth_telegram_id: int | None = Field(default=None, gt=0)
     cors_origins: list[str] = Field(default_factory=list)
@@ -69,6 +72,16 @@ class Settings(BaseSettings):
         if stripped.startswith("["):
             return json.loads(stripped)
         return [item.strip() for item in stripped.split(",") if item.strip()]
+
+    @field_validator(
+        "admin_web_username",
+        "admin_web_password_hash",
+        "admin_web_telegram_id",
+        mode="before",
+    )
+    @classmethod
+    def blank_optional_web_auth(cls, value: Any) -> Any:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
     def validate_security_boundaries(self) -> Settings:
@@ -112,6 +125,24 @@ class Settings(BaseSettings):
         if self.dev_auth_enabled and self.dev_auth_telegram_id is None:
             msg = "DEV_AUTH_TELEGRAM_ID is required when DEV_AUTH_ENABLED=true"
             raise ValueError(msg)
+        web_auth_values = (
+            self.admin_web_username,
+            self.admin_web_password_hash,
+            self.admin_web_telegram_id,
+        )
+        if any(value is not None for value in web_auth_values) and not all(
+            value is not None for value in web_auth_values
+        ):
+            msg = (
+                "ADMIN_WEB_USERNAME, ADMIN_WEB_PASSWORD_HASH and "
+                "ADMIN_WEB_TELEGRAM_ID must be set together"
+            )
+            raise ValueError(msg)
+        if self.admin_web_password_hash is not None:
+            encoded = self.admin_web_password_hash.get_secret_value()
+            if not encoded.startswith("pbkdf2_sha256:"):
+                msg = "ADMIN_WEB_PASSWORD_HASH must be a PBKDF2-SHA256 hash"
+                raise ValueError(msg)
         return self
 
 

@@ -924,6 +924,7 @@ describe("critical Mini App flows", () => {
           setActiveRole: vi.fn(),
           retry: vi.fn(),
           loginWithTelegram: vi.fn().mockResolvedValue(undefined),
+          loginWithPassword: vi.fn().mockResolvedValue(undefined),
           logout: vi.fn().mockResolvedValue(undefined),
         }}
       >
@@ -940,6 +941,10 @@ describe("critical Mini App flows", () => {
     expect(container.querySelector(".topbar .avatar")).toHaveAttribute(
       "src",
       "https://telegram.example/avatar.jpg",
+    );
+    expect(screen.getByRole("link", { name: "Карта" })).toHaveAttribute(
+      "href",
+      "/card",
     );
   });
 
@@ -1507,6 +1512,7 @@ describe("critical Mini App flows", () => {
           setActiveRole: vi.fn(),
           retry: vi.fn(),
           loginWithTelegram: vi.fn().mockResolvedValue(undefined),
+          loginWithPassword: vi.fn().mockResolvedValue(undefined),
           logout: vi.fn().mockResolvedValue(undefined),
         }}
       >

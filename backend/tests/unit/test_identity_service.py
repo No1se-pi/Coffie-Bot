@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.core.config import AppEnvironment, Settings
-from app.models.access import User
+from app.models.access import StaffMember, User
 from app.models.cards import UserCard
 from app.models.content import Venue
 from app.models.enums import CardStatus, LoyaltyOperationType, RewardStatus, Role, UserStatus
@@ -20,6 +20,7 @@ from app.repositories.identity import (
     IdentityAccessRecord,
     RewardPageRecord,
 )
+from app.security.passwords import hash_password
 from app.security.sessions import IssuedSessionToken
 from app.security.telegram import TelegramUserData, VerifiedTelegramInitData
 from app.services.identity import IdentityService
@@ -46,12 +47,14 @@ class FakeIdentityRepository:
     def __init__(self, *, welcome_bonus: int = 10) -> None:
         self.user: User | None = None
         self.card_view: CardViewRecord | None = None
+        self.staff: StaffMember | None = None
         self.settings = _loyalty_settings(welcome_bonus)
         self.initialize_calls: list[dict[str, Any]] = []
         self.issued_sessions: list[IssuedSessionToken] = []
         self.commits = 0
         self.rollbacks = 0
         self.revoked: list[tuple[UUID, UUID]] = []
+        self.password_failures = 0
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
@@ -146,6 +149,11 @@ class FakeIdentityRepository:
         assert len(user_agent or "") <= 512
         self.issued_sessions.append(issued)
 
+    def record_password_auth_failure(
+        self, *, ip_address: str | None, user_agent: str | None
+    ) -> None:
+        self.password_failures += 1
+
     async def flush(self) -> None:
         return None
 
@@ -153,6 +161,13 @@ class FakeIdentityRepository:
         if self.user is None or self.user.id != user_id:
             return None
         return IdentityAccessRecord(user=self.user, staff=None)
+
+    async def get_identity_access_by_telegram_id(
+        self, telegram_id: int
+    ) -> IdentityAccessRecord | None:
+        if self.user is None or self.user.telegram_id != telegram_id:
+            return None
+        return IdentityAccessRecord(user=self.user, staff=self.staff)
 
     async def get_card_view(self, user_id: UUID) -> CardViewRecord | None:
         if self.user is None or self.user.id != user_id:
@@ -289,6 +304,54 @@ async def test_authentication_uses_verifier_and_stores_only_issued_hash() -> Non
     assert repository.issued_sessions[0].raw_token == result.access_token
     assert repository.issued_sessions[0].token_hash != result.access_token
     assert result.registration.identity.user.telegram_id == 42
+
+
+@pytest.mark.asyncio
+async def test_password_auth_uses_configured_active_admin_and_normal_session() -> None:
+    repository = FakeIdentityRepository()
+    await IdentityService(settings=_settings(), repository=repository).register_telegram_user(
+        _telegram_user(), now=NOW
+    )
+    assert repository.user is not None
+    repository.staff = StaffMember(
+        id=uuid4(),
+        user_id=repository.user.id,
+        role=Role.OWNER,
+        is_active=True,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    service = IdentityService(
+        settings=_settings(
+            admin_web_username="owner",
+            admin_web_password_hash=hash_password("strong-test-password"),
+            admin_web_telegram_id=42,
+        ),
+        repository=repository,
+    )
+
+    result = await service.authenticate_password("owner", "strong-test-password", now=NOW)
+
+    assert result.registration.identity.role is Role.OWNER
+    assert result.access_token.startswith("cbs_")
+    assert repository.issued_sessions[-1].token_hash != result.access_token
+
+
+@pytest.mark.asyncio
+async def test_password_auth_does_not_reveal_which_credential_failed() -> None:
+    repository = FakeIdentityRepository()
+    service = IdentityService(
+        settings=_settings(
+            admin_web_username="owner",
+            admin_web_password_hash=hash_password("strong-test-password"),
+            admin_web_telegram_id=42,
+        ),
+        repository=repository,
+    )
+
+    with pytest.raises(Exception, match="Неверный логин или пароль"):
+        await service.authenticate_password("owner", "wrong-password", now=NOW)
+    assert repository.password_failures == 1
 
 
 @pytest.mark.asyncio

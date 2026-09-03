@@ -11,6 +11,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.access import StaffMember, User
 from app.models.audit import AuditEvent
@@ -197,6 +198,22 @@ class OrderRepository:
                 StaffMember.archived_at.is_(None),
             )
             .order_by(StaffMember.display_name, User.first_name, StaffMember.id)
+        )
+        return [(staff, user) for staff, user in rows.all()]
+
+    async def list_active_staff_users(self) -> list[tuple[StaffMember, User]]:
+        """Load active operational staff and their permission overrides for alerts."""
+
+        rows = await self._session.execute(
+            select(StaffMember, User)
+            .join(User, User.id == StaffMember.user_id)
+            .options(selectinload(StaffMember.permissions))
+            .where(
+                StaffMember.role.in_({Role.STAFF, Role.ADMIN, Role.OWNER}),
+                StaffMember.is_active.is_(True),
+                StaffMember.archived_at.is_(None),
+                User.telegram_id.is_not(None),
+            )
         )
         return [(staff, user) for staff, user in rows.all()]
 

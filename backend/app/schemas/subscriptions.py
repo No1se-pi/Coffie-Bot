@@ -28,6 +28,10 @@ class PassTemplateCreateRequest(ApiSchema):
     item_ids: set[UUID] = Field(default_factory=set)
 
 
+class PassTemplateUpdateRequest(PassTemplateCreateRequest):
+    """All editable fields are replaced together to keep scope changes explicit."""
+
+
 class PassIssueRequest(ApiSchema):
     user_id: UUID
     template_id: UUID
@@ -47,6 +51,7 @@ class PassTemplateResponse(ApiSchema):
     name: str
     description: str
     image_media_id: UUID | None
+    image_url: str | None
     total_uses: int
     validity_days: int
     price_minor: int
@@ -80,6 +85,7 @@ class CustomerPassResponse(ApiSchema):
     name: str
     description: str
     image_media_id: UUID | None
+    image_url: str | None
     total_uses: int
     remaining_uses: int
     status: PassStatus
@@ -123,6 +129,7 @@ def template_response(value: TemplateAccess) -> PassTemplateResponse:
         name=template.name,
         description=template.description,
         image_media_id=template.image_media_id,
+        image_url=(f"/api/v1/media/{template.image_media_id}" if template.image_media_id else None),
         total_uses=template.total_uses,
         validity_days=template.validity_days,
         price_minor=template.price_minor,
@@ -173,6 +180,11 @@ def pass_response(
         name=customer_pass.name_snapshot,
         description=customer_pass.description_snapshot,
         image_media_id=customer_pass.image_media_id_snapshot,
+        image_url=(
+            f"/api/v1/media/{customer_pass.image_media_id_snapshot}"
+            if customer_pass.image_media_id_snapshot
+            else None
+        ),
         total_uses=customer_pass.total_uses,
         remaining_uses=customer_pass.remaining_uses,
         status=effective_status,

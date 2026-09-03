@@ -218,6 +218,22 @@ def render_notification(
         text = f"Вам доступна награда: {name}." if name else "Вам доступна новая награда."
     elif event_type == "feedback.created":
         text = "Спасибо. Ваше обращение принято."
+    elif event_type in {"staff.order.created", "staff.order.cancelled"}:
+        order_number = _integer(payload.get("order_number"))
+        prefix = f"Заказ №{order_number}" if order_number else "Заказ"
+        text = (
+            f"{prefix}: новый заказ требует подтверждения."
+            if event_type == "staff.order.created"
+            else f"{prefix}: заказ отменён клиентом."
+        )
+    elif event_type in {"courier.order.available", "courier.order.assigned"}:
+        order_number = _integer(payload.get("order_number"))
+        prefix = f"Заказ №{order_number}" if order_number else "Заказ"
+        text = (
+            f"{prefix}: доступен новый заказ на доставку."
+            if event_type == "courier.order.available"
+            else f"{prefix}: вам назначена доставка."
+        )
     elif event_type.startswith("order."):
         order_number = _integer(payload.get("order_number"))
         label = {
@@ -251,11 +267,14 @@ def render_notification(
         else None
     )
     order_id = _short_text(payload.get("order_id"))
-    order_url = (
-        f"{webapp_url.rstrip('/')}/orders/{order_id}"
-        if webapp_url and order_id and event_type.startswith("order.")
-        else None
-    )
+    if webapp_url and order_id and event_type.startswith("staff.order."):
+        order_url = f"{webapp_url.rstrip('/')}/staff/orders"
+    elif webapp_url and order_id and event_type.startswith("courier.order."):
+        order_url = f"{webapp_url.rstrip('/')}/courier/mine"
+    elif webapp_url and order_id and event_type.startswith("order."):
+        order_url = f"{webapp_url.rstrip('/')}/orders/{order_id}"
+    else:
+        order_url = None
     return OutboundMessage(
         text=text,
         button_label=("Оценить бариста" if post_purchase_url else "Открыть приложение")

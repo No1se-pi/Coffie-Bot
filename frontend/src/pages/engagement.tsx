@@ -5,6 +5,7 @@ import type {
   BulkBonusPreview,
   CustomerPass,
   PublicReview,
+  PassTemplate,
   ReviewStatus,
 } from "../api/types";
 import { useResource } from "../hooks/useResource";
@@ -210,7 +211,7 @@ export function MySubscriptionsSection() {
         ) : (
           <EmptyState
             title="Абонементов пока нет"
-            text="Выданные администратором абонементы появятся здесь. Покупка в приложении пока недоступна."
+            text="Купленные или выданные администратором абонементы появятся здесь."
           />
         ))}
     </section>
@@ -225,7 +226,10 @@ function PassCard({
   action?: ReactNode;
 }) {
   return (
-    <Panel>
+    <Panel className="pass-card">
+      {value.image_url && (
+        <img className="pass-card__image" src={value.image_url} alt="" />
+      )}
       <div className="row-between">
         <h2>{value.name}</h2>
         <Badge tone={value.status === "active" ? "success" : "neutral"}>
@@ -418,11 +422,39 @@ export function AdminSubscriptionsPage() {
   const [templateId, setTemplateId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const resetForm = () => {
+    setEditingId(null);
+    setName("");
+    setDescription("");
+    setUses(20);
+    setDays(90);
+    setPriceMinor(0);
+    setPurchaseEnabled(true);
+    setVenueIds([]);
+    setCategoryIds([]);
+    setItemIds([]);
+    setImageMediaId(null);
+  };
+  const edit = (value: PassTemplate) => {
+    setEditingId(value.id);
+    setName(value.name);
+    setDescription(value.description);
+    setUses(value.total_uses);
+    setDays(value.validity_days);
+    setPriceMinor(value.price_minor);
+    setPurchaseEnabled(value.purchase_enabled);
+    setVenueIds(value.venue_ids);
+    setCategoryIds(value.category_ids);
+    setItemIds(value.item_ids);
+    setImageMediaId(value.image_media_id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const create = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     try {
-      await coffeeApi.createPassTemplate({
+      const payload = {
         name,
         description,
         image_media_id: imageMediaId,
@@ -433,13 +465,10 @@ export function AdminSubscriptionsPage() {
         venue_ids: venueIds,
         category_ids: categoryIds,
         item_ids: itemIds,
-      });
-      setName("");
-      setDescription("");
-      setVenueIds([]);
-      setCategoryIds([]);
-      setItemIds([]);
-      setImageMediaId(null);
+      };
+      if (editingId) await coffeeApi.updatePassTemplate(editingId, payload);
+      else await coffeeApi.createPassTemplate(payload);
+      resetForm();
       await templates.reload();
     } finally {
       setBusy(false);
@@ -458,7 +487,14 @@ export function AdminSubscriptionsPage() {
   return (
     <Page title="Абонементы" eyebrow="Без банковской подписки">
       <Panel>
-        <h2>Новый шаблон</h2>
+        <div className="section-heading">
+          <h2>{editingId ? "Редактирование абонемента" : "Новый абонемент"}</h2>
+          {editingId && (
+            <Button type="button" variant="ghost" onClick={resetForm}>
+              Отмена
+            </Button>
+          )}
+        </div>
         <form className="form" onSubmit={(event) => void create(event)}>
           <Field label="Название">
             <input
@@ -509,7 +545,10 @@ export function AdminSubscriptionsPage() {
             />
             <span>Показывать в меню и разрешить оформление</span>
           </label>
-          <Field label="Обложка абонемента">
+          <Field
+            label="Обложка абонемента"
+            hint="Рекомендуемый размер: 1200×800 px (3:2), JPG/PNG/WebP, до 5 МБ."
+          >
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
@@ -521,6 +560,13 @@ export function AdminSubscriptionsPage() {
                   .then((media) => setImageMediaId(media.id));
               }}
             />
+            {imageMediaId && (
+              <img
+                className="admin-image-preview admin-image-preview--wide"
+                src={`/api/v1/media/${imageMediaId}`}
+                alt="Предпросмотр обложки"
+              />
+            )}
           </Field>
           <Field label="Заведения (пусто — все)">
             <select
@@ -583,7 +629,7 @@ export function AdminSubscriptionsPage() {
             </select>
           </Field>
           <Button type="submit" disabled={busy}>
-            Создать шаблон
+            {editingId ? "Сохранить изменения" : "Создать абонемент"}
           </Button>
         </form>
       </Panel>
@@ -659,7 +705,10 @@ export function AdminSubscriptionsPage() {
       </Panel>
       <div className="card-list">
         {templates.data?.items.map((value) => (
-          <Panel key={value.id}>
+          <Panel key={value.id} className="pass-card">
+            {value.image_url && (
+              <img className="pass-card__image" src={value.image_url} alt="" />
+            )}
             <div className="row-between">
               <h2>{value.name}</h2>
               <Badge tone={value.is_active ? "success" : "neutral"}>
@@ -676,18 +725,33 @@ export function AdminSubscriptionsPage() {
                 ? "Продаётся в меню"
                 : "Только ручная выдача"}
             </Badge>
-            {value.is_active && (
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  void coffeeApi
-                    .archivePassTemplate(value.id)
-                    .then(() => templates.reload())
-                }
-              >
-                В архив
+            <div className="action-row">
+              <Button variant="secondary" onClick={() => edit(value)}>
+                Редактировать
               </Button>
-            )}
+              {value.is_active ? (
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    void coffeeApi
+                      .archivePassTemplate(value.id)
+                      .then(() => templates.reload())
+                  }
+                >
+                  В архив
+                </Button>
+              ) : (
+                <Button
+                  onClick={() =>
+                    void coffeeApi
+                      .restorePassTemplate(value.id)
+                      .then(() => templates.reload())
+                  }
+                >
+                  Вернуть из архива
+                </Button>
+              )}
+            </div>
           </Panel>
         ))}
       </div>

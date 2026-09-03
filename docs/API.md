@@ -40,6 +40,9 @@ Dangerous POST endpoints требуют `Idempotency-Key` (UUID, до 128 сим
 - `POST /auth/telegram/web` — Telegram Login Widget payload; отдельно
   проверяет Login Widget HMAC/TTL и выдаёт ту же opaque session. Этот
   endpoint не принимает Mini App `init_data`.
+- `POST /auth/password` — опциональный браузерный вход одного существующего
+  owner/admin, привязанного в окружении по Telegram ID; возвращает обычную
+  непрозрачную сессию и не принимает роль от клиента.
 - `POST /auth/logout` — отзывает текущую session.
 - `GET /me` — profile, роли и разрешения.
 - `GET /me/card` — active QR payload, короткий код, balance/progress.

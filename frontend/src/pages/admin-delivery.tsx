@@ -785,7 +785,10 @@ function LocationEditor({
           })
         }
       />
-      <Field label="Фотография точки" hint="JPEG, PNG или WebP, до 5 МБ">
+      <Field
+        label="Фотография точки"
+        hint="Рекомендуемый размер: 1600×900 px (16:9). JPEG, PNG или WebP, до 5 МБ"
+      >
         <input
           type="file"
           accept="image/jpeg,image/png,image/webp"

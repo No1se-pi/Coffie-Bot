@@ -1965,4 +1965,13 @@ describe("critical Mini App flows", () => {
     expect(readTheme()).toBe("anime");
     window.localStorage.removeItem("coffie.theme");
   });
+
+  it("persists the dark anime theme with a dark browser color scheme", () => {
+    applyTheme("anime-dark");
+
+    expect(document.documentElement.dataset.appTheme).toBe("anime-dark");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    expect(readTheme()).toBe("anime-dark");
+    window.localStorage.removeItem("coffie.theme");
+  });
 });

@@ -1,5 +1,5 @@
 export type AppTheme =
-  "light" | "dark" | "coffee" | "comic" | "matcha" | "anime";
+  "light" | "dark" | "coffee" | "comic" | "matcha" | "anime" | "anime-dark";
 
 export const appThemes: Array<{
   id: AppTheme;
@@ -12,6 +12,7 @@ export const appThemes: Array<{
   { id: "comic", label: "Комикс", icon: "★" },
   { id: "matcha", label: "Матча", icon: "●" },
   { id: "anime", label: "Аниме", icon: "✦" },
+  { id: "anime-dark", label: "Тёмное аниме", icon: "◆" },
 ];
 
 const STORAGE_KEY = "coffie.theme";
@@ -30,7 +31,7 @@ export function readTheme(): AppTheme {
 export function applyTheme(theme: AppTheme): void {
   document.documentElement.dataset.appTheme = theme;
   document.documentElement.style.colorScheme =
-    theme === "dark" ? "dark" : "light";
+    theme === "dark" || theme === "anime-dark" ? "dark" : "light";
   try {
     window.localStorage.setItem(STORAGE_KEY, theme);
   } catch {

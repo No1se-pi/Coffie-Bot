@@ -242,6 +242,31 @@
   --shadow-md: 0 14px 36px rgb(104 48 39 / 16%);
 }
 
+:root[data-app-theme="anime-dark"] {
+  --color-bg: #120c09;
+  --color-surface: #1d1511;
+  --color-surface-strong: #291c15;
+  --color-text: #fff3e8;
+  --color-muted: #c5aa99;
+  --color-link: #ffae6f;
+  --color-primary: #ed873c;
+  --color-primary-text: #241006;
+  --color-accent: #ff9b4b;
+  --color-accent-soft: #3c2418;
+  --color-success: #68ad82;
+  --color-success-soft: #183527;
+  --color-warning: #efaa50;
+  --color-warning-soft: #3d2c16;
+  --color-danger: #ef7668;
+  --color-danger-soft: #44201d;
+  --balance-banner-background: linear-gradient(135deg, #1a0b05, #bd4818);
+  --balance-banner-color: #fff8f0;
+  --balance-banner-qr-color: #3a1709;
+  --balance-banner-ring: transparent;
+  --shadow-sm: 0 3px 14px rgb(0 0 0 / 24%);
+  --shadow-md: 0 16px 42px rgb(0 0 0 / 38%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1343,6 +1368,19 @@ a:focus-visible {
     no-repeat;
 }
 :root[data-app-theme="anime"] .hero-card::after {
+  display: none;
+}
+:root[data-app-theme="anime-dark"] .hero-card::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -8px;
+  /* The subtle left-side shade keeps the balance legible over the detailed scene. */
+  background:
+    linear-gradient(90deg, rgb(25 8 2 / 68%) 0%, transparent 62%),
+    url("./assets/anime-dark-banner.png") center center / cover no-repeat;
+}
+:root[data-app-theme="anime-dark"] .hero-card::after {
   display: none;
 }
 .hero-card__copy {

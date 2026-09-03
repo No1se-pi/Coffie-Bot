@@ -764,6 +764,13 @@ export function MenuPage() {
               <div className="horizontal-cards">
                 {passProducts.data?.items.map((pass) => (
                   <article className="subscription-product" key={pass.id}>
+                    {pass.image_url && (
+                      <img
+                        className="subscription-product__image"
+                        src={pass.image_url}
+                        alt=""
+                      />
+                    )}
                     <Badge tone="accent">{pass.validity_days} дней</Badge>
                     <h3>{pass.name}</h3>
                     <p>{pass.description}</p>
@@ -1035,6 +1042,13 @@ export function MenuPage() {
           <Panel className="purchase-sheet" role="dialog" aria-modal="true">
             {buyingPass ? (
               <>
+                {buyingPass.image_url && (
+                  <img
+                    className="subscription-product__image"
+                    src={buyingPass.image_url}
+                    alt=""
+                  />
+                )}
                 <h2>{buyingPass.name}</h2>
                 <p>
                   {buyingPass.total_uses} использований в течение{" "}

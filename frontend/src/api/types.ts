@@ -27,6 +27,11 @@ export interface TelegramWebLoginData {
   hash: string;
 }
 
+export interface PasswordLoginData {
+  username: string;
+  password: string;
+}
+
 export interface ListResponse<T> {
   items: T[];
   page: number;
@@ -1204,6 +1209,7 @@ export interface PassTemplate {
   name: string;
   description: string;
   image_media_id: string | null;
+  image_url?: string | null;
   total_uses: number;
   validity_days: number;
   price_minor: number;
@@ -1239,6 +1245,7 @@ export interface CustomerPass {
   name: string;
   description: string;
   image_media_id: string | null;
+  image_url?: string | null;
   total_uses: number;
   remaining_uses: number;
   status: CustomerPassStatus;

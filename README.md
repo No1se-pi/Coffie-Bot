@@ -109,8 +109,21 @@ Phases 4–8 добавляют mixed-venue заказы, pickup/delivery и к�
 
 `DEV_AUTH_ENABLED=true` разрешён только для локальной браузерной разработки.
 Production-конфигурация принудительно отключает bypass.
-Для production-входа в Web Admin настройте hostname бота через BotFather `/setdomain`;
-пошаговая инструкция находится в [`DEPLOYMENT.md`](DEPLOYMENT.md#telegram-login-для-web-admin).
+Для production-входа в Web Admin можно настроить Telegram Login через BotFather
+или привязанный к существующему owner/admin вход по логину и паролю. Для второго
+варианта создайте хеш внутри backend-контейнера и добавьте три значения в `.env`:
+
+```bash
+docker compose --env-file .env -f compose.prod.yaml run --rm backend \
+  python -m app.security.passwords 'сложный пароль'
+# ADMIN_WEB_USERNAME=owner
+# ADMIN_WEB_PASSWORD_HASH=вывод-команды
+# ADMIN_WEB_TELEGRAM_ID=telegram-id-существующего-owner
+```
+
+Пароль не хранится в БД или frontend, а сессия после входа использует тот же
+непрозрачный токен и backend-RBAC. Инструкция по Telegram Login находится в
+[`DEPLOYMENT.md`](DEPLOYMENT.md#telegram-login-для-web-admin).
 
 ## Основные команды
 

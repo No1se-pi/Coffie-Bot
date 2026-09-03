@@ -147,6 +147,9 @@ class CourierService:
                 previous_courier_id=previous_courier,
                 idempotency_key=idempotency_key,
             )
+            self._repository.add(
+                _courier_notification(order, courier.user_id, event_type="courier.order.assigned")
+            )
             await self._repository.flush()
             return await self._view(order, private=True)
 
@@ -173,6 +176,12 @@ class CourierService:
                 courier_id,
                 idempotency_key=idempotency_key,
             )
+            # A declined order returns to the shared queue, so every active
+            # courier gets the same availability alert without customer data.
+            for _staff, user in await self._repository.list_active_couriers():
+                self._repository.add(
+                    _courier_notification(order, user.id, event_type="courier.order.available")
+                )
             await self._repository.flush()
             # The returned public view deliberately hides the now-unassigned customer's details.
             return await self._view(order, private=False)
@@ -324,6 +333,18 @@ class CourierService:
 def _require_permission(actor: Actor, permission: PermissionCode) -> None:
     if not actor.can(permission):
         raise AppError(code="forbidden", message="Недостаточно прав", status_code=403)
+
+
+def _courier_notification(
+    order: CustomerOrder, user_id: UUID, *, event_type: str
+) -> NotificationOutbox:
+    return NotificationOutbox(
+        id=uuid4(),
+        user_id=user_id,
+        event_type=event_type,
+        payload={"order_id": str(order.id), "order_number": order.number},
+        idempotency_key=f"{event_type}:{order.id}:{order.status_version}:{user_id}",
+    )
 
 
 def _not_found() -> NoReturn:

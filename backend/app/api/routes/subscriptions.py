@@ -20,6 +20,7 @@ from app.schemas.subscriptions import (
     PassTemplateCreateRequest,
     PassTemplateListResponse,
     PassTemplateResponse,
+    PassTemplateUpdateRequest,
     PassUsageResponse,
     PassUseRequest,
     pass_response,
@@ -167,6 +168,28 @@ async def create_template(
     return template_response(value)
 
 
+@router.put("/admin/subscriptions/templates/{template_id}", response_model=PassTemplateResponse)
+async def update_template(
+    template_id: UUID,
+    payload: PassTemplateUpdateRequest,
+    actor: PassAdmin,
+    session: DatabaseSession,
+) -> PassTemplateResponse:
+    command = TemplateCreateCommand(
+        name=payload.name,
+        description=payload.description,
+        image_media_id=payload.image_media_id,
+        total_uses=payload.total_uses,
+        validity_days=payload.validity_days,
+        price_minor=payload.price_minor,
+        purchase_enabled=payload.purchase_enabled,
+        venue_ids=frozenset(payload.venue_ids),
+        category_ids=frozenset(payload.category_ids),
+        item_ids=frozenset(payload.item_ids),
+    )
+    return template_response(await _service(session).update_template(actor, template_id, command))
+
+
 @router.post(
     "/admin/subscriptions/templates/{template_id}/archive", response_model=PassTemplateResponse
 )
@@ -174,6 +197,15 @@ async def archive_template(
     template_id: UUID, actor: PassAdmin, session: DatabaseSession
 ) -> PassTemplateResponse:
     return template_response(await _service(session).archive_template(actor, template_id))
+
+
+@router.post(
+    "/admin/subscriptions/templates/{template_id}/restore", response_model=PassTemplateResponse
+)
+async def restore_template(
+    template_id: UUID, actor: PassAdmin, session: DatabaseSession
+) -> PassTemplateResponse:
+    return template_response(await _service(session).restore_template(actor, template_id))
 
 
 @router.post("/admin/subscriptions/issue", response_model=CustomerPassResponse, status_code=201)

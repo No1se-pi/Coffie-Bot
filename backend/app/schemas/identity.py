@@ -44,6 +44,11 @@ class TelegramWebLoginRequest(ApiSchema):
     hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
 
 
+class PasswordLoginRequest(ApiSchema):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=256)
+
+
 class CurrentUserResponse(ApiSchema):
     id: UUID
     telegram_id: int | None

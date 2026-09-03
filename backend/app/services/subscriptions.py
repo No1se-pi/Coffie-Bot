@@ -115,6 +115,45 @@ class SubscriptionService:
             _forbidden()
         return await self._repository.list_templates(active_only=active_only)
 
+    async def update_template(
+        self, actor: Actor, template_id: UUID, command: TemplateCreateCommand
+    ) -> TemplateAccess:
+        _require_admin(actor)
+        name = _clean(command.name)
+        description = _clean(command.description)
+        if not name or not description:
+            _validation("invalid_pass_template", "Название и описание обязательны")
+        expected = (set(command.venue_ids), set(command.category_ids), set(command.item_ids))
+        if (
+            await self._repository.existing_entity_ids(
+                venue_ids=expected[0], category_ids=expected[1], item_ids=expected[2]
+            )
+            != expected
+        ):
+            _validation("invalid_pass_scope", "В ограничениях есть неизвестные объекты")
+        async with self._repository.transaction():
+            template = await self._repository.get_template(template_id, for_update=True)
+            if template is None:
+                _not_found("Шаблон не найден")
+            template.name = name
+            template.description = description
+            template.image_media_id = command.image_media_id
+            template.total_uses = command.total_uses
+            template.validity_days = command.validity_days
+            template.price_minor = command.price_minor
+            template.purchase_enabled = command.purchase_enabled
+            await self._repository.replace_template_scopes(
+                template.id,
+                venue_ids=command.venue_ids,
+                category_ids=command.category_ids,
+                item_ids=command.item_ids,
+            )
+            self._repository.add_all(
+                [_audit(actor, "subscription.template_updated", "pass_template", template.id)]
+            )
+            await self._repository.flush()
+            return await self._repository.template_access(template)
+
     async def list_storefront(self, _actor: Actor) -> list[TemplateAccess]:
         values = await self._repository.list_templates(active_only=True)
         return [
@@ -240,6 +279,19 @@ class SubscriptionService:
             template.is_active = False
             self._repository.add_all(
                 [_audit(actor, "subscription.template_archived", "pass_template", template.id)]
+            )
+            await self._repository.flush()
+            return await self._repository.template_access(template)
+
+    async def restore_template(self, actor: Actor, template_id: UUID) -> TemplateAccess:
+        _require_admin(actor)
+        async with self._repository.transaction():
+            template = await self._repository.get_template(template_id, for_update=True)
+            if template is None:
+                _not_found("Шаблон не найден")
+            template.is_active = True
+            self._repository.add_all(
+                [_audit(actor, "subscription.template_restored", "pass_template", template.id)]
             )
             await self._repository.flush()
             return await self._repository.template_access(template)

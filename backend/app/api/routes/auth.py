@@ -12,6 +12,7 @@ from app.db.session import get_db_session
 from app.repositories.identity import IdentityRepository
 from app.schemas.identity import (
     AuthResponse,
+    PasswordLoginRequest,
     TelegramAuthRequest,
     TelegramWebLoginRequest,
     auth_response,
@@ -61,6 +62,27 @@ async def telegram_web_auth(
         repository=IdentityRepository(session),
     ).authenticate_web_login(
         payload.model_dump(),
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
+    return auth_response(result)
+
+
+@router.post("/password", response_model=AuthResponse, status_code=status.HTTP_200_OK)
+async def password_auth(
+    payload: PasswordLoginRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> AuthResponse:
+    """Authenticate the single configured admin without trusting browser roles."""
+
+    settings = cast(Settings, request.app.state.settings)
+    result = await IdentityService(
+        settings=settings,
+        repository=IdentityRepository(session),
+    ).authenticate_password(
+        payload.username,
+        payload.password,
         ip_address=_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
     )

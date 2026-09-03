@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import User
@@ -179,6 +179,32 @@ class SubscriptionRepository:
             else set()
         )
         return venues, categories, items
+
+    async def replace_template_scopes(
+        self,
+        template_id: UUID,
+        *,
+        venue_ids: frozenset[UUID],
+        category_ids: frozenset[UUID],
+        item_ids: frozenset[UUID],
+    ) -> None:
+        """Replace applicability rows while the template row is locked by the service."""
+
+        for model in (PassTemplateVenue, PassTemplateCategory, PassTemplateItem):
+            await self._session.execute(delete(model).where(model.template_id == template_id))
+        self.add_all(
+            [
+                *(
+                    PassTemplateVenue(template_id=template_id, venue_id=value)
+                    for value in venue_ids
+                ),
+                *(
+                    PassTemplateCategory(template_id=template_id, category_id=value)
+                    for value in category_ids
+                ),
+                *(PassTemplateItem(template_id=template_id, item_id=value) for value in item_ids),
+            ]
+        )
 
     async def active_user(self, user_id: UUID) -> User | None:
         return cast(

@@ -381,6 +381,23 @@ class IdentityRepository:
             )
         )
 
+    def record_password_auth_failure(
+        self, *, ip_address: str | None, user_agent: str | None
+    ) -> None:
+        """Persist a secret-free audit event for browser credential failures."""
+
+        self._session.add(
+            AuditEvent(
+                id=uuid4(),
+                event_type="auth.password_failed",
+                event_metadata={},
+                severity=AuditSeverity.WARNING,
+                is_suspicious=True,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
+
     async def flush(self) -> None:
         await self._session.flush()
 
@@ -389,6 +406,21 @@ class IdentityRepository:
             select(User)
             .options(selectinload(User.staff_member).selectinload(StaffMember.permissions))
             .where(User.id == user_id)
+        )
+        if user is None:
+            return None
+        staff = user.staff_member
+        if staff is not None and not staff.is_active:
+            staff = None
+        return IdentityAccessRecord(user=user, staff=staff)
+
+    async def get_identity_access_by_telegram_id(
+        self, telegram_id: int
+    ) -> IdentityAccessRecord | None:
+        user = await self._session.scalar(
+            select(User)
+            .options(selectinload(User.staff_member).selectinload(StaffMember.permissions))
+            .where(User.telegram_id == telegram_id)
         )
         if user is None:
             return None

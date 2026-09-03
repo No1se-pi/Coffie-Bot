@@ -273,6 +273,32 @@ async def test_order_notification_opens_order_details() -> None:
 
 
 @pytest.mark.parametrize(
+    ("event_type", "expected_path", "expected_text"),
+    [
+        ("staff.order.created", "/staff/orders", "новый заказ"),
+        ("courier.order.available", "/courier/mine", "доступен новый заказ"),
+    ],
+)
+async def test_operational_order_alerts_open_the_correct_queue(
+    event_type: str, expected_path: str, expected_text: str
+) -> None:
+    order_id = uuid4()
+    job = NotificationJob(
+        id=uuid4(),
+        telegram_id=101,
+        event_type=event_type,
+        payload={"order_id": str(order_id), "order_number": 51},
+        attempts=1,
+        lease_until=LEASE,
+    )
+
+    message = render_notification(job, webapp_url="https://coffee.example/")
+
+    assert expected_text in message.text
+    assert message.button_url == f"https://coffee.example{expected_path}"
+
+
+@pytest.mark.parametrize(
     ("event_type", "payload", "expected"),
     [
         ("points.expiring", {"points": 15, "expires_at": "2026-09-01"}, "Скоро сгорят"),

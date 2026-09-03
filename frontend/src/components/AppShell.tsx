@@ -5,7 +5,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import type { Role } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { brand } from "../config";
@@ -32,7 +32,13 @@ const roleHome: Record<Role, string> = {
 
 const navItems: Record<
   "customer" | "staff" | "courier" | "admin",
-  Array<{ to: string; label: string; icon: string; end?: boolean }>
+  Array<{
+    to: string;
+    label: string;
+    icon: string;
+    end?: boolean;
+    section?: string;
+  }>
 > = {
   customer: [
     { to: "/", label: "Главная", icon: "⌂", end: true },
@@ -59,22 +65,37 @@ const navItems: Record<
     { to: "/courier/mine", label: "Мои", icon: "◇" },
   ],
   admin: [
-    { to: "/admin", label: "Обзор", icon: "⌂", end: true },
+    { to: "/admin", label: "Обзор", icon: "⌂", end: true, section: "Работа" },
     { to: "/staff/orders", label: "Заказы", icon: "▣" },
-    { to: "/admin/users", label: "Клиенты", icon: "○" },
-    { to: "/admin/venues", label: "Заведения и точки", icon: "⌖" },
+    { to: "/staff/receipts", label: "Чеки", icon: "▤" },
+    {
+      to: "/admin/users",
+      label: "Клиенты",
+      icon: "○",
+      section: "Команда и гости",
+    },
     { to: "/admin/staff", label: "Сотрудники", icon: "◇" },
-    { to: "/admin/events", label: "События", icon: "↻" },
     { to: "/admin/feedback", label: "Обращения", icon: "✉" },
     { to: "/admin/reviews", label: "Отзывы", icon: "★" },
-    { to: "/admin/subscriptions", label: "Абонементы", icon: "◇" },
-    { to: "/admin/bulk-bonus", label: "Бонусы", icon: "+" },
-    { to: "/admin/settings", label: "Лояльность", icon: "⚙" },
+    {
+      to: "/admin/venues",
+      label: "Заведения и точки",
+      icon: "⌖",
+      section: "Витрина",
+    },
     { to: "/admin/menu", label: "Меню", icon: "☕" },
     { to: "/admin/promotions", label: "Акции", icon: "%" },
+    { to: "/admin/subscriptions", label: "Абонементы", icon: "◇" },
     { to: "/admin/pricing", label: "Цены", icon: "₽" },
+    {
+      to: "/admin/settings",
+      label: "Лояльность",
+      icon: "⚙",
+      section: "Настройки",
+    },
+    { to: "/admin/bulk-bonus", label: "Бонусы", icon: "+" },
     { to: "/admin/delivery", label: "Доставка", icon: "▣" },
-    { to: "/staff/receipts", label: "Чеки", icon: "▤" },
+    { to: "/admin/events", label: "События", icon: "↻" },
     { to: "/admin/analytics", label: "Аналитика", icon: "⌁" },
     { to: "/admin/help", label: "Помощь", icon: "?" },
   ],
@@ -105,6 +126,10 @@ export function AuthGate() {
             Откройте Mini App внутри Telegram или войдите здесь через защищённый
             Telegram Login.
           </p>
+          <PasswordLoginForm />
+          <div className="login-divider">
+            <span>или</span>
+          </div>
           <TelegramLogin onLogin={auth.loginWithTelegram} />
           <button className="text-link" type="button" onClick={auth.retry}>
             Повторить вход через Mini App
@@ -122,6 +147,48 @@ export function AuthGate() {
       </div>
     );
   return <AppShell />;
+}
+
+function PasswordLoginForm() {
+  const auth = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <form
+      className="password-login"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setError("");
+        void auth
+          .loginWithPassword({ username, password })
+          .catch(() => setError("Проверьте логин и пароль"));
+      }}
+    >
+      <label>
+        <span>Логин администратора</span>
+        <input
+          autoComplete="username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          required
+        />
+      </label>
+      <label>
+        <span>Пароль</span>
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+          minLength={8}
+        />
+      </label>
+      {error && <p className="field__error">{error}</p>}
+      <Button type="submit">Войти</Button>
+    </form>
+  );
 }
 
 function AppShell() {
@@ -237,23 +304,28 @@ function AppShell() {
         </div>
         <nav className="side-nav" aria-label="Основная навигация">
           {navItems[navRole].map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={() => setDrawerOpen(false)}
-              className={({ isActive }) =>
-                isActive || (!item.end && location.pathname.startsWith(item.to))
-                  ? "side-nav__item is-active"
-                  : "side-nav__item"
-              }
-            >
-              <span aria-hidden="true">{item.icon}</span>
-              <span>{item.label}</span>
-              {item.to === "/cart" && (cart?.count ?? 0) > 0 && (
-                <b className="nav-badge">{cart?.count}</b>
+            <Fragment key={item.to}>
+              {item.section && (
+                <span className="side-nav__section">{item.section}</span>
               )}
-            </NavLink>
+              <NavLink
+                to={item.to}
+                end={item.end}
+                onClick={() => setDrawerOpen(false)}
+                className={({ isActive }) =>
+                  isActive ||
+                  (!item.end && location.pathname.startsWith(item.to))
+                    ? "side-nav__item is-active"
+                    : "side-nav__item"
+                }
+              >
+                <span aria-hidden="true">{item.icon}</span>
+                <span>{item.label}</span>
+                {item.to === "/cart" && (cart?.count ?? 0) > 0 && (
+                  <b className="nav-badge">{cart?.count}</b>
+                )}
+              </NavLink>
+            </Fragment>
           ))}
         </nav>
       </aside>
@@ -262,6 +334,7 @@ function AppShell() {
           {[
             { to: "/", label: "Главная", icon: "⌂", end: true },
             { to: "/menu", label: "Меню", icon: "☕" },
+            { to: "/card", label: "Карта", icon: "▦" },
             { to: "/rewards", label: "Награды", icon: "◇" },
             { to: "/more", label: "Ещё", icon: "•••" },
           ].map((item) => (

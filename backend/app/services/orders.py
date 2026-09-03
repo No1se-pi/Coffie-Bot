@@ -40,7 +40,7 @@ from app.models.orders import (
 )
 from app.repositories.loyalty_v2 import PointLedgerRepository
 from app.repositories.orders import OrderAggregate, OrderRepository
-from app.security.rbac import Actor
+from app.security.rbac import Actor, resolve_permissions
 from app.services.customers import normalize_phone
 from app.services.loyalty_calculations import (
     LoyaltyRuleViolation,
@@ -239,13 +239,7 @@ class OrderService:
                         comment="Заказ создан",
                         created_at=current_time,
                     ),
-                    NotificationOutbox(
-                        id=uuid4(),
-                        user_id=actor.user_id,
-                        event_type="order.created",
-                        payload={"order_id": str(order.id), "order_number": order.number},
-                        idempotency_key=f"order.created:{order.id}",
-                    ),
+                    *(await self._order_notifications(order, OrderStatus.NEW)),
                 ]
             )
             await self._repository.flush()
@@ -344,7 +338,7 @@ class OrderService:
                             comment="Статус рассчитан по частям заказа",
                             now=current_time,
                         ),
-                        _order_notification(order, derived),
+                        *(await self._order_notifications(order, derived)),
                     ]
                 )
             self._audit_transition(
@@ -443,7 +437,7 @@ class OrderService:
                         comment=comment,
                         now=current_time,
                     ),
-                    _order_notification(order, effective_target),
+                    *(await self._order_notifications(order, effective_target)),
                 ]
             )
             self._audit_transition(
@@ -510,11 +504,42 @@ class OrderService:
                         reason=normalized_reason,
                         now=current_time,
                     ),
-                    _order_notification(order, OrderStatus.CANCELLED),
+                    *(await self._order_notifications(order, OrderStatus.CANCELLED)),
                 ]
             )
             await self._repository.flush()
             return await self._repository.aggregate(order)
+
+    async def _order_notifications(
+        self, order: CustomerOrder, target: OrderStatus
+    ) -> list[NotificationOutbox]:
+        """Fan out only to staff roles that may open the corresponding order queue."""
+
+        result = [_order_notification(order, target)]
+        if target in {OrderStatus.NEW, OrderStatus.CANCELLED}:
+            for staff, user in await self._repository.list_active_staff_users():
+                overrides = {value.permission: value.allowed for value in staff.permissions}
+                if PermissionCode.ORDERS_READ not in resolve_permissions(staff.role, overrides):
+                    continue
+                result.append(
+                    _recipient_order_notification(
+                        order,
+                        user.id,
+                        event_type=(
+                            "staff.order.created"
+                            if target is OrderStatus.NEW
+                            else "staff.order.cancelled"
+                        ),
+                    )
+                )
+        if target is OrderStatus.WAITING_FOR_COURIER:
+            for _staff, user in await self._repository.list_active_couriers():
+                result.append(
+                    _recipient_order_notification(
+                        order, user.id, event_type="courier.order.available"
+                    )
+                )
+        return result
 
     async def _resolve_fulfillment(
         self,
@@ -919,12 +944,25 @@ def _event(
 
 
 def _order_notification(order: CustomerOrder, target: OrderStatus) -> NotificationOutbox:
+    event_type = "order.created" if target is OrderStatus.NEW else f"order.{target.value}"
     return NotificationOutbox(
         id=uuid4(),
         user_id=order.user_id,
-        event_type=f"order.{target.value}",
+        event_type=event_type,
         payload={"order_id": str(order.id), "order_number": order.number},
         idempotency_key=f"order.status:{order.id}:{order.status_version}:{target.value}",
+    )
+
+
+def _recipient_order_notification(
+    order: CustomerOrder, user_id: UUID, *, event_type: str
+) -> NotificationOutbox:
+    return NotificationOutbox(
+        id=uuid4(),
+        user_id=user_id,
+        event_type=event_type,
+        payload={"order_id": str(order.id), "order_number": order.number},
+        idempotency_key=(f"{event_type}:{order.id}:{order.status_version}:{user_id}"),
     )
 
 

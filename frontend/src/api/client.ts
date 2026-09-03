@@ -353,6 +353,17 @@ async function telegramWebLogin(
   return normalizeAuth(raw);
 }
 
+async function passwordLogin(payload: {
+  username: string;
+  password: string;
+}): Promise<AuthSession> {
+  const raw = await request<RawAuthResponse>("/auth/password", {
+    method: "POST",
+    body: jsonBody(payload),
+  });
+  return normalizeAuth(raw);
+}
+
 async function getHome(): Promise<HomeData> {
   if (isDemoMode) return demoApi.getHome();
   const [card, rewards, promotions] = await Promise.all([
@@ -601,6 +612,7 @@ export const coffeeApi = {
   isDemo: isDemoMode,
   bootstrapAuth,
   telegramWebLogin,
+  passwordLogin,
   async logout(): Promise<void> {
     if (!isDemoMode) await request<void>("/auth/logout", { method: "POST" });
     setSessionToken(null);
@@ -1708,6 +1720,30 @@ export const coffeeApi = {
       `/admin/subscriptions/templates/${encodeURIComponent(id)}/archive`,
       { method: "POST" },
     ),
+  restorePassTemplate: (id: string): Promise<PassTemplate> =>
+    request(
+      `/admin/subscriptions/templates/${encodeURIComponent(id)}/restore`,
+      { method: "POST" },
+    ),
+  updatePassTemplate: (
+    id: string,
+    payload: {
+      name: string;
+      description: string;
+      image_media_id: string | null;
+      total_uses: number;
+      validity_days: number;
+      price_minor: number;
+      purchase_enabled: boolean;
+      venue_ids: string[];
+      category_ids: string[];
+      item_ids: string[];
+    },
+  ): Promise<PassTemplate> =>
+    request(`/admin/subscriptions/templates/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: jsonBody(payload),
+    }),
   issuePass: (
     userId: string,
     templateId: string,

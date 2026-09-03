@@ -13,6 +13,7 @@ import type {
   AuthSession,
   Role,
   TelegramWebLoginData,
+  PasswordLoginData,
 } from "../api/types";
 import { getTelegramInitData, initializeTelegram } from "../telegram";
 
@@ -26,6 +27,7 @@ interface AuthContextValue {
   setActiveRole: (role: Role) => void;
   retry: () => void;
   loginWithTelegram: (payload: TelegramWebLoginData) => Promise<void>;
+  loginWithPassword: (payload: PasswordLoginData) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -125,6 +127,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError(null);
         try {
           acceptSession(await coffeeApi.telegramWebLogin(payload));
+        } catch (reason: unknown) {
+          setError(
+            reason instanceof Error ? reason : new Error("Не удалось войти"),
+          );
+          throw reason;
+        } finally {
+          setLoading(false);
+        }
+      },
+      loginWithPassword: async (payload) => {
+        setLoading(true);
+        setError(null);
+        try {
+          acceptSession(await coffeeApi.passwordLogin(payload));
         } catch (reason: unknown) {
           setError(
             reason instanceof Error ? reason : new Error("Не удалось войти"),

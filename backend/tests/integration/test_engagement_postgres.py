@@ -149,6 +149,14 @@ async def test_reviews_pass_usage_race_and_bulk_bonus_are_auditable() -> None:
 
     customer = _actor(customer_id, admin_id, Role.CUSTOMER)
     admin = _actor(admin_user_id, admin_id, Role.ADMIN)
+    employee_without_optional_overrides = Actor(
+        user_id=admin_user_id,
+        telegram_id=1,
+        session_id=uuid4(),
+        role=Role.STAFF,
+        staff_member_id=admin_id,
+        permissions=frozenset(),
+    )
 
     async with sessions() as session:
         reviews = ReviewService(ReviewRepository(session))
@@ -190,6 +198,7 @@ async def test_reviews_pass_usage_race_and_bulk_bonus_are_auditable() -> None:
             template_id=template.template.id,
             idempotency_key=str(uuid4()),
         )
+        assert issued.value.qr_payload.startswith("coffee-pass:v1:")
         pass_id, template_id = issued.value.id, template.template.id
         purchase = await subscriptions.purchase(
             customer,
@@ -197,9 +206,23 @@ async def test_reviews_pass_usage_race_and_bulk_bonus_are_auditable() -> None:
             payment_method=PaymentMethod.CARD_ON_RECEIPT,
             idempotency_key=str(uuid4()),
         )
-        confirmed_purchase = await subscriptions.confirm_purchase(admin, purchase.id)
+        confirmed_purchase = await subscriptions.confirm_purchase(
+            employee_without_optional_overrides, purchase.id
+        )
         assert confirmed_purchase.status == "paid"
         assert confirmed_purchase.customer_pass_id is not None
+        customer_passes = await subscriptions.list_customer(admin, customer_id)
+        confirmed_pass = next(
+            value.customer_pass
+            for value in customer_passes
+            if value.customer_pass.id == confirmed_purchase.customer_pass_id
+        )
+        purchased_pass = await subscriptions.lookup_qr(
+            employee_without_optional_overrides,
+            confirmed_pass.qr_payload,
+        )
+        assert purchased_pass.user.id == customer_id
+        assert purchased_pass.customer_short_code == card_id.hex[:12]
         purchase_id = purchase.id
         purchased_pass_id = confirmed_purchase.customer_pass_id
 

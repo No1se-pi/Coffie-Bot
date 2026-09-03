@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { coffeeApi, createIdempotencyKey } from "../api/client";
 import type {
   BulkBonusDraft,
@@ -225,25 +226,139 @@ function PassCard({
   value: CustomerPass;
   action?: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <Panel className="pass-card">
-      {value.image_url && (
-        <img className="pass-card__image" src={value.image_url} alt="" />
+    <>
+      <Panel className="pass-card">
+        {value.image_url && (
+          <img className="pass-card__image" src={value.image_url} alt="" />
+        )}
+        <div className="row-between">
+          <h2>{value.name}</h2>
+          <Badge tone={value.status === "active" ? "success" : "neutral"}>
+            {passStatus[value.status]}
+          </Badge>
+        </div>
+        <p>{value.description}</p>
+        <Progress
+          value={value.remaining_uses}
+          max={value.total_uses}
+          label="Осталось использований"
+        />
+        <small>Действует до {formatDateTime(value.expires_at)}</small>
+        <div className="action-row">
+          <Button variant="secondary" onClick={() => setOpen(true)}>
+            {value.status === "active" ? "Открыть QR" : "Подробнее"}
+          </Button>
+          {action}
+        </div>
+      </Panel>
+      {open && (
+        <div
+          className="purchase-sheet-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setOpen(false);
+          }}
+        >
+          <Panel
+            className="purchase-sheet purchase-sheet--success pass-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`pass-title-${value.id}`}
+          >
+            {value.image_url && (
+              <img
+                className="subscription-product__image"
+                src={value.image_url}
+                alt=""
+              />
+            )}
+            <Badge tone={value.status === "active" ? "success" : "neutral"}>
+              {passStatus[value.status]}
+            </Badge>
+            <h2 id={`pass-title-${value.id}`}>{value.name}</h2>
+            <Progress
+              value={value.remaining_uses}
+              max={value.total_uses}
+              label="Осталось использований"
+            />
+            {value.status === "active" && (
+              <div className="qr-frame" data-testid="subscription-qr">
+                <QRCodeSVG
+                  value={value.qr_payload}
+                  size={190}
+                  level="M"
+                  marginSize={2}
+                  title={`QR-код абонемента ${value.name}`}
+                />
+              </div>
+            )}
+            <small>
+              {value.status === "active"
+                ? "Покажите QR сотруднику. Списание произойдёт только после подтверждения."
+                : `Действует до ${formatDateTime(value.expires_at)}`}
+            </small>
+            <Button
+              variant="secondary"
+              onClick={() => setOpen(false)}
+              autoFocus
+            >
+              Закрыть
+            </Button>
+          </Panel>
+        </div>
       )}
+    </>
+  );
+}
+
+export function StaffPendingPassPurchases() {
+  const purchases = useResource(coffeeApi.getPendingPassPurchases);
+  const [busy, setBusy] = useState("");
+  return (
+    <Panel>
       <div className="row-between">
-        <h2>{value.name}</h2>
-        <Badge tone={value.status === "active" ? "success" : "neutral"}>
-          {passStatus[value.status]}
-        </Badge>
+        <div>
+          <p className="eyebrow">Абонементы</p>
+          <h2>Ожидают подтверждения</h2>
+        </div>
+        {!!purchases.data?.items.length && (
+          <Badge tone="warning">{purchases.data.items.length}</Badge>
+        )}
       </div>
-      <p>{value.description}</p>
-      <Progress
-        value={value.remaining_uses}
-        max={value.total_uses}
-        label="Осталось использований"
-      />
-      <small>Действует до {formatDateTime(value.expires_at)}</small>
-      {action}
+      {purchases.loading && <Loader />}
+      {purchases.error && (
+        <ErrorState
+          error={purchases.error}
+          onRetry={purchases.reload}
+          compact
+        />
+      )}
+      {(purchases.data?.items ?? []).map((purchase) => (
+        <div className="order-line-snapshot" key={purchase.id}>
+          <span>
+            <strong>
+              №{purchase.number} · {purchase.name}
+            </strong>
+            <small>{formatMoney(purchase.price_minor)}</small>
+          </span>
+          <Button
+            disabled={busy === purchase.id}
+            onClick={() => {
+              setBusy(purchase.id);
+              void coffeeApi
+                .confirmPassPurchase(purchase.id)
+                .then(purchases.reload)
+                .finally(() => setBusy(""));
+            }}
+          >
+            {busy === purchase.id ? "Подтверждаем…" : "Оплата получена"}
+          </Button>
+        </div>
+      ))}
+      {!purchases.loading && !purchases.data?.items.length && (
+        <p className="muted">Покупок, ожидающих оплаты, нет.</p>
+      )}
     </Panel>
   );
 }

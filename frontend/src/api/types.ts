@@ -1246,6 +1246,7 @@ export interface CustomerPass {
   description: string;
   image_media_id: string | null;
   image_url?: string | null;
+  qr_payload: string;
   total_uses: number;
   remaining_uses: number;
   status: CustomerPassStatus;
@@ -1253,6 +1254,12 @@ export interface CustomerPass {
   expires_at: string;
   usage_count: number;
   replay: boolean;
+}
+
+export interface StaffPassLookup {
+  customer_name: string;
+  customer_short_code: string;
+  subscription: CustomerPass;
 }
 
 export interface PassUsage {

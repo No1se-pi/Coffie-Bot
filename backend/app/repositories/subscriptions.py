@@ -13,6 +13,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.access import User
+from app.models.cards import UserCard
 from app.models.content import MenuCategory, MenuItem, Venue
 from app.models.engagement import (
     CustomerPass,
@@ -23,7 +24,7 @@ from app.models.engagement import (
     PassTemplateVenue,
     PassUsage,
 )
-from app.models.enums import PassStatus, UserStatus
+from app.models.enums import CardStatus, PassStatus, UserStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,13 @@ class TemplateAccess:
 class PassRecord:
     customer_pass: CustomerPass
     usage_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PassQrRecord:
+    customer_pass: CustomerPass
+    user: User
+    customer_short_code: str
 
 
 class SubscriptionRepository:
@@ -229,6 +237,20 @@ class SubscriptionRepository:
         if for_update:
             statement = statement.with_for_update()
         return cast(CustomerPass | None, await self._session.scalar(statement))
+
+    async def get_pass_by_qr(self, qr_payload: str) -> PassQrRecord | None:
+        row = (
+            await self._session.execute(
+                select(CustomerPass, User, UserCard.short_code)
+                .join(User, User.id == CustomerPass.user_id)
+                .join(
+                    UserCard,
+                    (UserCard.user_id == User.id) & (UserCard.status == CardStatus.ACTIVE),
+                )
+                .where(CustomerPass.qr_payload == qr_payload)
+            )
+        ).one_or_none()
+        return PassQrRecord(row[0], row[1], row[2]) if row is not None else None
 
     async def find_usage(self, staff_id: UUID, key: str) -> PassUsage | None:
         return cast(

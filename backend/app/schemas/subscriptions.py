@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.engagement import CustomerPass, PassPurchase, PassUsage
 from app.models.enums import PassStatus, PaymentMethod
-from app.repositories.subscriptions import PassRecord, TemplateAccess
+from app.repositories.subscriptions import PassQrRecord, PassRecord, TemplateAccess
 from app.services.subscriptions import PassOutcome, UsageOutcome
 
 
@@ -40,6 +40,10 @@ class PassIssueRequest(ApiSchema):
 class PassUseRequest(ApiSchema):
     venue_id: UUID
     item_id: UUID
+
+
+class PassQrLookupRequest(ApiSchema):
+    qr_payload: str = Field(min_length=32, max_length=160)
 
 
 class PassCancelRequest(ApiSchema):
@@ -86,6 +90,7 @@ class CustomerPassResponse(ApiSchema):
     description: str
     image_media_id: UUID | None
     image_url: str | None
+    qr_payload: str
     total_uses: int
     remaining_uses: int
     status: PassStatus
@@ -97,6 +102,12 @@ class CustomerPassResponse(ApiSchema):
 
 class CustomerPassListResponse(ApiSchema):
     items: list[CustomerPassResponse]
+
+
+class PassQrLookupResponse(ApiSchema):
+    customer_name: str
+    customer_short_code: str
+    subscription: CustomerPassResponse
 
 
 class PassPurchaseCreateRequest(ApiSchema):
@@ -185,6 +196,7 @@ def pass_response(
             if customer_pass.image_media_id_snapshot
             else None
         ),
+        qr_payload=customer_pass.qr_payload,
         total_uses=customer_pass.total_uses,
         remaining_uses=customer_pass.remaining_uses,
         status=effective_status,
@@ -192,6 +204,15 @@ def pass_response(
         expires_at=customer_pass.expires_at,
         usage_count=usage_count,
         replay=replay,
+    )
+
+
+def pass_qr_lookup_response(value: PassQrRecord) -> PassQrLookupResponse:
+    customer_name = " ".join(part for part in (value.user.first_name, value.user.last_name) if part)
+    return PassQrLookupResponse(
+        customer_name=customer_name or "Клиент",
+        customer_short_code=value.customer_short_code,
+        subscription=pass_response(value.customer_pass),
     )
 
 

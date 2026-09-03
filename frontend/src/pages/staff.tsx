@@ -20,6 +20,7 @@ import type {
   RedemptionPreview,
   StaffClient,
   StaffClientLookup,
+  StaffPassLookup,
   StaffRewardLookup,
   TipProfile,
 } from "../api/types";
@@ -272,6 +273,9 @@ export function ScannerPage() {
   const [cameraMessage, setCameraMessage] = useState<string | null>(null);
   const [reward, setReward] = useState<StaffRewardLookup | null>(null);
   const [rewardRedeemed, setRewardRedeemed] = useState(false);
+  const [subscription, setSubscription] = useState<StaffPassLookup | null>(
+    null,
+  );
   const codeInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => closeTelegramScanner(), []);
@@ -304,13 +308,7 @@ export function ScannerPage() {
         setLoading(true);
         void coffeeApi
           .lookupStaffPass(value)
-          .then(async (found) => {
-            const customer = await coffeeApi.lookupStaffClient({
-              short_code: found.customer_short_code,
-            });
-            setClient(customer);
-            navigate(`/staff/client/${encodeURIComponent(customer.user_id)}`);
-          })
+          .then((found) => setSubscription(found))
           .catch((reason: unknown) =>
             setError(
               reason instanceof Error
@@ -412,6 +410,17 @@ export function ScannerPage() {
 
   return (
     <Page title="Сканер карты" eyebrow="Поиск клиента">
+      {subscription && (
+        <SubscriptionRedemptionDialog
+          lookup={subscription}
+          venueId={selectedLocation?.venue_id ?? null}
+          onCancel={() => setSubscription(null)}
+          onNext={() => {
+            setSubscription(null);
+            startScanner();
+          }}
+        />
+      )}
       <StaffLocationSelector />
       {reward && (
         <Panel className="reward-highlight">
@@ -600,6 +609,195 @@ export function ScannerPage() {
         </p>
       </div>
     </Page>
+  );
+}
+
+type SubscriptionRedemptionStep = "details" | "confirm" | "success";
+
+export function SubscriptionRedemptionDialog({
+  lookup,
+  venueId,
+  onCancel,
+  onNext,
+}: {
+  lookup: StaffPassLookup;
+  venueId: string | null;
+  onCancel: () => void;
+  onNext: () => void;
+}) {
+  const menu = useResource(() => coffeeApi.getMenu(venueId), [venueId]);
+  const [step, setStep] = useState<SubscriptionRedemptionStep>("details");
+  const [itemId, setItemId] = useState("");
+  const [usesAfter, setUsesAfter] = useState<number | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState(createIdempotencyKey);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const items = (menu.data?.items ?? []).filter(
+    (item) =>
+      item.available &&
+      item.visible &&
+      (!venueId || !item.venue_id || item.venue_id === venueId),
+  );
+
+  useEffect(() => {
+    if (!itemId && items.length === 1) setItemId(items[0]!.id);
+  }, [itemId, items]);
+
+  const redeemSubscription = async () => {
+    if (!venueId || !itemId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // The key remains stable during a retry, so a lost response cannot
+      // consume a second use from the customer's pass.
+      const usage = await coffeeApi.usePass(
+        lookup.subscription.id,
+        venueId,
+        itemId,
+        idempotencyKey,
+      );
+      setUsesAfter(usage.uses_after);
+      setStep("success");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason
+          : new Error("Не удалось использовать абонемент"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="purchase-sheet-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy && step !== "success")
+          onCancel();
+      }}
+    >
+      <Panel
+        className={`purchase-sheet subscription-redemption ${
+          step === "success" ? "purchase-sheet--success" : ""
+        }`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="subscription-redemption-title"
+      >
+        {step === "details" && (
+          <>
+            {lookup.subscription.image_url && (
+              <img
+                className="subscription-redemption__cover"
+                src={lookup.subscription.image_url}
+                alt=""
+              />
+            )}
+            <Badge tone="accent">Абонемент клиента</Badge>
+            <h2 id="subscription-redemption-title">
+              {lookup.subscription.name}
+            </h2>
+            <p>{lookup.subscription.description}</p>
+            <dl className="subscription-redemption__facts">
+              <div>
+                <dt>Клиент</dt>
+                <dd>{lookup.customer_name}</dd>
+              </div>
+              <div>
+                <dt>Осталось</dt>
+                <dd>{lookup.subscription.remaining_uses} использований</dd>
+              </div>
+              <div>
+                <dt>Действует до</dt>
+                <dd>{formatDateTime(lookup.subscription.expires_at)}</dd>
+              </div>
+            </dl>
+            {!venueId && (
+              <div className="inline-error">
+                Сначала выберите активную физическую точку.
+              </div>
+            )}
+            <div className="action-row">
+              <Button variant="secondary" onClick={onCancel}>
+                Отмена
+              </Button>
+              <Button disabled={!venueId} onClick={() => setStep("confirm")}>
+                Использовать
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step === "confirm" && (
+          <>
+            <Badge tone="warning">Подтверждение</Badge>
+            <h2 id="subscription-redemption-title">
+              Списать одно использование?
+            </h2>
+            <p>
+              Выберите выданную позицию. После подтверждения отменить операцию
+              на этом экране будет нельзя.
+            </p>
+            {menu.loading ? (
+              <Loader />
+            ) : menu.error ? (
+              <ErrorState error={menu.error} onRetry={menu.reload} compact />
+            ) : (
+              <Field label="Позиция заказа">
+                <select
+                  value={itemId}
+                  onChange={(event) => {
+                    setItemId(event.target.value);
+                    setIdempotencyKey(createIdempotencyKey());
+                    setError(null);
+                  }}
+                >
+                  <option value="">Выберите позицию</option>
+                  {items.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {error && <ErrorState error={error} compact />}
+            <div className="action-row">
+              <Button variant="secondary" disabled={busy} onClick={onCancel}>
+                Отмена
+              </Button>
+              <Button
+                disabled={busy || menu.loading || !itemId}
+                onClick={() => void redeemSubscription()}
+              >
+                {busy ? "Используем…" : "Подтвердить использование"}
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step === "success" && (
+          <>
+            <div
+              className="subscription-redemption__success"
+              aria-hidden="true"
+            >
+              ✓
+            </div>
+            <Badge tone="success">Использовано</Badge>
+            <h2 id="subscription-redemption-title">
+              Абонемент успешно использован
+            </h2>
+            <p>
+              У клиента осталось <strong>{usesAfter ?? 0}</strong>{" "}
+              использований. Уведомление отправится в Telegram.
+            </p>
+            <Button onClick={onNext}>Следующий заказ</Button>
+          </>
+        )}
+      </Panel>
+    </div>
   );
 }
 

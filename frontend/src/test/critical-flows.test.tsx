@@ -21,6 +21,7 @@ import type {
   PurchasePreview,
   RedemptionPreview,
   StaffClient,
+  StaffPassLookup,
   Venue,
 } from "../api/types";
 import {
@@ -38,6 +39,7 @@ import {
   ScannerPage,
   STAFF_LOCATION_STORAGE_KEY,
   StaffWorkspaceProvider,
+  SubscriptionRedemptionDialog,
 } from "../pages/staff";
 import {
   AdminAdjustmentPage,
@@ -336,6 +338,97 @@ describe("critical Mini App flows", () => {
 
     expect(await screen.findByText("Карточка найдена")).toBeInTheDocument();
     expect(lookup).toHaveBeenCalledWith({ short_code: "BEAN2026" });
+  });
+
+  it("uses a scanned subscription in a dedicated confirmation flow", async () => {
+    const user = userEvent.setup();
+    const lookup: StaffPassLookup = {
+      customer_name: "Анна",
+      customer_short_code: "BEAN2026",
+      subscription: {
+        id: "pass-1",
+        template_id: "template-1",
+        user_id: "user-1",
+        name: "Кофейный месяц",
+        description: "Один напиток каждый день",
+        image_media_id: null,
+        image_url: null,
+        qr_payload: "coffee-pass:v1:opaque-token",
+        total_uses: 30,
+        remaining_uses: 12,
+        status: "active",
+        issued_at: "2026-09-01T10:00:00Z",
+        expires_at: "2026-10-01T10:00:00Z",
+        usage_count: 18,
+        replay: false,
+      },
+    };
+    vi.spyOn(coffeeApi, "getMenu").mockResolvedValue({
+      categories: [],
+      items: [
+        {
+          id: "item-1",
+          venue_id: "venue-coffee",
+          category_id: "category-1",
+          name: "Капучино",
+          price_minor: 25000,
+          available: true,
+          visible: true,
+        },
+      ],
+    });
+    const usePass = vi.spyOn(coffeeApi, "usePass").mockResolvedValue({
+      id: "usage-1",
+      pass_id: "pass-1",
+      venue_id: "venue-coffee",
+      item_id: "item-1",
+      uses_before: 12,
+      uses_after: 11,
+      created_at: "2026-09-03T12:00:00Z",
+      replay: false,
+    });
+    const cancel = vi.fn();
+    const next = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <SubscriptionRedemptionDialog
+          lookup={lookup}
+          venueId="venue-coffee"
+          onCancel={cancel}
+          onNext={next}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Кофейный месяц")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Использовать" }));
+    expect(
+      screen.getByRole("heading", { name: "Списать одно использование?" }),
+    ).toBeInTheDocument();
+    await user.selectOptions(
+      await screen.findByLabelText("Позиция заказа"),
+      "item-1",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Подтвердить использование" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Абонемент успешно использован",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/осталось/i)).toHaveTextContent("11");
+    expect(usePass).toHaveBeenCalledWith(
+      "pass-1",
+      "venue-coffee",
+      "item-1",
+      expect.any(String),
+    );
+    await user.click(screen.getByRole("button", { name: "Следующий заказ" }));
+    expect(next).toHaveBeenCalledOnce();
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it("passes a formatted phone to the backend customer lookup", async () => {

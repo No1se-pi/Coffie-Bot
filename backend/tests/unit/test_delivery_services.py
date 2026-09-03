@@ -254,6 +254,43 @@ async def test_generic_notification_opens_the_main_mini_app() -> None:
     assert button.url is None
 
 
+async def test_subscription_usage_notification_reports_remaining_uses() -> None:
+    job = NotificationJob(
+        id=uuid4(),
+        telegram_id=101,
+        event_type="subscription.used",
+        payload={
+            "subscription_name": "Кофейный месяц",
+            "item_name": "Капучино",
+            "remaining_uses": 11,
+        },
+        attempts=1,
+        lease_until=LEASE,
+    )
+
+    message = render_notification(job, webapp_url="https://coffee.example/")
+
+    assert message.text == (
+        "Абонемент «Кофейный месяц» использован: Капучино. Осталось использований: 11."
+    )
+    assert message.button_url == "https://coffee.example/"
+
+
+async def test_subscription_usage_notification_reports_exhaustion() -> None:
+    job = NotificationJob(
+        id=uuid4(),
+        telegram_id=101,
+        event_type="subscription.used",
+        payload={"subscription_name": "Кофейный месяц", "remaining_uses": 0},
+        attempts=1,
+        lease_until=LEASE,
+    )
+
+    message = render_notification(job, webapp_url=None)
+
+    assert message.text.endswith("Использования закончились.")
+
+
 async def test_order_notification_opens_order_details() -> None:
     order_id = uuid4()
     job = NotificationJob(

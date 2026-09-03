@@ -218,6 +218,20 @@ def render_notification(
         text = f"Вам доступна награда: {name}." if name else "Вам доступна новая награда."
     elif event_type == "feedback.created":
         text = "Спасибо. Ваше обращение принято."
+    elif event_type == "subscription.used":
+        subscription_name = _short_text(payload.get("subscription_name"))
+        item_name = _short_text(payload.get("item_name"))
+        remaining_uses = _integer(payload.get("remaining_uses"))
+        label = f"Абонемент «{subscription_name}»" if subscription_name else "Абонемент"
+        text = f"{label} использован"
+        if item_name:
+            text += f": {item_name}"
+        text += "."
+        text += (
+            f" Осталось использований: {remaining_uses}."
+            if remaining_uses > 0
+            else " Использования закончились."
+        )
     elif event_type in {"staff.order.created", "staff.order.cancelled"}:
         order_number = _integer(payload.get("order_number"))
         prefix = f"Заказ №{order_number}" if order_number else "Заказ"

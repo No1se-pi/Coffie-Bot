@@ -14,6 +14,7 @@ from fastapi import status
 
 from app.core.errors import AppError
 from app.models.audit import AuditEvent
+from app.models.delivery import NotificationOutbox
 from app.models.engagement import (
     CustomerPass,
     PassPurchase,
@@ -496,6 +497,17 @@ class SubscriptionService:
                     usage,
                     _audit(
                         actor, "subscription.used", "pass_usage", usage.id, subject=value.user_id
+                    ),
+                    NotificationOutbox(
+                        id=uuid4(),
+                        user_id=value.user_id,
+                        event_type="subscription.used",
+                        payload={
+                            "subscription_name": value.name_snapshot,
+                            "item_name": item.name,
+                            "remaining_uses": value.remaining_uses,
+                        },
+                        idempotency_key=f"subscription.used:{usage.id}",
                     ),
                 ]
             )

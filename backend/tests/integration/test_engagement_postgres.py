@@ -7,7 +7,7 @@ import os
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.errors import AppError
@@ -243,6 +243,24 @@ async def test_reviews_pass_usage_race_and_bulk_bonus_are_auditable() -> None:
     outcomes = await asyncio.gather(redeem_once(), redeem_once())
     assert outcomes.count("used") == 1
     assert len([value for value in outcomes if value != "used"]) == 1
+
+    async with sessions() as session:
+        notifications = list(
+            (
+                await session.scalars(
+                    select(NotificationOutbox).where(
+                        NotificationOutbox.user_id == customer_id,
+                        NotificationOutbox.event_type == "subscription.used",
+                    )
+                )
+            ).all()
+        )
+        assert len(notifications) == 1
+        assert notifications[0].payload == {
+            "subscription_name": "Один кофе",
+            "item_name": "Pass coffee",
+            "remaining_uses": 0,
+        }
 
     bulk_key = str(uuid4())
     command = BulkBonusCommand(

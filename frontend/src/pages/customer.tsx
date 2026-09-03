@@ -148,7 +148,8 @@ export function HomePage() {
               <h2>Активные акции</h2>
               <Link to="/more">Смотреть все</Link>
             </div>
-            {resource.data.promotions.length ? (
+            {resource.data.promotions.length ||
+            (resource.data.subscription_products?.length ?? 0) ? (
               <div className="horizontal-cards">
                 {resource.data.promotions.map((promotion) => (
                   <article className="promo-card" key={promotion.id}>
@@ -159,6 +160,32 @@ export function HomePage() {
                       <Badge tone="accent">Акция</Badge>
                       <h3>{promotion.title}</h3>
                       <p>{promotion.text}</p>
+                    </div>
+                  </article>
+                ))}
+                {resource.data.subscription_products?.map((pass) => (
+                  <article
+                    className="promo-card promo-card--subscription"
+                    key={`subscription-${pass.id}`}
+                  >
+                    {pass.image_url && <img src={pass.image_url} alt="" />}
+                    <div className="promo-card__body">
+                      <Badge tone="accent">Абонемент</Badge>
+                      <h3>{pass.name}</h3>
+                      <p>{pass.description}</p>
+                      <div className="promo-card__footer">
+                        <strong>{formatMoney(pass.price_minor)}</strong>
+                        <span>
+                          {pass.total_uses} использований · {pass.validity_days}{" "}
+                          дней
+                        </span>
+                      </div>
+                      <Link
+                        className="button button--secondary"
+                        to="/menu#subscriptions"
+                      >
+                        Подробнее
+                      </Link>
                     </div>
                   </article>
                 ))}
@@ -754,7 +781,7 @@ export function MenuPage() {
       {resource.data && (
         <>
           {(passProducts.data?.items.length ?? 0) > 0 && (
-            <section className="subscription-storefront">
+            <section className="subscription-storefront" id="subscriptions">
               <div className="section-heading">
                 <div>
                   <p className="eyebrow">Абонементы</p>
@@ -771,20 +798,26 @@ export function MenuPage() {
                         alt=""
                       />
                     )}
-                    <Badge tone="accent">{pass.validity_days} дней</Badge>
-                    <h3>{pass.name}</h3>
-                    <p>{pass.description}</p>
-                    <strong>{formatMoney(pass.price_minor)}</strong>
-                    <small>{pass.total_uses} использований</small>
-                    <Button
-                      onClick={() => {
-                        setPassPurchase(null);
-                        setPurchaseError(null);
-                        setBuyingPass(pass);
-                      }}
-                    >
-                      Купить
-                    </Button>
+                    <div className="subscription-product__body">
+                      <Badge tone="accent">{pass.validity_days} дней</Badge>
+                      <h3>{pass.name}</h3>
+                      <p>{pass.description}</p>
+                      <div className="subscription-product__purchase">
+                        <div>
+                          <strong>{formatMoney(pass.price_minor)}</strong>
+                          <small>{pass.total_uses} использований</small>
+                        </div>
+                        <Button
+                          onClick={() => {
+                            setPassPurchase(null);
+                            setPurchaseError(null);
+                            setBuyingPass(pass);
+                          }}
+                        >
+                          Купить
+                        </Button>
+                      </div>
+                    </div>
                   </article>
                 ))}
               </div>

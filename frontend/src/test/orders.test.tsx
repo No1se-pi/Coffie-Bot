@@ -149,6 +149,50 @@ describe("order flows", () => {
     expect(assign).toHaveBeenCalledWith("delivery-2", "courier-1");
   });
 
+  it("shows newest active orders first and keeps finished orders in an archive", async () => {
+    const user = userEvent.setup();
+    const makeOrder = (
+      id: string,
+      number: number,
+      status: CustomerOrder["status"],
+      createdAt: string,
+    ) =>
+      ({
+        id,
+        number,
+        status,
+        fulfillment_mode: "pickup",
+        total_minor: 30000,
+        created_at: createdAt,
+        suborders: [],
+      }) as unknown as CustomerOrder;
+    vi.spyOn(coffeeApi, "getStaffOrders").mockResolvedValue({
+      items: [
+        makeOrder("old-active", 1, "new", "2026-09-01T10:00:00Z"),
+        makeOrder("finished", 2, "delivered", "2026-09-02T10:00:00Z"),
+        makeOrder("new-active", 3, "confirmed", "2026-09-03T10:00:00Z"),
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <StaffOrdersPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Активные заказы")).toBeVisible();
+    const activeNumbers = Array.from(
+      document.querySelectorAll(".order-group .order-card h2"),
+    ).map((element) => element.textContent);
+    expect(activeNumbers).toEqual(["Заказ №3", "Заказ №1"]);
+
+    const archive = screen.getByText("Архив заказов").closest("details");
+    expect(archive).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Архив заказов"));
+    expect(archive).toHaveAttribute("open");
+    expect(screen.getByText("Заказ №2")).toBeVisible();
+  });
+
   it("shows a simple pickup number and the customer progress", async () => {
     const order = {
       id: "pickup-7",

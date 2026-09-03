@@ -47,6 +47,7 @@ from app.models.loyalty_v2 import (
 from app.models.staff import FeedbackItem
 from app.repositories.customer_merges import CustomerMergeRepository
 from app.repositories.identity import IdentityRepository
+from app.repositories.loyalty import LoyaltyRepository
 from app.repositories.loyalty_v2 import PointLedgerRepository
 from app.security.rbac import Actor
 from app.services.customer_merges import CustomerMergeService
@@ -562,6 +563,14 @@ async def test_merge_chain_preserves_lineage_history_and_mutable_ownership() -> 
             middle.id,
             canonical.id,
         }
+        staff_history = await LoyaltyRepository(session).list_operations(
+            user_id=canonical.id,
+            actor_staff_id=None,
+            page=1,
+            page_size=100,
+        )
+        assert staff_history.total == history.total
+        assert {item.id for item in staff_history.items} == {item.id for item in history.items}
     finally:
         await session.close()
         if outer_transaction.is_active:

@@ -590,6 +590,7 @@ export const demoApi = {
       card: { ...card },
       active_rewards: rewards.filter((item) => item.status === "active"),
       promotions: promotions.filter((item) => item.status === "published"),
+      subscription_products: [],
     };
   },
   async getVenues(): Promise<ListResponse<Venue>> {

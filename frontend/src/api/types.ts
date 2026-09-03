@@ -761,6 +761,7 @@ export interface HomeData {
   card: CardData;
   active_rewards: Reward[];
   promotions: Promotion[];
+  subscription_products?: PassTemplate[];
 }
 
 export interface PublicMoreData {

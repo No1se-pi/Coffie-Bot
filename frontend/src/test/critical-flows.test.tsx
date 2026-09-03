@@ -816,6 +816,45 @@ describe("critical Mini App flows", () => {
     expect(getTimeGreeting(new Date(2026, 0, 1, 23))).toBe("Доброй ночи");
   });
 
+  it("shows purchasable subscriptions together with home promotions", async () => {
+    vi.spyOn(coffeeApi, "getHome").mockResolvedValue({
+      card,
+      active_rewards: [],
+      promotions: [],
+      subscription_products: [
+        {
+          id: "pass-template-1",
+          name: "Кофейный месяц",
+          description: "Кофе каждое утро",
+          image_media_id: null,
+          image_url: "/subscription.webp",
+          total_uses: 30,
+          validity_days: 30,
+          price_minor: 150000,
+          purchase_enabled: true,
+          venue_ids: [],
+          category_ids: [],
+          item_ids: [],
+          is_active: true,
+          created_at: "2026-09-03T10:00:00Z",
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Кофейный месяц")).toBeVisible();
+    expect(screen.getByText("Абонемент")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Подробнее" })).toHaveAttribute(
+      "href",
+      "/menu#subscriptions",
+    );
+  });
+
   it("restores and persists the customer venue selection on home", async () => {
     const user = userEvent.setup();
     window.localStorage.setItem(SELECTED_VENUE_STORAGE_KEY, foodVenue.id);

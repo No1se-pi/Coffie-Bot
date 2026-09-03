@@ -63,6 +63,7 @@ CLAIMED_MEDIA_TYPE_ALIASES = {
 STAFF_OVERRIDE_PERMISSIONS = frozenset(
     {
         PermissionCode.CARD_LOOKUP,
+        PermissionCode.CUSTOMERS_CREATE,
         PermissionCode.POINTS_ACCRUE,
         PermissionCode.POINTS_REDEEM,
         PermissionCode.VISITS_MARK,

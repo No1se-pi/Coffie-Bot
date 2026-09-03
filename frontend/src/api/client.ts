@@ -367,12 +367,18 @@ async function passwordLogin(payload: {
 
 async function getHome(): Promise<HomeData> {
   if (isDemoMode) return demoApi.getHome();
-  const [card, rewards, promotions] = await Promise.all([
+  const [card, rewards, promotions, subscriptionProducts] = await Promise.all([
     request<CardData>("/me/card"),
     request<ListResponse<Reward>>("/me/rewards?status=active"),
     request<ListResponse<Promotion>>("/promotions?active=true"),
+    request<ListResponse<PassTemplate>>("/subscription-products"),
   ]);
-  return { card, active_rewards: rewards.items, promotions: promotions.items };
+  return {
+    card,
+    active_rewards: rewards.items,
+    promotions: promotions.items,
+    subscription_products: subscriptionProducts.items,
+  };
 }
 
 async function getMenu(venueId?: string | null): Promise<{

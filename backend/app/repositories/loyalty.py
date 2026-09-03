@@ -449,7 +449,15 @@ class LoyaltyRepository:
     ) -> OperationPage:
         filters: list[ColumnElement[bool]] = []
         if user_id is not None:
-            lineage = select(literal(user_id).label("user_id")).cte(
+            # Bind the recursive anchor as UUID explicitly. PostgreSQL can infer
+            # an untyped asyncpg parameter as text, then reject uuid = text when
+            # a scanned subscription opens the customer's operation history.
+            lineage = select(
+                literal(
+                    user_id,
+                    type_=CustomerMerge.__table__.c.canonical_user_id.type,
+                ).label("user_id")
+            ).cte(
                 "admin_customer_history_lineage",
                 recursive=True,
             )

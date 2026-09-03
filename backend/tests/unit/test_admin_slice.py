@@ -1030,3 +1030,30 @@ async def test_staff_update_keeps_updated_at_loaded_for_the_api_response() -> No
 
     assert updated.display_name == "After"
     assert updated.updated_at == NOW
+
+
+@pytest.mark.asyncio
+async def test_staff_update_accepts_customer_creation_permission_override() -> None:
+    repository = RecordingAdminRepository()
+    staff = StaffMember(
+        id=uuid4(),
+        user_id=uuid4(),
+        role=Role.STAFF,
+        display_name="Before",
+        is_active=True,
+        archived_at=None,
+        permissions=[],
+    )
+    repository.locked_staff = LockedStaffManagement(target=staff, active_owner_count=1)
+    service = AdminService(repository=cast(AdminRepository, repository))
+
+    await service.update_staff(
+        actor=_actor(),
+        staff_id=staff.id,
+        updates={"position": "Старший бариста"},
+        permissions={PermissionCode.CUSTOMERS_CREATE: True},
+        now=NOW,
+    )
+
+    assert staff.position == "Старший бариста"
+    assert repository.permission_overrides == {PermissionCode.CUSTOMERS_CREATE: True}

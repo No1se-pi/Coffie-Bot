@@ -36,6 +36,8 @@ const nextStaffStatus: Partial<Record<OrderStatus, OrderStatus>> = {
   preparing: "ready",
 };
 
+const terminalOrderStatuses = new Set<OrderStatus>(["delivered", "cancelled"]);
+
 function getNextStaffStatusFor(
   status: OrderStatus,
   fulfillmentMode: FulfillmentMode,
@@ -799,22 +801,86 @@ export function StaffOrdersPage() {
   };
   const groups = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return (resource.data?.items ?? []).filter((order) => {
-      if (status && order.status !== status) return false;
-      if (!normalized) return true;
-      return [
-        String(order.number),
-        order.contact_phone,
-        order.delivery_address,
-        ...order.suborders.flatMap((suborder) => [
-          suborder.venue_name,
-          ...suborder.lines.map((line) => line.name),
-        ]),
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(normalized));
-    });
+    const filtered = (resource.data?.items ?? [])
+      .filter((order) => {
+        if (status && order.status !== status) return false;
+        if (!normalized) return true;
+        return [
+          String(order.number),
+          order.contact_phone,
+          order.delivery_address,
+          ...order.suborders.flatMap((suborder) => [
+            suborder.venue_name,
+            ...suborder.lines.map((line) => line.name),
+          ]),
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized));
+      })
+      .sort((left, right) => {
+        const dateDifference =
+          new Date(right.created_at).getTime() -
+          new Date(left.created_at).getTime();
+        return dateDifference || right.number - left.number;
+      });
+    return {
+      active: filtered.filter(
+        (order) => !terminalOrderStatuses.has(order.status),
+      ),
+      archived: filtered.filter((order) =>
+        terminalOrderStatuses.has(order.status),
+      ),
+    };
   }, [query, resource.data, status]);
+
+  const renderOrder = (order: CustomerOrder) => (
+    <Panel className="order-card" key={order.id}>
+      <Link className="plain-link" to={`/staff/orders/${order.id}`}>
+        <OrderSummary order={order} embedded />
+      </Link>
+      {order.suborders.map((suborder) => (
+        <p key={suborder.id}>
+          {suborder.venue_name}: {statusLabels[suborder.status]}
+        </p>
+      ))}
+      {getNextStaffStatus(order) && (
+        <Button
+          disabled={busy === order.id}
+          onClick={() => void advanceOrder(order)}
+        >
+          Следующий этап: {statusLabels[getNextStaffStatus(order)!]}
+        </Button>
+      )}
+      {order.status === "waiting_for_courier" && (
+        <div className="form-grid">
+          <Field label="Назначить курьера">
+            <select
+              value={courierByOrder[order.id] ?? ""}
+              onChange={(event) =>
+                setCourierByOrder((value) => ({
+                  ...value,
+                  [order.id]: event.target.value,
+                }))
+              }
+            >
+              <option value="">Выберите курьера</option>
+              {(couriers.data?.items ?? []).map((courier) => (
+                <option key={courier.id} value={courier.id}>
+                  {courier.display_name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button
+            disabled={busy === order.id || !courierByOrder[order.id]}
+            onClick={() => void assignCourier(order.id)}
+          >
+            Назначить
+          </Button>
+        </div>
+      )}
+    </Panel>
+  );
   return (
     <Page title="Заказы" eyebrow="Очередь кухни и выдачи">
       <Panel>
@@ -849,57 +915,34 @@ export function StaffOrdersPage() {
       )}
       {actionError && <ErrorState error={actionError} compact />}
       {resource.data &&
-        (groups.length ? (
-          <div className="card-list">
-            {groups.map((order) => (
-              <Panel className="order-card" key={order.id}>
-                <Link className="plain-link" to={`/staff/orders/${order.id}`}>
-                  <OrderSummary order={order} embedded />
-                </Link>
-                {order.suborders.map((suborder) => (
-                  <p key={suborder.id}>
-                    {suborder.venue_name}: {statusLabels[suborder.status]}
-                  </p>
-                ))}
-                {getNextStaffStatus(order) && (
-                  <Button
-                    disabled={busy === order.id}
-                    onClick={() => void advanceOrder(order)}
-                  >
-                    Следующий этап: {statusLabels[getNextStaffStatus(order)!]}
-                  </Button>
-                )}
-                {order.status === "waiting_for_courier" && (
-                  <div className="form-grid">
-                    <Field label="Назначить курьера">
-                      <select
-                        value={courierByOrder[order.id] ?? ""}
-                        onChange={(event) =>
-                          setCourierByOrder((value) => ({
-                            ...value,
-                            [order.id]: event.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">Выберите курьера</option>
-                        {(couriers.data?.items ?? []).map((courier) => (
-                          <option key={courier.id} value={courier.id}>
-                            {courier.display_name}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Button
-                      disabled={busy === order.id || !courierByOrder[order.id]}
-                      onClick={() => void assignCourier(order.id)}
-                    >
-                      Назначить
-                    </Button>
-                  </div>
-                )}
-              </Panel>
-            ))}
-          </div>
+        (groups.active.length || groups.archived.length ? (
+          <>
+            {groups.active.length > 0 && (
+              <section className="order-group">
+                <div className="section-heading">
+                  <h2>Активные заказы</h2>
+                  <Badge tone="warning">{groups.active.length}</Badge>
+                </div>
+                <div className="card-list">
+                  {groups.active.map(renderOrder)}
+                </div>
+              </section>
+            )}
+            {groups.archived.length > 0 && (
+              <details className="order-archive">
+                <summary>
+                  <span>
+                    <strong>Архив заказов</strong>
+                    <small>Доставленные и отменённые</small>
+                  </span>
+                  <Badge>{groups.archived.length}</Badge>
+                </summary>
+                <div className="card-list">
+                  {groups.archived.map(renderOrder)}
+                </div>
+              </details>
+            )}
+          </>
         ) : (
           <EmptyState
             title="Очередь пуста"

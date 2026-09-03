@@ -137,6 +137,7 @@ class CustomerPass(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "cancellation_idempotency_key",
             name="staff_pass_cancel_key",
         ),
+        UniqueConstraint("qr_payload", name="uq_customer_passes_qr_payload"),
         Index("ix_customer_passes_user_status", "user_id", "status", "expires_at"),
     )
 
@@ -162,6 +163,9 @@ class CustomerPass(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The QR never exposes the user or pass id; staff resolves this random token
+    # server-side before any usage can be confirmed.
+    qr_payload: Mapped[str] = mapped_column(String(160), nullable=False)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by_staff_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("staff_members.id", ondelete="RESTRICT")

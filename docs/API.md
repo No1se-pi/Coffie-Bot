@@ -131,6 +131,20 @@ venue accrual policy. Это не fallback на старую global formula. В 
 - `POST /staff/orders/{order_id}/transition` — только разрешённый state
   transition с optional reason/comment; бизнес-правила повторно проверяет backend.
 
+## Абонементы
+
+- `GET /subscription-products`, `POST /subscription-purchases` — витрина и заявка
+  на оплату абонемента в физической точке.
+- `GET /me/subscriptions` — выданные абонементы со счётчиком, сроком и отдельным
+  непрозрачным `coffee-pass:v1:*` QR.
+- `GET /staff/subscription-purchases`,
+  `POST /staff/subscription-purchases/{purchase_id}/confirm` — очередь оплат и
+  подтверждение любым активным сотрудником, администратором или владельцем.
+- `POST /staff/subscriptions/lookup` — безопасно разрешает QR активного абонемента
+  в карточку клиента; истёкшие, отменённые и исчерпанные абонементы скрываются.
+- `POST /staff/subscriptions/{pass_id}/use` — транзакционно списывает ровно одно
+  использование после проверки заведения и позиции меню.
+
 ## Admin audit/content
 
 - `GET /admin/venues`, `GET /admin/venues/{id}`, `POST|PATCH /admin/venues`;

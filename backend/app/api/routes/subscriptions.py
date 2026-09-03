@@ -17,12 +17,15 @@ from app.schemas.subscriptions import (
     PassPurchaseCreateRequest,
     PassPurchaseListResponse,
     PassPurchaseResponse,
+    PassQrLookupRequest,
+    PassQrLookupResponse,
     PassTemplateCreateRequest,
     PassTemplateListResponse,
     PassTemplateResponse,
     PassTemplateUpdateRequest,
     PassUsageResponse,
     PassUseRequest,
+    pass_qr_lookup_response,
     pass_response,
     purchase_response,
     template_response,
@@ -38,6 +41,7 @@ CurrentActor = Annotated[Actor, Depends(get_current_actor)]
 PassReader = Annotated[Actor, Depends(require_permissions(PermissionCode.SUBSCRIPTIONS_READ))]
 PassManager = Annotated[Actor, Depends(require_permissions(PermissionCode.SUBSCRIPTIONS_MANAGE))]
 PassAdmin = Annotated[Actor, Depends(require_roles(Role.ADMIN, Role.OWNER))]
+AnyEmployee = Annotated[Actor, Depends(require_roles(Role.STAFF, Role.ADMIN, Role.OWNER))]
 
 
 def _service(session: AsyncSession) -> SubscriptionService:
@@ -89,7 +93,7 @@ async def my_subscription_purchases(
 
 @router.get("/staff/subscription-purchases", response_model=PassPurchaseListResponse)
 async def pending_subscription_purchases(
-    actor: PassManager, session: DatabaseSession
+    actor: AnyEmployee, session: DatabaseSession
 ) -> PassPurchaseListResponse:
     values = await _service(session).list_pending_purchases(actor)
     return PassPurchaseListResponse(items=[purchase_response(value) for value in values])
@@ -100,9 +104,16 @@ async def pending_subscription_purchases(
     response_model=PassPurchaseResponse,
 )
 async def confirm_subscription_purchase(
-    purchase_id: UUID, actor: PassManager, session: DatabaseSession
+    purchase_id: UUID, actor: AnyEmployee, session: DatabaseSession
 ) -> PassPurchaseResponse:
     return purchase_response(await _service(session).confirm_purchase(actor, purchase_id))
+
+
+@router.post("/staff/subscriptions/lookup", response_model=PassQrLookupResponse)
+async def lookup_subscription_qr(
+    payload: PassQrLookupRequest, actor: AnyEmployee, session: DatabaseSession
+) -> PassQrLookupResponse:
+    return pass_qr_lookup_response(await _service(session).lookup_qr(actor, payload.qr_payload))
 
 
 @router.get("/staff/customers/{user_id}/subscriptions", response_model=CustomerPassListResponse)

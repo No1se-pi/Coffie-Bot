@@ -7,6 +7,8 @@ import type { BulkBonusPreview, CustomerPass } from "../api/types";
 import {
   AdminBulkBonusPage,
   AdminSubscriptionsPage,
+  MySubscriptionsSection,
+  StaffPendingPassPurchases,
   StaffPassPanel,
 } from "../pages/engagement";
 
@@ -17,6 +19,7 @@ const activePass: CustomerPass = {
   name: "Кофе на выбор",
   description: "Один тестовый кофе",
   image_media_id: null,
+  qr_payload: "coffee-pass:v1:opaque-subscription-token",
   total_uses: 2,
   remaining_uses: 1,
   status: "active",
@@ -27,6 +30,74 @@ const activePass: CustomerPass = {
 };
 
 describe("engagement workflows", () => {
+  it("opens an active subscription as a scannable QR", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getMyPasses").mockResolvedValue({
+      items: [activePass],
+    });
+    vi.spyOn(coffeeApi, "getMyPassPurchases").mockResolvedValue({ items: [] });
+
+    render(
+      <MemoryRouter>
+        <MySubscriptionsSection />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Открыть QR" }));
+    expect(screen.getByTestId("subscription-qr")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("QR-код абонемента Кофе на выбор"),
+    ).toBeInTheDocument();
+  });
+
+  it("lets any staff member confirm a pending subscription purchase", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getPendingPassPurchases")
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "purchase-1",
+            number: 42,
+            template_id: "template-1",
+            user_id: "customer-1",
+            name: "Кофе на выбор",
+            price_minor: 149000,
+            payment_method: "card_on_receipt",
+            status: "pending",
+            customer_pass_id: null,
+            created_at: "2026-09-03T10:00:00Z",
+            paid_at: null,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ items: [] });
+    const confirm = vi
+      .spyOn(coffeeApi, "confirmPassPurchase")
+      .mockResolvedValue({
+        id: "purchase-1",
+        number: 42,
+        template_id: "template-1",
+        user_id: "customer-1",
+        name: "Кофе на выбор",
+        price_minor: 149000,
+        payment_method: "card_on_receipt",
+        status: "paid",
+        customer_pass_id: "pass-1",
+        created_at: "2026-09-03T10:00:00Z",
+        paid_at: "2026-09-03T10:01:00Z",
+      });
+
+    render(
+      <MemoryRouter>
+        <StaffPendingPassPurchases />
+      </MemoryRouter>,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Оплата получена" }),
+    );
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith("purchase-1"));
+  });
+
   it("keeps selected venues, categories and items in a pass template", async () => {
     const user = userEvent.setup();
     vi.spyOn(coffeeApi, "getPassTemplates").mockResolvedValue({ items: [] });

@@ -72,6 +72,7 @@ import type {
   StaffClient,
   StaffClientLookup,
   StaffRewardLookup,
+  StaffPassLookup,
   StaffMemberDraft,
   StaffProfile,
   TipProfile,
@@ -1684,6 +1685,11 @@ export const coffeeApi = {
     }),
   getCustomerPasses: (userId: string): Promise<{ items: CustomerPass[] }> =>
     request(`/staff/customers/${encodeURIComponent(userId)}/subscriptions`),
+  lookupStaffPass: (qrPayload: string): Promise<StaffPassLookup> =>
+    request("/staff/subscriptions/lookup", {
+      method: "POST",
+      body: jsonBody({ qr_payload: qrPayload }),
+    }),
   usePass: (
     passId: string,
     venueId: string,

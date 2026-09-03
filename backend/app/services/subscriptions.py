@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
@@ -22,8 +23,20 @@ from app.models.engagement import (
     PassTemplateVenue,
     PassUsage,
 )
-from app.models.enums import AuditSeverity, PassStatus, PaymentMethod, PermissionCode, Role
-from app.repositories.subscriptions import PassRecord, SubscriptionRepository, TemplateAccess
+from app.models.enums import (
+    AuditSeverity,
+    PassStatus,
+    PaymentMethod,
+    PermissionCode,
+    Role,
+    UserStatus,
+)
+from app.repositories.subscriptions import (
+    PassQrRecord,
+    PassRecord,
+    SubscriptionRepository,
+    TemplateAccess,
+)
 from app.security.rbac import Actor
 
 
@@ -212,15 +225,13 @@ class SubscriptionService:
         return await self._repository.list_purchases(user_id=actor.user_id)
 
     async def list_pending_purchases(self, actor: Actor) -> list[PassPurchase]:
-        if not actor.can(PermissionCode.SUBSCRIPTIONS_MANAGE):
-            _forbidden()
+        _require_employee(actor)
         return await self._repository.list_purchases(status="pending")
 
     async def confirm_purchase(
         self, actor: Actor, purchase_id: UUID, *, now: datetime | None = None
     ) -> PassPurchase:
-        if not actor.can(PermissionCode.SUBSCRIPTIONS_MANAGE):
-            _forbidden()
+        _require_employee(actor)
         current_time = now or datetime.now(UTC)
         staff_id = _staff_id(actor)
         async with self._repository.transaction():
@@ -249,6 +260,7 @@ class SubscriptionService:
                 issued_by_staff_id=staff_id,
                 idempotency_key=f"purchase:{purchase.id}",
                 request_hash=purchase.request_hash,
+                qr_payload=_new_pass_qr_payload(),
             )
             self._repository.add_all([customer_pass])
             await self._repository.flush()
@@ -334,6 +346,7 @@ class SubscriptionService:
                 issued_by_staff_id=staff_id,
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
+                qr_payload=_new_pass_qr_payload(),
             )
             self._repository.add_all(
                 [
@@ -395,6 +408,22 @@ class SubscriptionService:
 
     async def list_mine(self, actor: Actor) -> list[PassRecord]:
         return await self._repository.list_passes(user_id=actor.user_id)
+
+    async def lookup_qr(self, actor: Actor, qr_payload: str) -> PassQrRecord:
+        _require_employee(actor)
+        if not qr_payload.startswith("coffee-pass:v1:"):
+            _not_found("Активный абонемент не найден")
+        record = await self._repository.get_pass_by_qr(qr_payload)
+        current_time = datetime.now(UTC)
+        if (
+            record is None
+            or record.user.status is not UserStatus.ACTIVE
+            or record.customer_pass.status is not PassStatus.ACTIVE
+            or record.customer_pass.expires_at <= current_time
+            or record.customer_pass.remaining_uses <= 0
+        ):
+            _not_found("Активный абонемент не найден")
+        return record
 
     async def list_customer(self, actor: Actor, user_id: UUID) -> list[PassRecord]:
         if not actor.can(PermissionCode.SUBSCRIPTIONS_READ):
@@ -511,6 +540,17 @@ def _staff_id(actor: Actor) -> UUID:
 def _require_admin(actor: Actor) -> None:
     if actor.role not in {Role.ADMIN, Role.OWNER}:
         _forbidden()
+
+
+def _require_employee(actor: Actor) -> None:
+    """Allow every active operational employee, regardless of optional overrides."""
+
+    if actor.role not in {Role.STAFF, Role.ADMIN, Role.OWNER}:
+        _forbidden()
+
+
+def _new_pass_qr_payload() -> str:
+    return f"coffee-pass:v1:{secrets.token_urlsafe(32)}"
 
 
 def _clean(value: str) -> str:

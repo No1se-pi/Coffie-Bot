@@ -300,7 +300,10 @@ export function AdminDeliveryPage() {
                     ))}
                 </select>
               </Field>
-              <Field label="Точка консолидации">
+              <Field
+                label="Где собирают заказы доставки"
+                hint="Необязательно. Выберите общий хаб, только если курьеры забирают заказы не из точки приготовления."
+              >
                 <select
                   value={settings.consolidation_location_id ?? ""}
                   onChange={(event) =>
@@ -310,7 +313,7 @@ export function AdminDeliveryPage() {
                     })
                   }
                 >
-                  <option value="">Не выбрана</option>
+                  <option value="">Прямо из точки приготовления</option>
                   {resource.data.locations
                     .filter((value) => value.consolidation_enabled)
                     .map((value) => (
@@ -329,9 +332,9 @@ export function AdminDeliveryPage() {
           <Panel id="locations">
             <h2>Точки</h2>
             <p className="muted">
-              Точка — физический адрес конкретного заведения. «Выдача» разрешает
-              самовывоз, «консолидация» позволяет собирать здесь доставочные
-              заказы.
+              Точка — физический адрес конкретного заведения. Карточки ниже
+              свёрнуты: нажмите на нужную, чтобы изменить адрес, карту или
+              режимы работы.
             </p>
             <div className="card-list">
               {resource.data.locations.map((location) => (
@@ -679,195 +682,224 @@ function LocationEditor({
 }) {
   const [draft, setDraft] = useState(value);
   const [uploading, setUploading] = useState(false);
+  const [open, setOpen] = useState(false);
   useEffect(() => setDraft(value), [value]);
   return (
-    <div className="delivery-location">
-      <div>
-        <strong>{draft.name}</strong>
-        <small>{draft.address}</small>
-      </div>
-      <Field label="Заведение">
-        <select
-          value={draft.venue_id ?? ""}
-          onChange={(event) =>
-            setDraft({ ...draft, venue_id: event.target.value || null })
-          }
-        >
-          <option value="">Общая точка организации</option>
-          {venues.map((venue) => (
-            <option key={venue.id} value={venue.id}>
-              {venue.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Название точки">
-        <input
-          value={draft.name}
-          onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-        />
-      </Field>
-      <Field label="Адрес">
-        <input
-          value={draft.address}
-          onChange={(event) =>
-            setDraft({ ...draft, address: event.target.value })
-          }
-        />
-      </Field>
-      <div className="form-grid">
-        <Field label="Телефон">
-          <input
-            value={draft.phone ?? ""}
-            onChange={(event) =>
-              setDraft({ ...draft, phone: event.target.value || null })
+    <details
+      className="delivery-location"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="delivery-location__summary">
+        <span>
+          <strong>{draft.name}</strong>
+          <small>{draft.address}</small>
+        </span>
+        <span className="delivery-location__summary-status">
+          {draft.pickup_enabled && <small>Самовывоз</small>}
+          {draft.consolidation_enabled && <small>Сборка доставки</small>}
+          <b aria-hidden="true">⌄</b>
+        </span>
+      </summary>
+      {open && (
+        <div className="delivery-location__body">
+          <Field label="Заведение">
+            <select
+              value={draft.venue_id ?? ""}
+              onChange={(event) =>
+                setDraft({ ...draft, venue_id: event.target.value || null })
+              }
+            >
+              <option value="">Общая точка организации</option>
+              {venues.map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Название точки">
+            <input
+              value={draft.name}
+              onChange={(event) =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Адрес">
+            <input
+              value={draft.address}
+              onChange={(event) =>
+                setDraft({ ...draft, address: event.target.value })
+              }
+            />
+          </Field>
+          <div className="form-grid">
+            <Field label="Телефон">
+              <input
+                value={draft.phone ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, phone: event.target.value || null })
+                }
+              />
+            </Field>
+            <Field label="Ссылка на карту">
+              <input
+                type="url"
+                value={draft.map_url ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, map_url: event.target.value || null })
+                }
+              />
+            </Field>
+          </div>
+          <div className="form-grid">
+            <Field label="Широта">
+              <input
+                type="number"
+                step="0.000001"
+                min={-90}
+                max={90}
+                value={draft.latitude ?? ""}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    latitude: event.target.value
+                      ? Number(event.target.value)
+                      : null,
+                  })
+                }
+              />
+            </Field>
+            <Field label="Долгота">
+              <input
+                type="number"
+                step="0.000001"
+                min={-180}
+                max={180}
+                value={draft.longitude ?? ""}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    longitude: event.target.value
+                      ? Number(event.target.value)
+                      : null,
+                  })
+                }
+              />
+            </Field>
+          </div>
+          <DeliveryMap
+            marker={
+              draft.latitude !== null && draft.longitude !== null
+                ? { latitude: draft.latitude, longitude: draft.longitude }
+                : null
             }
-          />
-        </Field>
-        <Field label="Ссылка на карту">
-          <input
-            type="url"
-            value={draft.map_url ?? ""}
-            onChange={(event) =>
-              setDraft({ ...draft, map_url: event.target.value || null })
-            }
-          />
-        </Field>
-      </div>
-      <div className="form-grid">
-        <Field label="Широта">
-          <input
-            type="number"
-            step="0.000001"
-            min={-90}
-            max={90}
-            value={draft.latitude ?? ""}
-            onChange={(event) =>
+            markerLabel={draft.name}
+            onMarkerChange={(point) =>
               setDraft({
                 ...draft,
-                latitude: event.target.value
-                  ? Number(event.target.value)
-                  : null,
+                latitude: point.latitude,
+                longitude: point.longitude,
               })
             }
           />
-        </Field>
-        <Field label="Долгота">
-          <input
-            type="number"
-            step="0.000001"
-            min={-180}
-            max={180}
-            value={draft.longitude ?? ""}
-            onChange={(event) =>
-              setDraft({
-                ...draft,
-                longitude: event.target.value
-                  ? Number(event.target.value)
-                  : null,
-              })
-            }
-          />
-        </Field>
-      </div>
-      <DeliveryMap
-        marker={
-          draft.latitude !== null && draft.longitude !== null
-            ? { latitude: draft.latitude, longitude: draft.longitude }
-            : null
-        }
-        markerLabel={draft.name}
-        onMarkerChange={(point) =>
-          setDraft({
-            ...draft,
-            latitude: point.latitude,
-            longitude: point.longitude,
-          })
-        }
-      />
-      <Field
-        label="Фотография точки"
-        hint="Рекомендуемый размер: 1600×900 px (16:9). JPEG, PNG или WebP, до 5 МБ"
-      >
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          disabled={disabled || uploading}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            setUploading(true);
-            void coffeeApi
-              .uploadAdminMedia(file, "location")
-              .then((media) =>
-                setDraft((current) => ({
-                  ...current,
-                  image_media_id: media.id,
-                })),
-              )
-              .finally(() => setUploading(false));
-          }}
-        />
-      </Field>
-      <label>
-        <input
-          type="checkbox"
-          checked={draft.is_active}
-          onChange={(event) =>
-            setDraft({ ...draft, is_active: event.target.checked })
-          }
-        />{" "}
-        Активна
-      </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={draft.pickup_enabled}
-          onChange={(event) =>
-            setDraft({ ...draft, pickup_enabled: event.target.checked })
-          }
-        />{" "}
-        Выдача
-      </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={draft.consolidation_enabled}
-          onChange={(event) =>
-            setDraft({ ...draft, consolidation_enabled: event.target.checked })
-          }
-        />{" "}
-        Консолидация
-      </label>
-      <Field label="Приготовление, мин">
-        <input
-          type="number"
-          min={0}
-          max={1440}
-          value={draft.preparation_minutes}
-          onChange={(event) =>
-            setDraft({
-              ...draft,
-              preparation_minutes: Number(event.target.value),
-            })
-          }
-        />
-      </Field>
-      <Field label="Комментарий к выдаче">
-        <input
-          value={draft.pickup_comment ?? ""}
-          onChange={(event) =>
-            setDraft({ ...draft, pickup_comment: event.target.value || null })
-          }
-        />
-      </Field>
-      <Button
-        variant="secondary"
-        disabled={disabled}
-        onClick={() => void onSave(draft)}
-      >
-        Сохранить точку
-      </Button>
-    </div>
+          <Field
+            label="Фотография точки"
+            hint="Рекомендуемый размер: 1600×900 px (16:9). JPEG, PNG или WebP, до 5 МБ"
+          >
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={disabled || uploading}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                setUploading(true);
+                void coffeeApi
+                  .uploadAdminMedia(file, "location")
+                  .then((media) =>
+                    setDraft((current) => ({
+                      ...current,
+                      image_media_id: media.id,
+                    })),
+                  )
+                  .finally(() => setUploading(false));
+              }}
+            />
+          </Field>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={draft.is_active}
+              onChange={(event) =>
+                setDraft({ ...draft, is_active: event.target.checked })
+              }
+            />{" "}
+            Активна
+          </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={draft.pickup_enabled}
+              onChange={(event) =>
+                setDraft({ ...draft, pickup_enabled: event.target.checked })
+              }
+            />{" "}
+            Доступна для самовывоза
+          </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={draft.consolidation_enabled}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  consolidation_enabled: event.target.checked,
+                })
+              }
+            />{" "}
+            Здесь собирают заказы доставки
+          </label>
+          <p className="muted">
+            Включайте сборку доставки, только если курьер забирает здесь готовые
+            заказы. После сохранения точка появится в поле «Где собирают заказы
+            доставки» выше.
+          </p>
+          <Field label="Приготовление, мин">
+            <input
+              type="number"
+              min={0}
+              max={1440}
+              value={draft.preparation_minutes}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  preparation_minutes: Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field label="Комментарий к выдаче">
+            <input
+              value={draft.pickup_comment ?? ""}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  pickup_comment: event.target.value || null,
+                })
+              }
+            />
+          </Field>
+          <Button
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => void onSave(draft)}
+          >
+            Сохранить точку
+          </Button>
+        </div>
+      )}
+    </details>
   );
 }

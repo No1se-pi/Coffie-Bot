@@ -28,7 +28,7 @@ import { AuthContext } from "../auth/AuthContext";
 import { closeTelegramScanner, scanQrWithTelegram } from "../telegram";
 import { formatDateTime, formatMoney, rublesToMinor } from "../utils/format";
 import { ReceiptQuickForm } from "./receipts";
-import { StaffPassPanel } from "./engagement";
+import { StaffPassPanel, StaffPendingPassPurchases } from "./engagement";
 import {
   Avatar,
   Badge,
@@ -210,6 +210,7 @@ export function StaffHomePage() {
           Сканировать, ввести код или телефон
         </Link>
       </Panel>
+      <StaffPendingPassPurchases />
       <section>
         <div className="section-heading">
           <h2>Последние операции</h2>
@@ -299,6 +300,27 @@ export function ScannerPage() {
     setCameraMessage(null);
     setError(null);
     const started = scanQrWithTelegram((value) => {
+      if (value.startsWith("coffee-pass:v1:")) {
+        setLoading(true);
+        void coffeeApi
+          .lookupStaffPass(value)
+          .then(async (found) => {
+            const customer = await coffeeApi.lookupStaffClient({
+              short_code: found.customer_short_code,
+            });
+            setClient(customer);
+            navigate(`/staff/client/${encodeURIComponent(customer.user_id)}`);
+          })
+          .catch((reason: unknown) =>
+            setError(
+              reason instanceof Error
+                ? reason
+                : new Error("Абонемент не найден"),
+            ),
+          )
+          .finally(() => setLoading(false));
+        return;
+      }
       if (value.startsWith("coffee-reward:v1:")) {
         setLoading(true);
         void coffeeApi
@@ -448,7 +470,7 @@ export function ScannerPage() {
           <b>▦</b>
         </div>
         <h2>Наведите камеру на QR-код</h2>
-        <p>Сканер распознает карту клиента или QR купленной награды.</p>
+        <p>Сканер распознает карту клиента, награду или абонемент.</p>
         <Button onClick={startScanner} disabled={loading}>
           Открыть сканер Telegram
         </Button>

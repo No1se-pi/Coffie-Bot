@@ -953,6 +953,9 @@ export interface AuditEvent {
   message: string;
   actor_name?: string | null;
   subject_name?: string | null;
+  object_type?: string | null;
+  object_id?: string | null;
+  metadata: Record<string, unknown>;
   severity: "info" | "warning" | "critical";
   suspicious: boolean;
   created_at: string;

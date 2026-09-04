@@ -44,6 +44,7 @@ import {
 import {
   AdminAdjustmentPage,
   AdminCustomerMergePage,
+  AuditEventEntry,
   AdminFeedbackPage,
   AdminMenuPage,
   AdminPromotionsPage,
@@ -1973,5 +1974,46 @@ describe("critical Mini App flows", () => {
     expect(document.documentElement.style.colorScheme).toBe("dark");
     expect(readTheme()).toBe("anime-dark");
     window.localStorage.removeItem("coffie.theme");
+  });
+
+  it("keeps audit details collapsed until an admin opens the event", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <div className="event-list">
+          <AuditEventEntry
+            event={{
+              id: "event-order-1",
+              type: "order.status_changed",
+              message: "Статус заказа изменён: «Новый» → «Подтверждён»",
+              actor_name: "staff-1",
+              subject_name: null,
+              object_type: "customer_order",
+              object_id: "order-1",
+              metadata: {
+                order_id: "order-1",
+                from: "new",
+                to: "confirmed",
+              },
+              severity: "info",
+              suspicious: false,
+              created_at: "2026-09-04T00:10:00Z",
+            }}
+          />
+        </div>
+      </MemoryRouter>,
+    );
+
+    const technicalType = screen.getByText("order.status_changed");
+    expect(technicalType).not.toBeVisible();
+    const summary = screen
+      .getByText("Статус заказа изменён: «Новый» → «Подтверждён»")
+      .closest("summary");
+    expect(summary).not.toBeNull();
+    await user.click(summary!);
+
+    expect(technicalType).toBeVisible();
+    expect(screen.getByText("Предыдущий статус")).toBeVisible();
+    expect(screen.getAllByText("Подтверждён").length).toBeGreaterThan(0);
   });
 });

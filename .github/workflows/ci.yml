@@ -29,21 +29,18 @@ jobs:
       - name: Validate PowerShell scripts
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path scripts/backup.ps1),
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
-          $restoreTokens = $null
-          $restoreErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path scripts/restore.ps1),
-            [ref]$restoreTokens,
-            [ref]$restoreErrors
-          ) | Out-Null
-          $allErrors = @($errors) + @($restoreErrors)
+          # Keep every checked-in maintenance script covered as the set grows.
+          $allErrors = @()
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            $allErrors += @($errors)
+          }
           if ($allErrors.Count -gt 0) {
             $allErrors | Format-List
             exit 1

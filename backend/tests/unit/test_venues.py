@@ -161,6 +161,13 @@ def test_venue_schemas_normalize_content_and_reject_unsafe_patch_shapes() -> Non
     assert payload.name == "Кофейня и точка"
     assert payload.description == "Описание"
 
+    with pytest.raises(ValidationError, match="https"):
+        VenueCreate(
+            slug="unsafe-link",
+            name="Кофейня",
+            website="http://example.com/coffee",
+        )
+
     with pytest.raises(ValidationError):
         VenueCreate.model_validate(
             {"slug": "Coffee Point", "name": "Кофейня", "tenant_id": str(uuid4())}

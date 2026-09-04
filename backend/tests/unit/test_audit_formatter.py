@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.audit_formatter import format_audit_event, format_money_minor
 
 
@@ -61,3 +63,44 @@ def test_staff_role_change_uses_role_labels() -> None:
         )
         == "Роль сотрудника изменена: «Сотрудник» → «Курьер»"
     )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "metadata", "expected_fragment"),
+    [
+        (
+            "points.accrual_pending",
+            {"points": 10, "purchase_amount_minor": 12_500},
+            "ожидает подтверждения",
+        ),
+        ("points.redeemed", {"points": 20}, "списано 20 баллов"),
+        ("points.adjusted", {"delta_points": -5}, "снято 5 баллов"),
+        ("visit.marked", {"streak": 3}, "Текущая серия: 3"),
+        ("stamp.added", {"stamps": 4}, "Всего штампов: 4"),
+        ("reward.created", {"reward_name": "Кофе"}, "награду «Кофе»"),
+        ("reward.redeemed", {"reward_name": "Кофе"}, "погашена награда «Кофе»"),
+        (
+            "reward.cancelled",
+            {"reward_name": "Кофе", "reason": "ошибка"},
+            "Причина: ошибка",
+        ),
+        ("card.blocked", {"reason": "проверка"}, "заблокирована"),
+        ("card.unblocked", {}, "разблокирована"),
+        ("card.reissued", {}, "QR-карта"),
+        ("tip_profile.submitted", {}, "отправлены на проверку"),
+        ("broadcast.created", {"title": "Новость"}, "рассылка «Новость»"),
+        ("promotion.published", {"title": "Скидка"}, "акция «Скидка»"),
+    ],
+)
+def test_specialized_audit_formatters(
+    event_type: str,
+    metadata: dict[str, object],
+    expected_fragment: str,
+) -> None:
+    assert expected_fragment in format_audit_event(event_type, metadata)
+
+
+def test_incomplete_status_metadata_has_readable_fallback() -> None:
+    assert format_audit_event("order.status_changed", {}) == "Статус заказа изменён"
+    assert format_audit_event("order.courier_status_changed", {}) == "Курьер изменил статус заказа"
+    assert format_audit_event("staff.role_changed", {}) == "Роль сотрудника изменена"

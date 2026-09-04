@@ -236,14 +236,16 @@ function uuid(): string {
 
   // FastAPI validates Idempotency-Key as a UUID, including in older WebViews
   // where randomUUID is missing but getRandomValues is still available.
-  const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
+  if (!globalThis.crypto?.getRandomValues) {
+    // A predictable key can make two financial operations collide. Old
+    // WebViews without a cryptographic RNG must fail closed instead.
+    throw new ApiError(
+      "Браузер не поддерживает безопасное оформление операции. Обновите Telegram или браузер.",
+      { status: 0, code: "secure_random_unavailable" },
+    );
   }
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
   const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0"));

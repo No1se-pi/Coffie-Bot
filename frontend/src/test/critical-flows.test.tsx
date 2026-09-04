@@ -1994,6 +1994,12 @@ describe("critical Mini App flows", () => {
                 order_id: "order-1",
                 from: "new",
                 to: "confirmed",
+                active: true,
+                empty: null,
+                purchase_amount_minor: 12_500,
+                changes: ["role", { source: "scanner" }, 3],
+                context: { channel: "courier" },
+                unexpected: Symbol("unsupported"),
               },
               severity: "info",
               suspicious: false,
@@ -2015,5 +2021,12 @@ describe("critical Mini App flows", () => {
     expect(technicalType).toBeVisible();
     expect(screen.getByText("Предыдущий статус")).toBeVisible();
     expect(screen.getAllByText("Подтверждён").length).toBeGreaterThan(0);
+    expect(screen.getByText(/"channel": "courier"/)).toBeVisible();
+    expect(screen.getByText("Да")).toBeVisible();
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.getByText("125 ₽")).toBeVisible();
+    expect(
+      screen.getByText(/Новая роль, \{"source":"scanner"\}, 3/),
+    ).toBeVisible();
   });
 });

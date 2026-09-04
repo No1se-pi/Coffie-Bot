@@ -328,9 +328,7 @@ function PromotionRuleEditor({
   const [error, setError] = useState<string | null>(null);
   const percent = form.action_type === "percent_discount";
   const discountDisplay =
-    form.discount_value == null
-      ? ""
-      : String(percent ? form.discount_value / 100 : form.discount_value / 100);
+    form.discount_value == null ? "" : String(form.discount_value / 100);
   const toggleId = (
     key: "category_ids" | "menu_item_ids",
     id: string,

@@ -90,25 +90,28 @@ const auditObjectLabels: Record<string, string> = {
   loyalty_settings: "Настройки лояльности",
 };
 
+function auditArrayItem(value: unknown): string {
+  if (typeof value === "string") return auditMetadataLabels[value] ?? value;
+  if (typeof value === "object" && value !== null) return JSON.stringify(value);
+  return String(value);
+}
+
 function auditDetailValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Да" : "Нет";
   if (typeof value === "string") return auditValueLabels[value] ?? value;
-  if (Array.isArray(value))
-    return value
-      .map((item) =>
-        typeof item === "string"
-          ? (auditMetadataLabels[item] ?? item)
-          : String(item),
-      )
-      .join(", ");
+  if (Array.isArray(value)) return value.map(auditArrayItem).join(", ");
   if (typeof value === "object") return JSON.stringify(value, null, 2);
   if (key === "purchase_amount_minor" && typeof value === "number")
     return formatMoney(value);
-  return String(value);
+  if (typeof value === "number" || typeof value === "bigint")
+    return String(value);
+  // Metadata originates on the backend. Preserve unexpected values as JSON
+  // instead of showing the unhelpful default "[object Object]" rendering.
+  return JSON.stringify(value) ?? "—";
 }
 
-export function AuditEventEntry({ event }: { event: AuditEvent }) {
+export function AuditEventEntry({ event }: Readonly<{ event: AuditEvent }>) {
   const metadata = Object.entries(event.metadata);
   return (
     <article

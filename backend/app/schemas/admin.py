@@ -296,7 +296,7 @@ class PromotionCreate(ApiSchema):
     @field_validator("button_url")
     @classmethod
     def validate_url(cls, value: str | None) -> str | None:
-        return optional_http_url(value)
+        return optional_https_url(value)
 
     @model_validator(mode="after")
     def validate_window(self) -> Self:
@@ -316,7 +316,7 @@ class PromotionUpdate(ApiSchema):
     @field_validator("button_url")
     @classmethod
     def validate_url(cls, value: str | None) -> str | None:
-        return optional_http_url(value)
+        return optional_https_url(value)
 
 
 class FeedbackAdminResponse(ApiSchema):
@@ -429,7 +429,7 @@ class TipProfileUpdate(ApiSchema):
     @field_validator("tip_url")
     @classmethod
     def validate_tip_url(cls, value: str) -> str:
-        return optional_http_url(value) or ""
+        return optional_https_url(value) or ""
 
 
 class TipProfileResponse(ApiSchema):
@@ -799,12 +799,12 @@ def promotion_window(starts_at: datetime | None, ends_at: datetime | None) -> No
         raise ValueError("ends_at must be after starts_at")
 
 
-def optional_http_url(value: str | None) -> str | None:
+def optional_https_url(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip()
     if not normalized:
         return None
-    if not normalized.lower().startswith(("https://", "http://")):
-        raise ValueError("URL must use http or https")
+    if not normalized.lower().startswith("https://"):
+        raise ValueError("URL must use https")
     return normalized

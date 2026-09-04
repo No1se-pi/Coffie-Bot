@@ -17,7 +17,7 @@ jobs:
     name: Compose and production images
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate development Compose
         run: docker compose --env-file .env.example -f compose.yaml config --quiet
       - name: Validate production Compose
@@ -74,8 +74,8 @@ jobs:
       DEV_AUTH_ENABLED: "false"
       SESSION_TOKEN_PEPPER: ci-only-session-pepper-not-a-production-secret-0123456789abcdef
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install backend
@@ -102,8 +102,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24.15.0"
           cache: npm

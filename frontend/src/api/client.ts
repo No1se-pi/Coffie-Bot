@@ -435,6 +435,9 @@ interface BackendAuditEvent {
   actor_user_id?: string | null;
   actor_staff_id?: string | null;
   subject_user_id?: string | null;
+  object_type?: string | null;
+  object_id?: string | null;
+  metadata: Record<string, unknown>;
   severity: "info" | "warning" | "critical";
   suspicious: boolean;
   human_message: string;
@@ -609,6 +612,9 @@ function normalizeAuditEvent(event: BackendAuditEvent): AuditEvent {
     message: event.human_message,
     actor_name: event.actor_staff_id ?? event.actor_user_id,
     subject_name: event.subject_user_id,
+    object_type: event.object_type,
+    object_id: event.object_id,
+    metadata: event.metadata,
     severity: event.severity,
     suspicious: event.suspicious,
     created_at: event.created_at,

@@ -19,6 +19,7 @@ const activePass: CustomerPass = {
   name: "Кофе на выбор",
   description: "Один тестовый кофе",
   image_media_id: null,
+  image_url: "/media/subscription-cover.png",
   qr_payload: "coffee-pass:v1:opaque-subscription-token",
   total_uses: 2,
   remaining_uses: 1,
@@ -43,6 +44,11 @@ describe("engagement workflows", () => {
       </MemoryRouter>,
     );
 
+    await screen.findByText("Кофе на выбор");
+    expect(document.querySelector(".pass-card__image")).toHaveAttribute(
+      "src",
+      "/media/subscription-cover.png",
+    );
     await user.click(await screen.findByRole("button", { name: "Открыть QR" }));
     expect(screen.getByTestId("subscription-qr")).toBeInTheDocument();
     expect(

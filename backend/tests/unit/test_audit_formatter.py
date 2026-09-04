@@ -30,3 +30,34 @@ def test_reversal_contains_reason() -> None:
 
 def test_unknown_event_has_safe_fallback() -> None:
     assert format_audit_event("future.event", {}) == "Системное событие [future.event]"
+
+
+def test_order_transition_uses_russian_status_labels() -> None:
+    assert (
+        format_audit_event(
+            "order.status_changed",
+            {"from": "preparing", "to": "waiting_for_courier"},
+        )
+        == "Статус заказа изменён: «Готовится» → «Ожидает курьера»"
+    )
+
+
+def test_courier_and_subscription_events_have_human_labels() -> None:
+    assert (
+        format_audit_event("order.courier_status_changed", {"status": "in_transit"})
+        == "Курьер изменил статус заказа: «В пути»"
+    )
+    assert (
+        format_audit_event("subscription.purchase_confirmed", {})
+        == "Покупка абонемента подтверждена сотрудником"
+    )
+
+
+def test_staff_role_change_uses_role_labels() -> None:
+    assert (
+        format_audit_event(
+            "staff.role_changed",
+            {"previous_role": "staff", "role": "courier"},
+        )
+        == "Роль сотрудника изменена: «Сотрудник» → «Курьер»"
+    )

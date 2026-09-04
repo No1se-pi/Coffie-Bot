@@ -9,6 +9,7 @@ import type {
   AdminFeedback,
   AdminStaffMember,
   AdjustmentPreview,
+  AuditEvent,
   CustomerIdentityProvider,
   CustomerMergePreview,
   CustomerMergeProfile,
@@ -37,6 +38,135 @@ import {
   Page,
   Panel,
 } from "../components/ui";
+
+const auditMetadataLabels: Record<string, string> = {
+  order_id: "Заказ",
+  courier_staff_id: "Курьер",
+  previous_courier_staff_id: "Предыдущий курьер",
+  from: "Предыдущий статус",
+  to: "Новый статус",
+  status: "Статус",
+  role: "Новая роль",
+  previous_role: "Предыдущая роль",
+  changed_fields: "Что изменено",
+  revoked_sessions: "Завершено сессий",
+  reason: "Причина",
+  title: "Название",
+  name: "Название",
+  venue_id: "Заведение",
+  category_id: "Категория",
+  points: "Баллы",
+  delta_points: "Изменение баланса",
+  purchase_amount_minor: "Сумма покупки",
+};
+
+const auditValueLabels: Record<string, string> = {
+  new: "Новый",
+  confirmed: "Подтверждён",
+  preparing: "Готовится",
+  ready: "Готов к выдаче",
+  waiting_for_courier: "Ожидает курьера",
+  courier_assigned: "Курьер назначен",
+  picked_up: "Забран курьером",
+  in_transit: "В пути",
+  delivered: "Доставлен",
+  cancelled: "Отменён",
+  customer: "Клиент",
+  staff: "Сотрудник",
+  courier: "Курьер",
+  admin: "Администратор",
+  owner: "Владелец",
+};
+
+const auditObjectLabels: Record<string, string> = {
+  customer_order: "Заказ",
+  order_suborder: "Часть заказа",
+  pass_purchase: "Покупка абонемента",
+  customer_pass: "Абонемент клиента",
+  pass_template: "Настройка абонемента",
+  staff_member: "Сотрудник",
+  user_card: "Карта клиента",
+  loyalty_operation: "Операция лояльности",
+  loyalty_settings: "Настройки лояльности",
+};
+
+function auditDetailValue(key: string, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Да" : "Нет";
+  if (typeof value === "string") return auditValueLabels[value] ?? value;
+  if (Array.isArray(value))
+    return value
+      .map((item) =>
+        typeof item === "string"
+          ? (auditMetadataLabels[item] ?? item)
+          : String(item),
+      )
+      .join(", ");
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  if (key === "purchase_amount_minor" && typeof value === "number")
+    return formatMoney(value);
+  return String(value);
+}
+
+export function AuditEventEntry({ event }: { event: AuditEvent }) {
+  const metadata = Object.entries(event.metadata);
+  return (
+    <article
+      className={`event-entry ${event.suspicious ? "is-suspicious" : ""}`}
+    >
+      <details>
+        <summary>
+          <span className={`event-dot event-dot--${event.severity}`} />
+          <div>
+            <p>{event.message}</p>
+            <small>{formatDateTime(event.created_at)}</small>
+          </div>
+          <span className="event-entry__trailing">
+            {event.suspicious && <Badge tone="warning">Проверить</Badge>}
+            <span className="event-entry__chevron" aria-hidden="true">
+              ›
+            </span>
+          </span>
+        </summary>
+        <div className="event-entry__details">
+          <dl>
+            <div>
+              <dt>Тип действия</dt>
+              <dd>{event.type}</dd>
+            </div>
+            {event.actor_name && (
+              <div>
+                <dt>Кто выполнил</dt>
+                <dd>{event.actor_name}</dd>
+              </div>
+            )}
+            {event.subject_name && (
+              <div>
+                <dt>Кого касается</dt>
+                <dd>{event.subject_name}</dd>
+              </div>
+            )}
+            {event.object_type && (
+              <div>
+                <dt>Объект</dt>
+                <dd>
+                  {auditObjectLabels[event.object_type] ?? event.object_type}
+                  {event.object_id ? ` · ${event.object_id}` : ""}
+                </dd>
+              </div>
+            )}
+            {metadata.map(([key, value]) => (
+              <div key={key}>
+                <dt>{auditMetadataLabels[key] ?? key}</dt>
+                <dd>{auditDetailValue(key, value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </details>
+    </article>
+  );
+}
 
 function errorMessage(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback;
@@ -149,21 +279,7 @@ export function AdminOverviewPage() {
             {resource.data.recent_events.length ? (
               <div className="event-list">
                 {resource.data.recent_events.map((event) => (
-                  <article
-                    key={event.id}
-                    className={event.suspicious ? "is-suspicious" : ""}
-                  >
-                    <span
-                      className={`event-dot event-dot--${event.severity}`}
-                    />
-                    <div>
-                      <p>{event.message}</p>
-                      <small>{formatDateTime(event.created_at)}</small>
-                    </div>
-                    {event.suspicious && (
-                      <Badge tone="warning">Проверить</Badge>
-                    )}
-                  </article>
+                  <AuditEventEntry key={event.id} event={event} />
                 ))}
               </div>
             ) : (
@@ -2185,35 +2301,7 @@ export function AdminEventsPage() {
         (resource.data.items.length ? (
           <div className="event-list event-list--cards">
             {resource.data.items.map((event) => (
-              <article
-                key={event.id}
-                className={event.suspicious ? "is-suspicious" : ""}
-              >
-                <span className={`event-dot event-dot--${event.severity}`} />
-                <div>
-                  <div className="tag-row">
-                    <Badge
-                      tone={
-                        event.severity === "critical"
-                          ? "danger"
-                          : event.severity === "warning"
-                            ? "warning"
-                            : "neutral"
-                      }
-                    >
-                      {event.type}
-                    </Badge>
-                    {event.suspicious && (
-                      <Badge tone="warning">Подозрительное</Badge>
-                    )}
-                  </div>
-                  <p>{event.message}</p>
-                  <small>
-                    {formatDateTime(event.created_at)}
-                    {event.actor_name ? ` · ${event.actor_name}` : ""}
-                  </small>
-                </div>
-              </article>
+              <AuditEventEntry key={event.id} event={event} />
             ))}
           </div>
         ) : (

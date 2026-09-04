@@ -297,7 +297,13 @@ class CourierService:
         previous_courier_id: UUID | None = None,
         idempotency_key: str,
     ) -> None:
-        metadata = {"order_id": str(order.id), "courier_staff_id": str(courier_id)}
+        metadata = {
+            "order_id": str(order.id),
+            "courier_staff_id": str(courier_id),
+            # Keeping the resulting status in the immutable audit row lets the
+            # admin log explain the action without reconstructing old state.
+            "status": order.status.value,
+        }
         if previous_courier_id is not None:
             metadata["previous_courier_staff_id"] = str(previous_courier_id)
         self._repository.add(

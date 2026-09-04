@@ -77,6 +77,12 @@ def test_cors_origins_accept_comma_separated_environment_shape() -> None:
     assert settings.cors_origins == ["https://one.example", "https://two.example"]
 
 
+def test_default_database_url_does_not_embed_a_password() -> None:
+    default_url = Settings.model_fields["database_url"].default
+
+    assert default_url == "postgresql+asyncpg://coffie@localhost:5432/coffie"
+
+
 @pytest.mark.parametrize(
     ("field", "value", "error"),
     [

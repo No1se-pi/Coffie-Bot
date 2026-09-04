@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 _ORDER_STATUS_LABELS = {
@@ -26,8 +26,11 @@ _ROLE_LABELS = {
     "owner": "Владелец",
 }
 
+_DEFAULT_REWARD_NAME = "Награда"
+
 _EVENT_LABELS = {
-    "auth.password_failed": "Неудачная попытка входа по паролю",
+    # This is a structured event name, not a credential stored in source.
+    "auth.password_failed": "Неудачная попытка входа по паролю",  # NOSONAR
     "broadcast.cancelled": "Рассылка отменена",
     "broadcast.confirmed": "Рассылка запущена",
     "card.blocked_attempt": "Попытка использовать заблокированную карту",
@@ -125,84 +128,163 @@ def format_money_minor(value: int, currency_symbol: str = "₽") -> str:
     return f"{sign}{amount} {currency_symbol}"
 
 
-def format_audit_event(event_type: str, metadata: Mapping[str, Any]) -> str:
-    """Render known structured event types with a safe forward-compatible fallback."""
-
+def _participants(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     actor = _text(metadata, "actor_name", "Сотрудник")
     customer = _text(metadata, "customer_name", "клиенту")
     reason = _text(metadata, "reason", "причина не указана")
+    return actor, customer, reason
 
-    if event_type == "points.accrued":
-        points = _integer(metadata, "points")
-        purchase = format_money_minor(_integer(metadata, "purchase_amount_minor"))
-        return f"{actor}: {customer} начислено {points} баллов за покупку на {purchase}"
-    if event_type == "points.accrual_pending":
-        points = _integer(metadata, "points")
-        purchase = format_money_minor(_integer(metadata, "purchase_amount_minor"))
-        return (
-            f"{actor}: начисление {points} баллов для {customer} "
-            f"за покупку на {purchase} ожидает подтверждения"
-        )
-    if event_type == "points.redeemed":
-        points = _integer(metadata, "points")
-        return f"{actor}: у пользователя {customer} списано {points} баллов"
-    if event_type == "operation.reversed":
-        points = abs(_integer(metadata, "points"))
-        return f"{actor}: отменена операция на {points} баллов. Причина: {reason}"
-    if event_type == "points.adjusted":
-        delta = _integer(metadata, "delta_points")
-        action = "добавлено" if delta >= 0 else "снято"
-        return f"{actor}: пользователю {customer} {action} {abs(delta)} баллов. Причина: {reason}"
-    if event_type == "visit.marked":
-        streak = _integer(metadata, "streak")
-        return f"{customer} получил(а) отметку посещения. Текущая серия: {streak}"
-    if event_type == "stamp.added":
-        stamps = _integer(metadata, "stamps")
-        return f"{actor}: пользователю {customer} добавлен штамп. Всего штампов: {stamps}"
-    if event_type == "reward.created":
-        reward = _text(metadata, "reward_name", "Награда")
-        return f"{customer} получил(а) награду «{reward}»"
-    if event_type == "reward.redeemed":
-        reward = _text(metadata, "reward_name", "Награда")
-        return f"{actor}: для {customer} погашена награда «{reward}»"
-    if event_type == "reward.cancelled":
-        reward = _text(metadata, "reward_name", "Награда")
-        return f"{actor}: для {customer} отменена награда «{reward}». Причина: {reason}"
-    if event_type == "card.blocked":
-        return f"{actor}: карта пользователя {customer} заблокирована. Причина: {reason}"
-    if event_type == "card.unblocked":
-        return f"{actor}: карта пользователя {customer} разблокирована"
-    if event_type == "card.reissued":
-        return f"{actor}: QR-карта пользователя {customer} перевыпущена"
-    if event_type == "tip_profile.submitted":
-        return f"{actor}: изменения профиля чаевых отправлены на проверку"
-    if event_type == "broadcast.created":
-        title = _text(metadata, "title", "Без названия")
-        return f"{actor}: создана рассылка «{title}»"
-    if event_type == "promotion.published":
-        title = _text(metadata, "title", "Без названия")
-        return f"{actor}: опубликована акция «{title}»"
-    if event_type == "order.status_changed":
-        previous = _status(metadata, "from")
-        current = _status(metadata, "to")
-        if previous and current:
-            return f"Статус заказа изменён: «{previous}» → «{current}»"
-        return "Статус заказа изменён"
-    if event_type == "order.courier_status_changed":
-        current = _status(metadata, "status")
-        return (
-            f"Курьер изменил статус заказа: «{current}»"
-            if current
-            else "Курьер изменил статус заказа"
-        )
-    if event_type == "staff.role_changed":
-        previous = _text(metadata, "previous_role", "")
-        current = _text(metadata, "role", "")
-        previous_label = _ROLE_LABELS.get(previous, previous)
-        current_label = _ROLE_LABELS.get(current, current)
-        if previous_label and current_label:
-            return f"Роль сотрудника изменена: «{previous_label}» → «{current_label}»"
-        return "Роль сотрудника изменена"
+
+def _format_points_accrued(metadata: Mapping[str, Any]) -> str:
+    actor, customer, _ = _participants(metadata)
+    points = _integer(metadata, "points")
+    purchase = format_money_minor(_integer(metadata, "purchase_amount_minor"))
+    return f"{actor}: {customer} начислено {points} баллов за покупку на {purchase}"
+
+
+def _format_points_pending(metadata: Mapping[str, Any]) -> str:
+    actor, customer, _ = _participants(metadata)
+    points = _integer(metadata, "points")
+    purchase = format_money_minor(_integer(metadata, "purchase_amount_minor"))
+    return (
+        f"{actor}: начисление {points} баллов для {customer} "
+        f"за покупку на {purchase} ожидает подтверждения"
+    )
+
+
+def _format_points_redeemed(metadata: Mapping[str, Any]) -> str:
+    actor, customer, _ = _participants(metadata)
+    return f"{actor}: у пользователя {customer} списано {_integer(metadata, 'points')} баллов"
+
+
+def _format_operation_reversed(metadata: Mapping[str, Any]) -> str:
+    actor, _, reason = _participants(metadata)
+    points = abs(_integer(metadata, "points"))
+    return f"{actor}: отменена операция на {points} баллов. Причина: {reason}"
+
+
+def _format_points_adjusted(metadata: Mapping[str, Any]) -> str:
+    actor, customer, reason = _participants(metadata)
+    delta = _integer(metadata, "delta_points")
+    action = "добавлено" if delta >= 0 else "снято"
+    return f"{actor}: пользователю {customer} {action} {abs(delta)} баллов. Причина: {reason}"
+
+
+def _format_visit(metadata: Mapping[str, Any]) -> str:
+    _, customer, _ = _participants(metadata)
+    return f"{customer} получил(а) отметку посещения. Текущая серия: {_integer(metadata, 'streak')}"
+
+
+def _format_stamp(metadata: Mapping[str, Any]) -> str:
+    actor, customer, _ = _participants(metadata)
+    return (
+        f"{actor}: пользователю {customer} добавлен штамп. "
+        f"Всего штампов: {_integer(metadata, 'stamps')}"
+    )
+
+
+def _format_reward_created(metadata: Mapping[str, Any]) -> str:
+    _, customer, _ = _participants(metadata)
+    reward = _text(metadata, "reward_name", _DEFAULT_REWARD_NAME)
+    return f"{customer} получил(а) награду «{reward}»"
+
+
+def _format_reward_redeemed(metadata: Mapping[str, Any]) -> str:
+    actor, customer, _ = _participants(metadata)
+    reward = _text(metadata, "reward_name", _DEFAULT_REWARD_NAME)
+    return f"{actor}: для {customer} погашена награда «{reward}»"
+
+
+def _format_reward_cancelled(metadata: Mapping[str, Any]) -> str:
+    actor, customer, reason = _participants(metadata)
+    reward = _text(metadata, "reward_name", _DEFAULT_REWARD_NAME)
+    return f"{actor}: для {customer} отменена награда «{reward}». Причина: {reason}"
+
+
+def _format_card_blocked(metadata: Mapping[str, Any]) -> str:
+    actor, customer, reason = _participants(metadata)
+    return f"{actor}: карта пользователя {customer} заблокирована. Причина: {reason}"
+
+
+def _format_card_unblocked(metadata: Mapping[str, Any]) -> str:
+    actor, customer, _ = _participants(metadata)
+    return f"{actor}: карта пользователя {customer} разблокирована"
+
+
+def _format_card_reissued(metadata: Mapping[str, Any]) -> str:
+    actor, customer, _ = _participants(metadata)
+    return f"{actor}: QR-карта пользователя {customer} перевыпущена"
+
+
+def _format_tip_submitted(metadata: Mapping[str, Any]) -> str:
+    actor, _, _ = _participants(metadata)
+    return f"{actor}: изменения профиля чаевых отправлены на проверку"
+
+
+def _format_broadcast_created(metadata: Mapping[str, Any]) -> str:
+    actor, _, _ = _participants(metadata)
+    return f"{actor}: создана рассылка «{_text(metadata, 'title', 'Без названия')}»"
+
+
+def _format_promotion_published(metadata: Mapping[str, Any]) -> str:
+    actor, _, _ = _participants(metadata)
+    return f"{actor}: опубликована акция «{_text(metadata, 'title', 'Без названия')}»"
+
+
+def _format_order_status(metadata: Mapping[str, Any]) -> str:
+    previous = _status(metadata, "from")
+    current = _status(metadata, "to")
+    if previous and current:
+        return f"Статус заказа изменён: «{previous}» → «{current}»"
+    return "Статус заказа изменён"
+
+
+def _format_courier_status(metadata: Mapping[str, Any]) -> str:
+    current = _status(metadata, "status")
+    if current:
+        return f"Курьер изменил статус заказа: «{current}»"
+    return "Курьер изменил статус заказа"
+
+
+def _format_staff_role(metadata: Mapping[str, Any]) -> str:
+    previous = _text(metadata, "previous_role", "")
+    current = _text(metadata, "role", "")
+    previous_label = _ROLE_LABELS.get(previous, previous)
+    current_label = _ROLE_LABELS.get(current, current)
+    if previous_label and current_label:
+        return f"Роль сотрудника изменена: «{previous_label}» → «{current_label}»"
+    return "Роль сотрудника изменена"
+
+
+_EVENT_FORMATTERS: dict[str, Callable[[Mapping[str, Any]], str]] = {
+    "points.accrued": _format_points_accrued,
+    "points.accrual_pending": _format_points_pending,
+    "points.redeemed": _format_points_redeemed,
+    "operation.reversed": _format_operation_reversed,
+    "points.adjusted": _format_points_adjusted,
+    "visit.marked": _format_visit,
+    "stamp.added": _format_stamp,
+    "reward.created": _format_reward_created,
+    "reward.redeemed": _format_reward_redeemed,
+    "reward.cancelled": _format_reward_cancelled,
+    "card.blocked": _format_card_blocked,
+    "card.unblocked": _format_card_unblocked,
+    "card.reissued": _format_card_reissued,
+    "tip_profile.submitted": _format_tip_submitted,
+    "broadcast.created": _format_broadcast_created,
+    "promotion.published": _format_promotion_published,
+    "order.status_changed": _format_order_status,
+    "order.courier_status_changed": _format_courier_status,
+    "staff.role_changed": _format_staff_role,
+}
+
+
+def format_audit_event(event_type: str, metadata: Mapping[str, Any]) -> str:
+    """Render known structured event types with a safe forward-compatible fallback."""
+
+    formatter = _EVENT_FORMATTERS.get(event_type)
+    if formatter is not None:
+        return formatter(metadata)
 
     known_label = _EVENT_LABELS.get(event_type)
     if known_label:

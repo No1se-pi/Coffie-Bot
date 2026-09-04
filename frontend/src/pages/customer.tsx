@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { coffeeApi } from "../api/client";
+import { coffeeApi, createIdempotencyKey } from "../api/client";
 import type {
   HistoryType,
   MenuItem,
@@ -906,10 +906,7 @@ export function MenuPage() {
                         onClick={() => {
                           setPurchaseError(null);
                           setBuying(item);
-                          setPurchaseKey(
-                            globalThis.crypto?.randomUUID?.() ??
-                              `${Date.now()}-${Math.random()}`,
-                          );
+                          setPurchaseKey(createIdempotencyKey());
                         }}
                       >
                         Купить за {item.points_price} баллов

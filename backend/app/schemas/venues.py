@@ -74,7 +74,7 @@ class VenueCreate(ApiSchema):
     @field_validator("website")
     @classmethod
     def validate_website(cls, value: str | None) -> str | None:
-        return _http_url(value)
+        return _https_url(value)
 
 
 class VenueUpdate(ApiSchema):
@@ -102,7 +102,7 @@ class VenueUpdate(ApiSchema):
     @field_validator("website")
     @classmethod
     def validate_website(cls, value: str | None) -> str | None:
-        return _http_url(value)
+        return _https_url(value)
 
     @model_validator(mode="after")
     def validate_patch(self) -> Self:
@@ -177,9 +177,9 @@ def _optional_text(value: str | None) -> str | None:
     return normalized or None
 
 
-def _http_url(value: str | None) -> str | None:
-    if value is not None and not value.lower().startswith(("https://", "http://")):
-        raise ValueError("URL must use http or https")
+def _https_url(value: str | None) -> str | None:
+    if value is not None and not value.lower().startswith("https://"):
+        raise ValueError("URL must use https")
     return value
 
 

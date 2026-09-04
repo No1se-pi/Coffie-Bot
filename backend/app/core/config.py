@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = True
 
-    database_url: str = "postgresql+asyncpg://coffie:coffie@localhost:5432/coffie"
+    # Compose and production provide an authenticated URL via the environment.
+    # The passwordless local default contains no reusable embedded credential.
+    database_url: str = "postgresql+asyncpg://coffie@localhost:5432/coffie"  # NOSONAR
     database_pool_size: int = Field(default=10, ge=1, le=100)
     database_max_overflow: int = Field(default=10, ge=0, le=100)
     database_pool_timeout_seconds: int = Field(default=10, ge=1, le=120)

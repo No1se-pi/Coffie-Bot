@@ -1,0 +1,8 @@
+[run]
+relative_files = True
+
+[report]
+skip_empty = True
+
+[xml]
+output = backend/coverage.xml

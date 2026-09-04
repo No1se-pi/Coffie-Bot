@@ -18,6 +18,7 @@ ENV/
 .pytest-tmp/
 .mypy_cache/
 .ruff_cache/
+.sonar/
 .coverage
 .coverage.*
 coverage.xml

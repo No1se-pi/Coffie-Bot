@@ -36,6 +36,7 @@ from app.schemas.admin import (
     LoyaltySettingsUpdate,
     MenuItemUpdate,
     PromotionCreate,
+    TipProfileUpdate,
     boundary_minutes,
     loyalty_settings_response,
 )
@@ -456,6 +457,18 @@ def test_admin_patch_forbids_excess_fields_and_promotion_requires_aware_window()
             title="Акция",
             text="Условия",
             starts_at=NOW.replace(tzinfo=None),
+        )
+    with pytest.raises(ValidationError, match="https"):
+        PromotionCreate(
+            title="Акция",
+            text="Условия",
+            button_url="http://example.com/promotion",
+        )
+    with pytest.raises(ValidationError, match="https"):
+        TipProfileUpdate(
+            display_name="Бариста",
+            position="Бариста",
+            tip_url="http://example.com/tips",
         )
 
 

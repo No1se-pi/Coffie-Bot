@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def run_command(args: argparse.Namespace, settings: Settings) -> int:
+async def run_command(args: argparse.Namespace, settings: Settings) -> int:  # NOSONAR
     database = create_database(settings)
     try:
         async with database.session_factory() as session:

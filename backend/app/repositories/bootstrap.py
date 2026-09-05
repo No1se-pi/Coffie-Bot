@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
@@ -40,13 +41,17 @@ from app.models.enums import (
     PermissionCode,
     Role,
     UserStatus,
+    WalletMode,
 )
 from app.models.loyalty import LoyaltySettings, RewardTemplate
 from app.models.loyalty_v2 import BirthdayPromotionVenue
 from app.models.media import MediaFile
+from app.repositories.identity import IdentityRepository
 
 BOOTSTRAP_LOCK_KEY = 4_349_346_470_191
 SEED_IDS_SETTING = "seed.entity_ids"
+SHORT_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+SHORT_CODE_LENGTH = 8
 
 
 class BootstrapRepository:
@@ -470,6 +475,13 @@ class BootstrapRepository:
         display_name: str | None,
     ) -> tuple[UUID, UUID, bool]:
         await self.acquire_lock()
+        # Match the lock order used by normal customer registration: settings
+        # must be locked before a user aggregate can be created or repaired.
+        loyalty_settings = await self._session.scalar(
+            select(LoyaltySettings)
+            .where(LoyaltySettings.singleton_key == "default")
+            .with_for_update()
+        )
         user = await self._upsert_user(
             telegram_id=telegram_id,
             first_name=display_name or "Владелец",
@@ -503,6 +515,62 @@ class BootstrapRepository:
             if display_name is not None:
                 staff.display_name = display_name
         await self._session.flush()
+
+        # The owner CLI is commonly run before the person opens the Mini App.
+        # Web admin login still needs the same card and loyalty aggregate that
+        # Telegram registration creates, so bootstrap it in this transaction.
+        identity_repository = IdentityRepository(self._session)
+        if await identity_repository.get_card_view(user.id) is None:
+            welcome_bonus = (
+                loyalty_settings.welcome_bonus_points
+                if loyalty_settings is not None and loyalty_settings.points_enabled
+                else 0
+            )
+            bonus_venue_id = (
+                loyalty_settings.default_bonus_venue_id if loyalty_settings is not None else None
+            )
+            if (
+                welcome_bonus > 0
+                and loyalty_settings is not None
+                and loyalty_settings.wallet_mode is WalletMode.SEPARATE
+                and bonus_venue_id is None
+            ):
+                raise ValueError("A separate welcome bonus requires an explicit venue")
+            if (
+                welcome_bonus > 0
+                and bonus_venue_id is not None
+                and await identity_repository.get_active_venue(bonus_venue_id) is None
+            ):
+                raise ValueError("Welcome bonus venue is unavailable")
+            identity_repository.initialize_customer(
+                user_id=user.id,
+                qr_token=secrets.token_urlsafe(32),
+                short_code="".join(
+                    secrets.choice(SHORT_CODE_ALPHABET) for _ in range(SHORT_CODE_LENGTH)
+                ),
+                welcome_bonus_points=welcome_bonus,
+                wallet_mode=(
+                    loyalty_settings.wallet_mode
+                    if loyalty_settings is not None
+                    else WalletMode.SHARED
+                ),
+                points_expiry_months=(
+                    loyalty_settings.points_expiry_months if loyalty_settings is not None else 6
+                ),
+                points_validity_days=(
+                    loyalty_settings.points_validity_days if loyalty_settings is not None else None
+                ),
+                bonus_venue_id=bonus_venue_id,
+                now=datetime.now(UTC),
+                ip_address=None,
+                user_agent=None,
+                actor_user_id=user.id,
+                actor_staff_id=staff.id,
+                event_type="owner.bootstrap_registered",
+                event_metadata={"source": "create-owner"},
+                enqueue_telegram_notification=False,
+            )
+            changed = True
         if changed:
             self._session.add(
                 AuditEvent(

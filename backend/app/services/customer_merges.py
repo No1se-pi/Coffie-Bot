@@ -56,6 +56,7 @@ class MergeRequestMetadata:
 
 EMPTY_METADATA = MergeRequestMetadata()
 BirthdayResolution = Literal["keep_canonical", "use_source"]
+VERIFIED_PHONE_MERGE_REASON = "Verified Telegram contact matched a phone-only profile"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +122,44 @@ class CustomerMergeService:
             _validate_merge_rules(actor, context)
             return _preview(context)
 
+    async def merge_verified_phone_profile(
+        self,
+        *,
+        telegram_user_id: UUID,
+        telegram_id: int,
+        phone_profile_user_id: UUID,
+        phone_subject: str,
+        now: datetime | None = None,
+    ) -> CustomerMergeResult:
+        """Merge a proven phone-only profile into its current Telegram profile.
+
+        This method is intentionally not exposed as an HTTP endpoint. The bot
+        calls it only after Telegram sends a Contact whose user_id matches the
+        sender. The locked identity checks below repeat that proof at the final
+        mutation boundary instead of trusting transport-supplied profile ids.
+        """
+
+        actor = Actor(
+            user_id=telegram_user_id,
+            telegram_id=telegram_id,
+            session_id=uuid4(),
+            role=Role.CUSTOMER,
+            staff_member_id=None,
+            permissions=frozenset(),
+        )
+        return await self.confirm(
+            actor,
+            source_user_id=phone_profile_user_id,
+            canonical_user_id=telegram_user_id,
+            # Self-service calculates and stores the preview under the final
+            # profile locks; there is no unsafe client-provided preview gap.
+            preview_hash="",
+            reason=VERIFIED_PHONE_MERGE_REASON,
+            idempotency_key=(f"verified-phone:{phone_profile_user_id}:{telegram_user_id}"),
+            now=now,
+            _verified_phone_subject=phone_subject,
+        )
+
     async def confirm(
         self,
         actor: Actor,
@@ -133,10 +172,20 @@ class CustomerMergeService:
         birthday_resolution: BirthdayResolution | None = None,
         metadata: MergeRequestMetadata = EMPTY_METADATA,
         now: datetime | None = None,
+        _verified_phone_subject: str | None = None,
     ) -> CustomerMergeResult:
-        _require_permission(actor)
+        if _verified_phone_subject is None:
+            _require_permission(actor)
+            actor_staff_id: UUID | None = _require_staff_actor(actor)
+        else:
+            if actor.role is not Role.CUSTOMER or actor.user_id != canonical_user_id:
+                raise AppError(
+                    code=ErrorCode.FORBIDDEN,
+                    message="Verified phone merge must target the current customer",
+                    status_code=status.HTTP_403_FORBIDDEN,
+                )
+            actor_staff_id = None
         _require_distinct_users(source_user_id, canonical_user_id)
-        actor_staff_id = _require_staff_actor(actor)
         normalized_reason = " ".join(reason.split())
         if len(normalized_reason) < 3:
             raise AppError(
@@ -152,6 +201,10 @@ class CustomerMergeService:
             preview_hash=preview_hash,
             reason=normalized_reason,
             birthday_resolution=birthday_resolution,
+            merge_method=(
+                "verified_telegram_contact" if _verified_phone_subject is not None else "admin"
+            ),
+            phone_subject=_verified_phone_subject,
         )
 
         async with self._repository.transaction():
@@ -174,18 +227,30 @@ class CustomerMergeService:
             )
             if context is None:
                 _not_found()
-            _validate_merge_rules(actor, context)
+            if _verified_phone_subject is None:
+                _validate_merge_rules(actor, context)
+            else:
+                _validate_verified_phone_merge(
+                    actor,
+                    context,
+                    phone_subject=_verified_phone_subject,
+                )
             locked_preview = _preview(context)
-            if locked_preview.preview_hash != preview_hash:
+            effective_preview_hash = locked_preview.preview_hash
+            if _verified_phone_subject is None and effective_preview_hash != preview_hash:
                 raise AppError(
                     code="customer_merge_preview_stale",
                     message="Customer state changed; request a new merge preview",
                     status_code=status.HTTP_409_CONFLICT,
                     details={"current_preview_hash": locked_preview.preview_hash},
                 )
+            requested_birthday_resolution = birthday_resolution
+            if _verified_phone_subject is not None and _birthday_conflict(context):
+                # The authenticated Telegram profile remains canonical. Its
+                # already confirmed birthday wins an otherwise ambiguous merge.
+                requested_birthday_resolution = "keep_canonical"
             effective_birthday_resolution = _birthday_resolution(
-                context,
-                birthday_resolution,
+                context, requested_birthday_resolution
             )
 
             source_state = _ensure_loyalty_state(
@@ -320,7 +385,7 @@ class CustomerMergeService:
                 actor_staff_id=actor_staff_id,
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
-                preview_hash=preview_hash,
+                preview_hash=effective_preview_hash,
                 reason=normalized_reason,
                 source_points_operation_id=source_operation_id,
                 canonical_points_operation_id=canonical_operation_id,
@@ -423,7 +488,7 @@ class CustomerMergeService:
                 event_metadata={
                     "canonical_user_id": str(canonical_user_id),
                     "source_user_id": str(source_user_id),
-                    "preview_hash": preview_hash,
+                    "preview_hash": effective_preview_hash,
                     "request_hash": request_hash,
                     "reason": normalized_reason,
                     "points_transferred": points_transferred,
@@ -440,6 +505,11 @@ class CustomerMergeService:
                     "birthday_resolution": effective_birthday_resolution,
                     "visit_snapshot_from_user_id": (
                         str(visit_winner_id) if visit_winner_id is not None else None
+                    ),
+                    "merge_method": (
+                        "verified_telegram_contact"
+                        if _verified_phone_subject is not None
+                        else "admin"
                     ),
                 },
                 severity=AuditSeverity.CRITICAL,
@@ -855,7 +925,7 @@ def _apply_birthday_resolution(
     context: LockedMergeContext,
     resolution: BirthdayResolution,
     *,
-    actor_staff_id: UUID,
+    actor_staff_id: UUID | None,
     now: datetime,
 ) -> None:
     if resolution != "use_source":
@@ -965,6 +1035,94 @@ def _validate_merge_rules(actor: Actor, context: LockedMergeContext) -> None:
         )
 
 
+def _validate_verified_phone_merge(
+    actor: Actor,
+    context: LockedMergeContext,
+    *,
+    phone_subject: str,
+) -> None:
+    """Repeat all self-service ownership checks while both users are locked."""
+
+    if (
+        context.source.user.status is not UserStatus.ACTIVE
+        or context.canonical.user.status is not UserStatus.ACTIVE
+    ):
+        _conflict(
+            "phone_profile_merge_unavailable",
+            "Only active customer profiles can be linked automatically",
+        )
+    if context.source.staff is not None or context.canonical.staff is not None:
+        _conflict(
+            "staff_phone_merge_forbidden",
+            "Staff profiles require an owner-reviewed merge",
+        )
+    if context.canonical_card is None:
+        _conflict(
+            "canonical_active_card_required",
+            "The Telegram profile must have an active card",
+        )
+    if len(context.source_cards) != 1:
+        _conflict(
+            "phone_profile_active_card_required",
+            "The phone-only profile must have one active card",
+        )
+    if context.source.user.telegram_id is not None:
+        _conflict(
+            "phone_profile_has_telegram",
+            "A profile already linked to Telegram cannot be merged automatically",
+        )
+    if context.canonical.user.telegram_id != actor.telegram_id:
+        raise AppError(
+            code=ErrorCode.FORBIDDEN,
+            message="Telegram identity does not belong to the current profile",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+    source_phone_identities = [
+        identity
+        for identity in context.source.identities
+        if identity.provider is IdentityProvider.PHONE
+    ]
+    if (
+        len(source_phone_identities) != 1
+        or source_phone_identities[0].subject != phone_subject
+        or not source_phone_identities[0].is_verified
+        or source_phone_identities[0].verified_by_staff_id is None
+        or source_phone_identities[0].provider_metadata.get("verification_method") != "staff"
+    ):
+        raise AppError(
+            code=ErrorCode.FORBIDDEN,
+            message="The phone-only profile has no matching verified staff contact",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+    if len(context.source.identities) != 1:
+        _conflict(
+            "phone_profile_not_exclusive",
+            "A profile with additional identities requires an administrator",
+        )
+
+    canonical_telegram = [
+        identity
+        for identity in context.canonical.identities
+        if identity.provider is IdentityProvider.TELEGRAM
+        and identity.subject == str(actor.telegram_id)
+        and identity.is_verified
+    ]
+    if len(canonical_telegram) != 1:
+        raise AppError(
+            code=ErrorCode.FORBIDDEN,
+            message="The current profile has no matching verified Telegram identity",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+    if any(
+        identity.provider is IdentityProvider.PHONE for identity in context.canonical.identities
+    ):
+        _conflict(
+            "phone_already_linked",
+            "The Telegram profile already has a phone number",
+        )
+
+
 def _request_hash(
     *,
     actor: Actor,
@@ -973,6 +1131,8 @@ def _request_hash(
     preview_hash: str,
     reason: str,
     birthday_resolution: BirthdayResolution | None,
+    merge_method: str = "admin",
+    phone_subject: str | None = None,
 ) -> str:
     payload = {
         "action": "customer_merge",
@@ -983,6 +1143,10 @@ def _request_hash(
         "preview_hash": preview_hash,
         "reason": reason,
         "birthday_resolution": birthday_resolution,
+        "merge_method": merge_method,
+        # Bind the proof to the immutable receipt hash without writing the
+        # plaintext phone number into the merge audit event.
+        "phone_subject": phone_subject,
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()

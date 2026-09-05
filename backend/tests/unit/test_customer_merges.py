@@ -439,6 +439,89 @@ async def test_confirm_moves_mutable_ownership_and_writes_paired_journals() -> N
 
 
 @pytest.mark.asyncio
+async def test_verified_phone_contact_merges_phone_profile_into_telegram_profile() -> None:
+    context = _context()
+    context.source.user.telegram_id = None
+    context.canonical.user.telegram_id = 9001
+    context.source.identities[:] = [
+        CustomerIdentity(
+            id=uuid4(),
+            user_id=context.source.user.id,
+            provider=IdentityProvider.PHONE,
+            subject="+79261234567",
+            is_verified=True,
+            verified_at=NOW,
+            verified_by_staff_id=uuid4(),
+            provider_metadata={"verification_method": "staff"},
+        )
+    ]
+    context.canonical.identities[:] = [
+        CustomerIdentity(
+            id=uuid4(),
+            user_id=context.canonical.user.id,
+            provider=IdentityProvider.TELEGRAM,
+            subject="9001",
+            is_verified=True,
+            verified_at=NOW,
+            provider_metadata={},
+        )
+    ]
+    repository = RecordingMergeRepository(context)
+    service = CustomerMergeService(cast(CustomerMergeRepository, repository))
+
+    result = await service.merge_verified_phone_profile(
+        telegram_user_id=context.canonical.user.id,
+        telegram_id=9001,
+        phone_profile_user_id=context.source.user.id,
+        phone_subject="+79261234567",
+        now=NOW,
+    )
+
+    assert result.merge.actor_user_id == context.canonical.user.id
+    assert result.merge.actor_staff_id is None
+    assert result.merge.preview_hash
+    assert result.merge.points_transferred == 70
+    assert context.canonical.loyalty_state is not None
+    assert context.canonical.loyalty_state.points_balance == 100
+    assert context.source.identities[0].user_id == context.canonical.user.id
+    assert context.source_cards[0].revoked_by_staff_id is None
+    audit = next(item for item in repository.added if isinstance(item, AuditEvent))
+    assert audit.actor_user_id == context.canonical.user.id
+    assert audit.actor_staff_id is None
+    assert audit.event_metadata["merge_method"] == "verified_telegram_contact"
+
+
+@pytest.mark.asyncio
+async def test_verified_phone_merge_rejects_a_profile_with_telegram_identity() -> None:
+    context = _context()
+    context.canonical.user.telegram_id = 9001
+    context.canonical.identities[:] = [
+        CustomerIdentity(
+            id=uuid4(),
+            user_id=context.canonical.user.id,
+            provider=IdentityProvider.TELEGRAM,
+            subject="9001",
+            is_verified=True,
+            provider_metadata={},
+        )
+    ]
+    repository = RecordingMergeRepository(context)
+
+    with pytest.raises(AppError) as error:
+        await CustomerMergeService(
+            cast(CustomerMergeRepository, repository)
+        ).merge_verified_phone_profile(
+            telegram_user_id=context.canonical.user.id,
+            telegram_id=9001,
+            phone_profile_user_id=context.source.user.id,
+            phone_subject="+79261234567",
+            now=NOW,
+        )
+
+    assert error.value.code == "phone_profile_has_telegram"
+
+
+@pytest.mark.asyncio
 async def test_confirm_replays_same_request_and_rejects_key_reuse() -> None:
     context = _context()
     repository = RecordingMergeRepository(context)

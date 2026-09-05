@@ -6,6 +6,7 @@ declare global {
         colorScheme?: "light" | "dark";
         ready?: () => void;
         expand?: () => void;
+        requestContact?: (callback?: (shared: boolean) => void) => void;
         closeScanQrPopup?: () => void;
         showScanQrPopup?: (
           params: { text?: string },
@@ -55,6 +56,19 @@ export function scanQrWithTelegram(onResult: (value: string) => void): boolean {
 
 export function closeTelegramScanner(): void {
   window.Telegram?.WebApp?.closeScanQrPopup?.();
+}
+
+export type TelegramContactRequestResult = "sent" | "cancelled" | "unsupported";
+
+export function requestTelegramContact(): Promise<TelegramContactRequestResult> {
+  const webApp = window.Telegram?.WebApp;
+  if (!webApp?.requestContact) return Promise.resolve("unsupported");
+
+  // Telegram sends the verified Contact to the bot; the Mini App receives only
+  // the consent result and never has to trust a phone typed into the browser.
+  return new Promise((resolve) => {
+    webApp.requestContact?.((shared) => resolve(shared ? "sent" : "cancelled"));
+  });
 }
 
 export {};

@@ -84,3 +84,28 @@ async def test_verified_phone_link_reply_does_not_expose_another_profile() -> No
 
     assert "без изменений" in reply.text
     assert "+79991234567" not in reply.text
+
+
+async def test_verified_phone_merge_reply_reports_transferred_balance() -> None:
+    async def register(_user: TelegramUserData) -> bool:
+        return False
+
+    async def link_phone(
+        _telegram_id: int,
+        _contact_user_id: int,
+        _phone_number: str,
+    ) -> VerifiedPhoneLinkResult:
+        return VerifiedPhoneLinkResult(
+            status="merged",
+            masked_phone="+7*****4567",
+            points_transferred=120,
+        )
+
+    reply = await BotCommandService(register, link_phone).link_phone(
+        telegram_id=101,
+        contact_user_id=101,
+        phone_number="+79991234567",
+    )
+
+    assert "объединены" in reply.text
+    assert "120" in reply.text

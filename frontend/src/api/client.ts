@@ -663,6 +663,20 @@ export const coffeeApi = {
       : normalizeCustomerWallets(
           await request<BackendCustomerWallets>("/me/wallets"),
         ),
+  getMyIdentities: (): Promise<{ items: CustomerIdentity[] }> =>
+    isDemoMode
+      ? Promise.resolve({
+          items: [
+            {
+              id: "demo-telegram-identity",
+              provider: "telegram",
+              subject: "1000000000000",
+              verified: true,
+              verified_at: new Date().toISOString(),
+            },
+          ],
+        })
+      : request("/me/identities"),
   getMyBirthday: (): Promise<CustomerBirthday> =>
     isDemoMode ? demoApi.getMyBirthday() : request("/me/birthday"),
   setMyBirthday: (birthday: BirthdayValue): Promise<CustomerBirthday> =>

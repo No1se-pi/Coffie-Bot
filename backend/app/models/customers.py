@@ -129,9 +129,11 @@ class CustomerMerge(UUIDPrimaryKeyMixin, Base):
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    actor_staff_id: Mapped[UUID] = mapped_column(
+    # Customer-initiated merges are authenticated by a Telegram-owned contact
+    # and therefore have an actor user but intentionally no staff actor.
+    actor_staff_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("staff_members.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)

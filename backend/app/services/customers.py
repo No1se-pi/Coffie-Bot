@@ -31,6 +31,7 @@ from app.models.loyalty import LoyaltySettings
 from app.repositories.customers import CustomerCreationReceipt
 from app.repositories.identity import CardViewRecord
 from app.security.rbac import Actor
+from app.services.customer_merges import CustomerMergeService
 from app.services.identity import SHORT_CODE_ALPHABET, SHORT_CODE_LENGTH
 
 _PHONE_ALLOWED = re.compile(r"^[+\d\s().-]+$")
@@ -131,6 +132,54 @@ class VerifiedPhoneLinkResult:
 
     status: str
     masked_phone: str
+    telegram_user_id: UUID | None = None
+    merge_candidate_user_id: UUID | None = None
+    points_transferred: int = 0
+
+
+class VerifiedPhoneLinkCoordinator:
+    """Link a Telegram-owned contact and safely absorb a phone-only profile."""
+
+    def __init__(
+        self,
+        customer_service: CustomerService,
+        merge_service: CustomerMergeService,
+    ) -> None:
+        self._customer_service = customer_service
+        self._merge_service = merge_service
+
+    async def link(
+        self,
+        *,
+        telegram_id: int,
+        contact_user_id: int,
+        phone: str,
+        now: datetime | None = None,
+    ) -> VerifiedPhoneLinkResult:
+        result = await self._customer_service.link_verified_telegram_contact(
+            telegram_id=telegram_id,
+            contact_user_id=contact_user_id,
+            phone=phone,
+            now=now,
+        )
+        if result.status != "merge_required":
+            return result
+        if result.telegram_user_id is None or result.merge_candidate_user_id is None:
+            raise RuntimeError("Phone merge candidate is incomplete")
+
+        merged = await self._merge_service.merge_verified_phone_profile(
+            telegram_user_id=result.telegram_user_id,
+            telegram_id=telegram_id,
+            phone_profile_user_id=result.merge_candidate_user_id,
+            phone_subject=normalize_phone(phone),
+            now=now,
+        )
+        return VerifiedPhoneLinkResult(
+            status="merged",
+            masked_phone=result.masked_phone,
+            telegram_user_id=result.telegram_user_id,
+            points_transferred=merged.merge.points_transferred,
+        )
 
 
 class CustomerService:
@@ -327,8 +376,8 @@ class CustomerService:
         """Attach a phone only when Telegram proves that the contact is self-owned.
 
         If that phone already belongs to another profile, this method deliberately
-        leaves both profiles untouched. The audited merge workflow can then combine
-        them without silently moving balances or immutable history.
+        leaves both profiles untouched. The coordinator may then invoke the locked,
+        audited phone-only merge without silently rewriting immutable history.
         """
 
         if contact_user_id != telegram_id:
@@ -376,6 +425,8 @@ class CustomerService:
                 return VerifiedPhoneLinkResult(
                     status="merge_required",
                     masked_phone=mask_phone(normalized_phone),
+                    telegram_user_id=user.id,
+                    merge_candidate_user_id=phone_identity.user_id,
                 )
 
             if phone_identity is None:

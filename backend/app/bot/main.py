@@ -25,10 +25,16 @@ from aiogram.types import (
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import Database, create_database
+from app.repositories.customer_merges import CustomerMergeRepository
 from app.repositories.customers import CustomerRepository
 from app.repositories.identity import IdentityRepository
 from app.security.telegram import TelegramUserData
-from app.services.customers import CustomerService, VerifiedPhoneLinkResult
+from app.services.customer_merges import CustomerMergeService
+from app.services.customers import (
+    CustomerService,
+    VerifiedPhoneLinkCoordinator,
+    VerifiedPhoneLinkResult,
+)
 from app.services.identity import IdentityService
 
 logger = get_logger(__name__)
@@ -100,6 +106,16 @@ class BotCommandService:
             return CommandReply(
                 "Этот номер уже относится к другой карте. Данные сохранены без изменений; "
                 "обратитесь к администратору для безопасного объединения профилей."
+            )
+        if result.status == "merged":
+            transferred = (
+                f" Перенесено баллов: {result.points_transferred}."
+                if result.points_transferred > 0
+                else ""
+            )
+            return CommandReply(
+                f"Номер {result.masked_phone} подтверждён. Профили и история объединены."
+                f"{transferred}"
             )
         if result.status == "already_linked":
             return CommandReply(f"Номер {result.masked_phone} уже подтверждён.")
@@ -273,7 +289,10 @@ async def _link_phone_with_shared_service(
     phone_number: str,
 ) -> VerifiedPhoneLinkResult:
     async with database.session_factory() as session:
-        return await CustomerService(CustomerRepository(session)).link_verified_telegram_contact(
+        return await VerifiedPhoneLinkCoordinator(
+            CustomerService(CustomerRepository(session)),
+            CustomerMergeService(CustomerMergeRepository(session)),
+        ).link(
             telegram_id=telegram_id,
             contact_user_id=contact_user_id,
             phone=phone_number,

@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,7 +15,14 @@ from app.models.access import User
 from app.models.audit import AuditEvent
 from app.models.customers import CustomerIdentity
 from app.models.enums import IdentityProvider, UserStatus
-from app.services.customers import CustomerRepositoryPort, CustomerService
+from app.services.customer_merges import CustomerMergeService
+from app.services.customers import (
+    CustomerRepositoryPort,
+    CustomerService,
+    VerifiedPhoneLinkCoordinator,
+    VerifiedPhoneLinkResult,
+    normalize_phone,
+)
 
 NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
 
@@ -140,8 +149,59 @@ async def test_existing_phone_profile_requires_audited_merge_instead_of_silent_m
     )
 
     assert result.status == "merge_required"
+    assert result.telegram_user_id == telegram_user.id
+    assert result.merge_candidate_user_id == phone_user.id
     assert repository.identities[(IdentityProvider.PHONE, "+79991234567")].user_id == phone_user.id
     assert repository.audit_events[0].event_type == "customer.phone_link.merge_required"
     assert repository.audit_events[0].event_metadata["merge_candidate_user_id"] == str(
         phone_user.id
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "+7 (926) 123-45-67",
+        "8 926 123 45 67",
+        "7-926-123-45-67",
+        "9261234567",
+    ],
+)
+def test_russian_phone_formats_share_one_canonical_identity(value: str) -> None:
+    assert normalize_phone(value) == "+79261234567"
+
+
+@pytest.mark.asyncio
+async def test_phone_link_coordinator_merges_the_phone_only_candidate() -> None:
+    telegram_user_id = uuid4()
+    phone_user_id = uuid4()
+    link = AsyncMock(
+        return_value=VerifiedPhoneLinkResult(
+            status="merge_required",
+            masked_phone="+7*******4567",
+            telegram_user_id=telegram_user_id,
+            merge_candidate_user_id=phone_user_id,
+        )
+    )
+    merge = AsyncMock(return_value=SimpleNamespace(merge=SimpleNamespace(points_transferred=75)))
+    coordinator = VerifiedPhoneLinkCoordinator(
+        cast(CustomerService, SimpleNamespace(link_verified_telegram_contact=link)),
+        cast(CustomerMergeService, SimpleNamespace(merge_verified_phone_profile=merge)),
+    )
+
+    result = await coordinator.link(
+        telegram_id=12345,
+        contact_user_id=12345,
+        phone="8 (926) 123-45-67",
+        now=NOW,
+    )
+
+    assert result.status == "merged"
+    assert result.points_transferred == 75
+    merge.assert_awaited_once_with(
+        telegram_user_id=telegram_user_id,
+        telegram_id=12345,
+        phone_profile_user_id=phone_user_id,
+        phone_subject="+79261234567",
+        now=NOW,
     )

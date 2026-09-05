@@ -97,6 +97,159 @@ def _card(user_id: UUID, marker: str) -> UserCard:
 
 
 @pytest.mark.asyncio
+async def test_verified_phone_owner_can_merge_phone_only_profile() -> None:
+    """The customer path stores a nullable staff actor and keeps history visible."""
+
+    engine = create_async_engine(_database_url())
+    connection = await engine.connect()
+    outer_transaction = await connection.begin()
+    session = AsyncSession(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        marker = uuid4().hex
+        telegram_id = 7_400_000_000_000_000 + uuid4().int % 10**12
+        verifier = _user("Phone verifier", telegram_id=telegram_id + 1)
+        source = _user("Phone-only customer")
+        canonical = _user("Telegram customer", telegram_id=telegram_id)
+        verifier_staff = StaffMember(
+            id=uuid4(),
+            user_id=verifier.id,
+            role=Role.STAFF,
+            is_active=True,
+        )
+        source_state = _state(source.id, points=25, stamps=2)
+        canonical_state = _state(canonical.id, points=10, stamps=1)
+        source_wallet = LoyaltyWallet(
+            id=uuid4(), user_id=source.id, venue_id=None, balance_points=25, version=1
+        )
+        canonical_wallet = LoyaltyWallet(
+            id=uuid4(), user_id=canonical.id, venue_id=None, balance_points=10, version=1
+        )
+        historical_operation = LoyaltyOperation(
+            id=uuid4(),
+            user_id=source.id,
+            actor_user_id=verifier.id,
+            actor_staff_id=verifier_staff.id,
+            operation_type=LoyaltyOperationType.ADMIN_ADJUSTMENT,
+            status=OperationStatus.COMMITTED,
+            idempotency_key=f"phone-history:{marker}",
+            request_hash="e" * 64,
+            points_delta=25,
+            balance_before=0,
+            balance_after=25,
+            reason="Phone profile history",
+            occurred_at=NOW,
+        )
+        historical_transaction = PointTransaction(
+            id=uuid4(),
+            operation_id=historical_operation.id,
+            user_id=source.id,
+            delta=25,
+            balance_before=0,
+            balance_after=25,
+            created_at=NOW,
+        )
+        source_lot = PointLot(
+            id=uuid4(),
+            wallet_id=source_wallet.id,
+            source_operation_id=historical_operation.id,
+            source_venue_id=None,
+            source_type=PointLotSourceType.ADMIN_ADJUSTMENT,
+            initial_points=25,
+            remaining_points=25,
+            earned_at=NOW,
+            expires_at=None,
+        )
+        canonical_lot = PointLot(
+            id=uuid4(),
+            wallet_id=canonical_wallet.id,
+            source_operation_id=None,
+            source_venue_id=None,
+            source_type=PointLotSourceType.OPENING_BALANCE,
+            initial_points=10,
+            remaining_points=10,
+            earned_at=NOW,
+            expires_at=None,
+        )
+        phone = "+79261234567"
+        phone_identity = CustomerIdentity(
+            id=uuid4(),
+            user_id=source.id,
+            provider=IdentityProvider.PHONE,
+            subject=phone,
+            is_verified=True,
+            verified_at=NOW,
+            verified_by_staff_id=verifier_staff.id,
+            provider_metadata={"verification_method": "staff"},
+        )
+        telegram_identity = CustomerIdentity(
+            id=uuid4(),
+            user_id=canonical.id,
+            provider=IdentityProvider.TELEGRAM,
+            subject=str(telegram_id),
+            is_verified=True,
+            verified_at=NOW,
+            provider_metadata={},
+        )
+
+        session.add_all([verifier, source, canonical])
+        await session.flush()
+        session.add(verifier_staff)
+        await session.flush()
+        session.add_all(
+            [
+                source_state,
+                canonical_state,
+                source_wallet,
+                canonical_wallet,
+                historical_operation,
+                historical_transaction,
+                source_lot,
+                canonical_lot,
+                phone_identity,
+                telegram_identity,
+                _card(source.id, "phone-source"),
+                _card(canonical.id, "phone-canonical"),
+            ]
+        )
+        await session.flush()
+
+        result = await CustomerMergeService(
+            CustomerMergeRepository(session)
+        ).merge_verified_phone_profile(
+            telegram_user_id=canonical.id,
+            telegram_id=telegram_id,
+            phone_profile_user_id=source.id,
+            phone_subject=phone,
+            now=NOW + timedelta(minutes=1),
+        )
+
+        assert result.merge.actor_staff_id is None
+        assert result.merge.points_transferred == 25
+        assert canonical_state.points_balance == 35
+        assert canonical_state.stamp_count == 3
+        assert source.status is UserStatus.MERGED
+        assert source.merged_into_user_id == canonical.id
+        assert phone_identity.user_id == canonical.id
+        history = await IdentityRepository(session).list_history(
+            user_id=canonical.id,
+            operation_type=None,
+            page=1,
+            page_size=100,
+        )
+        assert historical_operation.id in {item.id for item in history.items}
+    finally:
+        await session.close()
+        if outer_transaction.is_active:
+            await outer_transaction.rollback()
+        await connection.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_merge_chain_preserves_lineage_history_and_mutable_ownership() -> None:
     """Exercise real constraints, flush ordering, journals, and recursive history."""
 

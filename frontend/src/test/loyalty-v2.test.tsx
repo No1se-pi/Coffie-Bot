@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { coffeeApi } from "../api/client";
 import type {
   AdminLoyaltyV2Settings,
@@ -98,6 +98,20 @@ const adminSettings: AdminLoyaltyV2Settings = {
 };
 
 describe("Loyalty V2 frontend", () => {
+  beforeEach(() => {
+    vi.spyOn(coffeeApi, "getMyIdentities").mockResolvedValue({
+      items: [
+        {
+          id: "telegram-identity",
+          provider: "telegram",
+          subject: "1000000000000",
+          verified: true,
+          verified_at: "2026-09-05T12:00:00Z",
+        },
+      ],
+    });
+  });
+
   it("shows separate balances, expiry and an unavailable venue without hiding its balance", async () => {
     vi.spyOn(coffeeApi, "getMyWallets").mockResolvedValue(wallets);
     vi.spyOn(coffeeApi, "getMyBirthday").mockResolvedValue(emptyBirthday);
@@ -168,6 +182,59 @@ describe("Loyalty V2 frontend", () => {
       "все активные заведения",
     );
     expect(screen.getByText(/28 февраля/)).toBeInTheDocument();
+  });
+
+  it("requests the Telegram contact and refreshes a merged phone profile", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getMyWallets").mockResolvedValue(wallets);
+    vi.spyOn(coffeeApi, "getMyBirthday").mockResolvedValue(emptyBirthday);
+    vi.mocked(coffeeApi.getMyIdentities)
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "telegram-identity",
+            provider: "telegram",
+            subject: "1000000000000",
+            verified: true,
+            verified_at: "2026-09-05T12:00:00Z",
+          },
+        ],
+      })
+      .mockResolvedValue({
+        items: [
+          {
+            id: "phone-identity",
+            provider: "phone",
+            subject: "+79261234567",
+            verified: true,
+            verified_at: "2026-09-05T12:01:00Z",
+          },
+        ],
+      });
+    const requestContact = vi.fn((callback?: (shared: boolean) => void) =>
+      callback?.(true),
+    );
+    window.Telegram = { WebApp: { requestContact } };
+
+    render(
+      <MemoryRouter>
+        <LoyaltyPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Добавить номер из Telegram",
+      }),
+    );
+
+    expect(requestContact).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByText(
+        "Телефон подключён. Баланс и история прежнего профиля объединены.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Телефон +79261234567")).toBeInTheDocument();
   });
 
   it("re-previews unresolved points with an active fallback and keeps the idempotency key on retry", async () => {

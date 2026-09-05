@@ -19,19 +19,31 @@ import {
 import { useResource } from "../hooks/useResource";
 import { formatDate, formatMoney } from "../utils/format";
 import { AuthContext } from "../auth/AuthContext";
+import { requestTelegramContact } from "../telegram";
 
 function walletName(entry: CustomerWalletEntry): string {
   return entry.venue?.name ?? "Общий кошелёк";
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 export function LoyaltyPage() {
   const actor = useContext(AuthContext)?.actor ?? null;
   const wallets = useResource(coffeeApi.getMyWallets);
   const birthday = useResource(coffeeApi.getMyBirthday);
+  const identities = useResource(coffeeApi.getMyIdentities);
   const [month, setMonth] = useState("");
   const [day, setDay] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneMessage, setPhoneMessage] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const phoneIdentity = identities.data?.items.find(
+    (identity) => identity.provider === "phone" && identity.verified,
+  );
 
   const nearestExpiration = useMemo(() => {
     // API order is not a guarantee; this comparison is display-only and never
@@ -81,6 +93,86 @@ export function LoyaltyPage() {
     }
   };
 
+  const refreshPhone = async (): Promise<boolean> => {
+    // Contact is delivered to the bot as a separate Telegram update. Polling
+    // bridges that asynchronous hand-off without requesting contact twice.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (attempt > 0) await wait(600);
+      const current = await coffeeApi.getMyIdentities();
+      if (
+        current.items.some(
+          (identity) => identity.provider === "phone" && identity.verified,
+        )
+      ) {
+        await Promise.all([
+          identities.reload(),
+          wallets.reload(),
+          birthday.reload(),
+        ]);
+        setPhoneMessage(
+          "Телефон подключён. Баланс и история прежнего профиля объединены.",
+        );
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const connectPhone = async () => {
+    setPhoneBusy(true);
+    setPhoneError(null);
+    setPhoneMessage(null);
+    try {
+      const result = await requestTelegramContact();
+      if (result === "unsupported") {
+        setPhoneError(
+          "Откройте профиль внутри Telegram или отправьте боту команду /phone.",
+        );
+        return;
+      }
+      if (result === "cancelled") {
+        setPhoneMessage("Отправка номера отменена.");
+        return;
+      }
+
+      setPhoneMessage("Telegram подтвердил номер. Объединяем профиль…");
+      if (!(await refreshPhone())) {
+        setPhoneMessage(
+          "Номер отправлен. Если он не появился, нажмите «Проверить ещё раз» через несколько секунд.",
+        );
+      }
+    } catch (reason) {
+      setPhoneError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось подключить телефон",
+      );
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
+  const checkPhone = async () => {
+    setPhoneBusy(true);
+    setPhoneError(null);
+    setPhoneMessage("Проверяем обработку номера…");
+    try {
+      if (!(await refreshPhone())) {
+        setPhoneMessage(
+          "Номер ещё обрабатывается. Можно повторить проверку через несколько секунд.",
+        );
+      }
+    } catch (reason) {
+      setPhoneError(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось проверить подключение телефона",
+      );
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
   return (
     <Page title="Профиль" eyebrow="Личные данные и лояльность">
       <Panel className="profile-card">
@@ -93,12 +185,48 @@ export function LoyaltyPage() {
         </div>
         <div className="profile-identities">
           <Badge tone="success">Telegram подключён</Badge>
-          <Badge>Телефон — через сотрудника</Badge>
+          {phoneIdentity ? (
+            <Badge tone="success">Телефон {phoneIdentity.subject}</Badge>
+          ) : (
+            <Badge>Телефон не подключён</Badge>
+          )}
           <Badge>MAX — пока недоступен</Badge>
         </div>
+        {!phoneIdentity && !identities.loading && (
+          <div className="action-row">
+            <Button disabled={phoneBusy} onClick={() => void connectPhone()}>
+              {phoneBusy ? "Проверяем…" : "Добавить номер из Telegram"}
+            </Button>
+            {phoneMessage?.startsWith("Номер отправлен") && (
+              <Button
+                variant="secondary"
+                disabled={phoneBusy}
+                onClick={() => void checkPhone()}
+              >
+                Проверить ещё раз
+              </Button>
+            )}
+          </div>
+        )}
+        {identities.error && (
+          <div className="inline-error" role="alert">
+            Не удалось загрузить способы входа.
+          </div>
+        )}
+        {phoneMessage && (
+          <div className="inline-success" role="status">
+            {phoneMessage}
+          </div>
+        )}
+        {phoneError && (
+          <div className="inline-error" role="alert">
+            {phoneError}
+          </div>
+        )}
         <small className="muted">
-          Телефон требует подтверждения и сейчас привязывается сотрудником.
-          Интеграция MAX не включена в эту версию.
+          Номер подтверждает сам Telegram. Если бариста уже создал по нему
+          карту, её баланс и история будут объединены автоматически. Интеграция
+          MAX пока не включена.
         </small>
       </Panel>
       {wallets.loading && <Loader label="Загружаем кошельки…" />}

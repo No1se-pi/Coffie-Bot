@@ -1075,7 +1075,7 @@ describe("critical Mini App flows", () => {
       "src",
       "https://telegram.example/avatar.jpg",
     );
-    expect(screen.getByRole("link", { name: "Карта" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "QR" })).toHaveAttribute(
       "href",
       "/card",
     );

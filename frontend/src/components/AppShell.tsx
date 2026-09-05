@@ -45,7 +45,7 @@ const navItems: Record<
     { to: "/restaurants", label: "Рестораны", icon: "⌖" },
     { to: "/menu", label: "Меню", icon: "☕" },
     { to: "/cart", label: "Корзина", icon: "▣" },
-    { to: "/card", label: "Карта гостя", icon: "▦" },
+    { to: "/card", label: "Мой QR", icon: "▦" },
     { to: "/rewards", label: "Награды", icon: "◇" },
     { to: "/history", label: "История", icon: "↻" },
     { to: "/orders", label: "Мои заказы", icon: "◫" },
@@ -334,7 +334,7 @@ function AppShell() {
           {[
             { to: "/", label: "Главная", icon: "⌂", end: true },
             { to: "/menu", label: "Меню", icon: "☕" },
-            { to: "/card", label: "Карта", icon: "▦" },
+            { to: "/card", label: "QR", icon: "▦" },
             { to: "/rewards", label: "Награды", icon: "◇" },
             { to: "/more", label: "Ещё", icon: "•••" },
           ].map((item) => (

@@ -106,14 +106,14 @@ export function HomePage() {
             <Link
               className="qr-shortcut"
               to="/card"
-              aria-label="Открыть карту с QR-кодом"
+              aria-label="Открыть мой QR"
             >
               <QRCodeSVG
                 value={resource.data.card.qr_payload}
                 size={76}
                 level="M"
                 marginSize={1}
-                title="QR-код карты"
+                title="Мой QR-код"
               />
               <span>Показать QR</span>
             </Link>
@@ -243,20 +243,20 @@ export function CardPage() {
   const resource = useResource(coffeeApi.getCard);
   return (
     <Page
-      title="Моя карта"
+      title="Мой QR"
       eyebrow="Покажите бариста"
       action={
         <Button
           variant="ghost"
           onClick={() => void resource.reload()}
           disabled={resource.loading}
-          aria-label="Обновить карту"
+          aria-label="Обновить QR"
         >
           ↻
         </Button>
       }
     >
-      {resource.loading && <Loader label="Готовим карту…" />}
+      {resource.loading && <Loader label="Готовим QR…" />}
       {resource.error && (
         <ErrorState error={resource.error} onRetry={resource.reload} />
       )}
@@ -266,7 +266,7 @@ export function CardPage() {
             className={`loyalty-card ${resource.data.blocked ? "loyalty-card--blocked" : ""}`}
           >
             <div className="loyalty-card__top">
-              <span>Персональная карта</span>
+              <span>Мой QR-код</span>
               <Badge tone={resource.data.blocked ? "danger" : "success"}>
                 {resource.data.blocked ? "Заблокирована" : "Активна"}
               </Badge>
@@ -277,7 +277,7 @@ export function CardPage() {
                 size={210}
                 level="M"
                 marginSize={2}
-                title="Персональный QR-код карты"
+                title="Мой персональный QR-код"
               />
             </div>
             <strong className="card-owner">{resource.data.display_name}</strong>
@@ -297,7 +297,7 @@ export function CardPage() {
             <span aria-hidden="true">i</span>
             <p>
               Не пересылайте QR-код другим людям. Сканирование только находит
-              карту — операцию всегда подтверждает сотрудник.
+              ваш профиль — операцию всегда подтверждает сотрудник.
             </p>
           </div>
           <p className="updated">
@@ -324,7 +324,7 @@ export function HistoryPage() {
     [filter],
   );
   return (
-    <Page title="История" eyebrow="Все изменения карты">
+    <Page title="История" eyebrow="Баланс, визиты и награды">
       <div className="chip-row" role="group" aria-label="Фильтр истории">
         {historyFilters.map((item) => (
           <button

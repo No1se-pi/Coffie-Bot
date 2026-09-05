@@ -195,7 +195,7 @@ def render_notification(
     event_type = job.event_type
     if event_type == "user.registered":
         bonus = _integer(payload.get("welcome_bonus_points"))
-        text = "Регистрация завершена. Ваша карта лояльности готова."
+        text = "Регистрация завершена. Ваш QR готов."
         if bonus > 0:
             text += f" Начислено приветственных баллов: {bonus}."
     elif event_type in {"points.accrued", "loyalty.points_accrued"}:

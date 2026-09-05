@@ -280,7 +280,7 @@ def contacts_response(
     brand = _mapping(settings.get("brand"))
     contacts = _mapping(settings.get("contacts"))
     return ContactsResponse(
-        coffee_shop_name=_text(brand.get("name")) or "Кофейня",
+        coffee_shop_name=_text(brand.get("name")) or "Кофейня и Точка!",
         description=_text(brand.get("description"))
         or _text(brand.get("welcome_text"))
         or "Программа лояльности кофейни",

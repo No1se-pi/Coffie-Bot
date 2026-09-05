@@ -62,16 +62,16 @@ class BotCommandService:
     async def start(self, telegram_user: TelegramUserData) -> CommandReply:
         created = await self._register_user(telegram_user)
         if created:
-            text = "Готово — карта лояльности создана. Откройте приложение, чтобы увидеть её."
+            text = "Готово — ваш QR создан. Откройте приложение, чтобы показать его."
         else:
-            text = "С возвращением! Ваша карта лояльности доступна в приложении."
+            text = "С возвращением! Ваш QR доступен в приложении."
         return CommandReply(text=text, show_mini_app=True)
 
     def help(self) -> CommandReply:
         return CommandReply(
             text=(
                 "Доступные команды:\n"
-                "/start — зарегистрироваться или открыть карту\n"
+                "/start — зарегистрироваться или открыть мой QR\n"
                 "/menu — открыть меню приложения\n"
                 "/phone — подтвердить свой номер телефона\n"
                 "/contact — посмотреть контакты организации\n"
@@ -242,7 +242,7 @@ async def run_bot(settings: Settings) -> None:
     try:
         await bot.set_my_commands(
             [
-                BotCommand(command="start", description="Открыть карту лояльности"),
+                BotCommand(command="start", description="Открыть мой QR"),
                 BotCommand(command="menu", description="Меню приложения"),
                 BotCommand(command="phone", description="Подтвердить номер телефона"),
                 BotCommand(command="contact", description="Контакты организации"),
@@ -315,7 +315,7 @@ def build_mini_app_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
     """Build navigation where every link opens inside Telegram Mini Apps."""
 
     items = (
-        (("🏠 Главная", "/"), ("💳 Моя карта", "/card")),
+        (("🏠 Главная", "/"), ("📱 Мой QR", "/card")),
         (("☕ Меню", "/menu"), ("🎁 Награды", "/rewards")),
         (("🧾 История", "/history"), ("ℹ️ Контакты", "/more")),
     )

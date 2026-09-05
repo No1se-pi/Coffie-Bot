@@ -22,7 +22,7 @@ async def test_start_registers_through_injected_shared_use_case() -> None:
     reply = await service.start(user)
 
     assert calls == [user]
-    assert "карта лояльности создана" in reply.text
+    assert "ваш QR создан" in reply.text
     assert reply.show_mini_app is True
 
 
@@ -47,7 +47,7 @@ async def test_human_menu_uses_only_mini_app_buttons_and_expected_routes() -> No
 
     assert [button.text for button in buttons] == [
         "🏠 Главная",
-        "💳 Моя карта",
+        "📱 Мой QR",
         "☕ Меню",
         "🎁 Награды",
         "🧾 История",

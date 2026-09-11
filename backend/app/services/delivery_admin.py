@@ -128,6 +128,16 @@ class DeliveryAdminService:
     async def _validate_zone_location(self, values: dict[str, Any]) -> None:
         location_id = values.get("location_id")
         radius = values.get("radius_meters")
+        polygon = values.get("polygon") or []
+        if polygon:
+            # The schema validates point count and coordinate ranges. Keeping
+            # the geometry mutually exclusive here protects non-HTTP callers.
+            if location_id is not None or radius is not None:
+                _validation(
+                    "delivery_geometry_conflict",
+                    "Выберите только один способ настройки зоны доставки",
+                )
+            return
         if (location_id is None) != (radius is None):
             _validation(
                 "delivery_radius_incomplete",

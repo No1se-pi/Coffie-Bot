@@ -581,7 +581,19 @@ class OrderService:
         zone = await self._repository.get_delivery_zone(command.delivery_zone_id)
         if zone is None:
             _validation("delivery_zone_unavailable", "Зона доставки недоступна")
-        if zone.location_id is not None and zone.radius_meters is not None:
+        if zone.polygon:
+            if command.delivery_latitude is None or command.delivery_longitude is None:
+                _validation("delivery_coordinates_required", "Поставьте точку адреса на карте")
+            if not _point_in_polygon(
+                command.delivery_latitude,
+                command.delivery_longitude,
+                zone.polygon,
+            ):
+                _validation(
+                    "address_outside_delivery_zone",
+                    "Адрес находится за пределами выбранной зоны доставки",
+                )
+        elif zone.location_id is not None and zone.radius_meters is not None:
             if command.delivery_latitude is None or command.delivery_longitude is None:
                 _validation("delivery_coordinates_required", "Поставьте точку адреса на карте")
             center = await self._repository.get_location(zone.location_id)
@@ -1025,3 +1037,49 @@ def _distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
         + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
     )
     return 2 * earth_radius_meters * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
+
+
+def _point_in_polygon(
+    latitude: float,
+    longitude: float,
+    polygon: list[dict[str, float]],
+) -> bool:
+    """Return whether a coordinate is inside or on a delivery polygon boundary."""
+
+    if len(polygon) < 3:
+        return False
+    point_x, point_y = longitude, latitude
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        x1, y1 = float(previous["longitude"]), float(previous["latitude"])
+        x2, y2 = float(current["longitude"]), float(current["latitude"])
+        if _point_on_segment(point_x, point_y, x1, y1, x2, y2):
+            return True
+        crosses = (y1 > point_y) != (y2 > point_y)
+        if crosses:
+            intersection_x = (x2 - x1) * (point_y - y1) / (y2 - y1) + x1
+            if point_x < intersection_x:
+                inside = not inside
+        previous = current
+    return inside
+
+
+def _point_on_segment(
+    point_x: float,
+    point_y: float,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+) -> bool:
+    """Treat polygon borders as deliverable despite floating-point rounding."""
+
+    epsilon = 1e-10
+    cross = (point_y - y1) * (x2 - x1) - (point_x - x1) * (y2 - y1)
+    if abs(cross) > epsilon:
+        return False
+    return (
+        min(x1, x2) - epsilon <= point_x <= max(x1, x2) + epsilon
+        and min(y1, y2) - epsilon <= point_y <= max(y1, y2) + epsilon
+    )

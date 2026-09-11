@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { coffeeApi } from "../api/client";
 import type { AdminVenue, AdminVenueDraft } from "../api/types";
@@ -51,9 +51,18 @@ export function AdminVenuesPage() {
   const [draft, setDraft] = useState<AdminVenueDraft>(emptyVenue);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const editorRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (editing) setDraft(venueDraft(editing));
+    if (!editing) return;
+    setDraft(venueDraft(editing));
+    window.requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
+      editorRef.current?.querySelector<HTMLInputElement>("input")?.focus();
+    });
   }, [editing]);
 
   const save = async (event: FormEvent) => {
@@ -153,6 +162,7 @@ export function AdminVenuesPage() {
                   {!value.archived_at && (
                     <Button
                       variant="secondary"
+                      aria-label={`Изменить заведение ${value.name}`}
                       onClick={() => setEditing(value)}
                     >
                       Изменить
@@ -180,7 +190,11 @@ export function AdminVenuesPage() {
         <h2>
           {editing ? `Редактирование: ${editing.name}` : "Новое заведение"}
         </h2>
-        <form className="form" onSubmit={(event) => void save(event)}>
+        <form
+          ref={editorRef}
+          className="form"
+          onSubmit={(event) => void save(event)}
+        >
           <Field label="Название">
             <input
               required

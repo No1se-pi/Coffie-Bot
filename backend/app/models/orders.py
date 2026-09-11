@@ -82,7 +82,7 @@ class DeliverySettings(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class DeliveryZone(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Delivery radius anchored to a configured physical location."""
+    """Delivery area defined by a location radius or a manually drawn polygon."""
 
     __tablename__ = "delivery_zones"
     __table_args__ = (
@@ -106,6 +106,9 @@ class DeliveryZone(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("locations.id", ondelete="RESTRICT")
     )
     radius_meters: Mapped[int | None] = mapped_column(Integer)
+    polygon: Mapped[list[dict[str, float]]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

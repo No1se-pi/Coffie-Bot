@@ -64,6 +64,7 @@ def _zone(value: DeliveryZone) -> DeliveryZoneAdminResponse:
         minimum_order_minor=value.minimum_order_minor,
         location_id=value.location_id,
         radius_meters=value.radius_meters,
+        polygon=value.polygon or [],
         is_active=value.is_active,
         sort_order=value.sort_order,
         archived=value.archived_at is not None,

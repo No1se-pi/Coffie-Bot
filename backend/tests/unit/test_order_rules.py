@@ -15,7 +15,7 @@ from app.services.order_rules import (
     validate_desired_time,
     validate_operating_hours,
 )
-from app.services.orders import _distance_meters
+from app.services.orders import _distance_meters, _point_in_polygon
 
 
 def test_mixed_suborders_become_waiting_only_when_every_part_is_ready() -> None:
@@ -93,3 +93,16 @@ def test_delivery_distance_uses_real_world_meters() -> None:
     # Roughly one kilometre north at Moscow's latitude.
     distance = _distance_meters(55.751244, 37.618423, 55.760227, 37.618423)
     assert 990 <= distance <= 1010
+
+
+def test_delivery_polygon_accepts_inside_and_boundary_points() -> None:
+    polygon = [
+        {"latitude": 55.70, "longitude": 37.50},
+        {"latitude": 55.70, "longitude": 37.70},
+        {"latitude": 55.80, "longitude": 37.70},
+        {"latitude": 55.80, "longitude": 37.50},
+    ]
+
+    assert _point_in_polygon(55.75, 37.60, polygon) is True
+    assert _point_in_polygon(55.70, 37.60, polygon) is True
+    assert _point_in_polygon(55.90, 37.60, polygon) is False

@@ -6,7 +6,7 @@ from datetime import time
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ApiSchema(BaseModel):
@@ -56,6 +56,11 @@ class DeliverySettingsResponse(DeliverySettingsUpdate):
     id: UUID
 
 
+class DeliveryZonePoint(ApiSchema):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
 class DeliveryZoneCreate(ApiSchema):
     name: str = Field(min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=2_000)
@@ -63,8 +68,23 @@ class DeliveryZoneCreate(ApiSchema):
     minimum_order_minor: int | None = Field(default=None, ge=0)
     location_id: UUID | None = None
     radius_meters: int | None = Field(default=None, ge=100, le=100_000)
+    polygon: list[DeliveryZonePoint] = Field(default_factory=list, max_length=100)
     is_active: bool = True
     sort_order: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_geometry(self) -> DeliveryZoneCreate:
+        if (self.location_id is None) != (self.radius_meters is None):
+            raise ValueError("location_id and radius_meters must be provided together")
+        if self.polygon and (self.location_id is not None or self.radius_meters is not None):
+            raise ValueError("polygon and radius geometry cannot be combined")
+        if self.polygon and len(self.polygon) < 3:
+            raise ValueError("polygon must contain at least three points")
+        if self.polygon:
+            distinct = {(point.latitude, point.longitude) for point in self.polygon}
+            if len(distinct) < 3:
+                raise ValueError("polygon must contain at least three distinct points")
+        return self
 
 
 class DeliveryZoneUpdate(DeliveryZoneCreate):

@@ -17,7 +17,7 @@ from app.models.content import Location, Venue
 from app.models.enums import PermissionCode, Role
 from app.repositories.orders import OrderRepository
 from app.repositories.venues import VenuePage, VenueRepository
-from app.schemas.delivery_admin import LocationCreate
+from app.schemas.delivery_admin import DeliveryZoneCreate, LocationCreate
 from app.schemas.public import contacts_response
 from app.schemas.venues import VenueCreate, VenueUpdate, venue_public_response
 from app.security.rbac import Actor
@@ -218,6 +218,42 @@ def test_delivery_contract_allows_creating_a_location_for_a_venue() -> None:
     assert payload.pickup_enabled is True
     with pytest.raises(ValidationError):
         LocationCreate(slug="Bad slug", name="Точка", address="Адрес")
+
+
+def test_delivery_zone_contract_supports_polygon_or_radius() -> None:
+    polygon = DeliveryZoneCreate(
+        name="Центр",
+        fee_minor=20_000,
+        polygon=[
+            {"latitude": 55.70, "longitude": 37.50},
+            {"latitude": 55.70, "longitude": 37.70},
+            {"latitude": 55.80, "longitude": 37.60},
+        ],
+    )
+    assert len(polygon.polygon) == 3
+
+    with pytest.raises(ValidationError):
+        DeliveryZoneCreate(
+            name="Сломанная зона",
+            fee_minor=0,
+            polygon=[
+                {"latitude": 55.70, "longitude": 37.50},
+                {"latitude": 55.80, "longitude": 37.60},
+            ],
+        )
+
+    with pytest.raises(ValidationError):
+        DeliveryZoneCreate(
+            name="Два способа сразу",
+            fee_minor=0,
+            location_id=uuid4(),
+            radius_meters=3_000,
+            polygon=[
+                {"latitude": 55.70, "longitude": 37.50},
+                {"latitude": 55.70, "longitude": 37.70},
+                {"latitude": 55.80, "longitude": 37.60},
+            ],
+        )
 
 
 @pytest.mark.asyncio

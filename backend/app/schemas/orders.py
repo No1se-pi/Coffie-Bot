@@ -98,6 +98,7 @@ class DeliveryZoneResponse(ApiSchema):
     center_latitude: float | None
     center_longitude: float | None
     radius_meters: int | None
+    polygon: list[dict[str, float]]
 
 
 class OrderOptionsResponse(ApiSchema):
@@ -240,6 +241,7 @@ def order_options_response(value: OrderOptions) -> OrderOptionsResponse:
                 center_latitude=_zone_coordinate(value, zone.location_id, "latitude"),
                 center_longitude=_zone_coordinate(value, zone.location_id, "longitude"),
                 radius_meters=zone.radius_meters,
+                polygon=zone.polygon or [],
             )
             for zone in value.delivery_zones
         ],

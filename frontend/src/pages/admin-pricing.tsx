@@ -55,6 +55,15 @@ function ModifierEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const venueItems = items.filter((item) => item.venue_id === form.venue_id);
+  const moveOption = (index: number, offset: -1 | 1) => {
+    const target = index + offset;
+    if (target < 0 || target >= form.options.length) return;
+    const options = [...form.options];
+    const [moved] = options.splice(index, 1);
+    if (!moved) return;
+    options.splice(target, 0, moved);
+    setForm({ ...form, options });
+  };
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -182,8 +191,14 @@ function ModifierEditor({
         </fieldset>
         <fieldset className="pricing-fieldset">
           <legend>Варианты</legend>
+          <p className="muted">
+            Порядок сверху вниз совпадает с порядком добавок в меню клиента.
+          </p>
           {form.options.map((option, index) => (
             <div className="pricing-option-row" key={option.id ?? index}>
+              <span className="pricing-option-position" aria-hidden="true">
+                {index + 1}
+              </span>
               <input
                 aria-label={`Название варианта ${index + 1}`}
                 value={option.name}
@@ -242,6 +257,24 @@ function ModifierEditor({
                   setForm({ ...form, options });
                 }}
               />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={index === 0}
+                aria-label={`Поднять вариант ${option.name || index + 1}`}
+                onClick={() => moveOption(index, -1)}
+              >
+                ↑
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={index === form.options.length - 1}
+                aria-label={`Опустить вариант ${option.name || index + 1}`}
+                onClick={() => moveOption(index, 1)}
+              >
+                ↓
+              </Button>
               <Button
                 type="button"
                 variant="ghost"

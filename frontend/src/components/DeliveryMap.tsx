@@ -4,6 +4,7 @@ import {
   Circle,
   CircleMarker,
   MapContainer,
+  Polygon,
   Popup,
   TileLayer,
   useMap,
@@ -16,13 +17,21 @@ export interface GeoPoint {
   longitude: number;
 }
 
-function MapClick({ onChange }: { onChange?: (value: GeoPoint) => void }) {
+function MapClick({
+  onChange,
+  onPolygonPointAdd,
+}: {
+  onChange?: (value: GeoPoint) => void;
+  onPolygonPointAdd?: (value: GeoPoint) => void;
+}) {
   useMapEvents({
     click(event) {
-      onChange?.({
+      const point = {
         latitude: Number(event.latlng.lat.toFixed(6)),
         longitude: Number(event.latlng.lng.toFixed(6)),
-      });
+      };
+      if (onPolygonPointAdd) onPolygonPointAdd(point);
+      else onChange?.(point);
     },
   });
   return null;
@@ -40,17 +49,22 @@ export function DeliveryMap({
   center,
   marker,
   radiusMeters,
+  polygon = [],
   onMarkerChange,
+  onPolygonPointAdd,
   markerLabel = "Выбранный адрес",
 }: {
   center?: GeoPoint | null;
   marker?: GeoPoint | null;
   radiusMeters?: number | null;
+  polygon?: GeoPoint[];
   onMarkerChange?: (value: GeoPoint) => void;
+  onPolygonPointAdd?: (value: GeoPoint) => void;
   markerLabel?: string;
 }) {
   const focus = marker ??
-    center ?? { latitude: 55.751244, longitude: 37.618423 };
+    center ??
+    polygon[0] ?? { latitude: 55.751244, longitude: 37.618423 };
   return (
     <div className="delivery-map">
       <MapContainer
@@ -66,7 +80,30 @@ export function DeliveryMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <Recenter point={focus} />
-        <MapClick onChange={onMarkerChange} />
+        <MapClick
+          onChange={onMarkerChange}
+          onPolygonPointAdd={onPolygonPointAdd}
+        />
+        {polygon.length >= 3 && (
+          <Polygon
+            positions={polygon.map((point) => [
+              point.latitude,
+              point.longitude,
+            ])}
+            pathOptions={{ color: "#d48632", fillOpacity: 0.16 }}
+          />
+        )}
+        {onPolygonPointAdd &&
+          polygon.map((point, index) => (
+            <CircleMarker
+              key={`${point.latitude}:${point.longitude}:${index}`}
+              center={[point.latitude, point.longitude]}
+              radius={6}
+              pathOptions={{ color: "#d48632", fillOpacity: 1 }}
+            >
+              <Popup>Вершина {index + 1}</Popup>
+            </CircleMarker>
+          ))}
         {center && (
           <>
             <CircleMarker
@@ -95,9 +132,11 @@ export function DeliveryMap({
           </CircleMarker>
         )}
       </MapContainer>
-      {onMarkerChange && (
+      {(onMarkerChange || onPolygonPointAdd) && (
         <small className="muted">
-          Нажмите на карту, чтобы поставить маркер.
+          {onPolygonPointAdd
+            ? "Нажимайте на карту по контуру зоны: минимум три точки."
+            : "Нажмите на карту, чтобы поставить маркер."}
         </small>
       )}
     </div>

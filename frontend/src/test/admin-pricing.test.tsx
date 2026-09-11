@@ -106,4 +106,94 @@ describe("admin menu pricing", () => {
       }),
     );
   });
+
+  it("changes the customer-facing order of modifier options", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getVenues").mockResolvedValue({
+      items: [
+        {
+          id: "venue-1",
+          slug: "coffee",
+          name: "Кофейня",
+          description: null,
+          phone: null,
+          email: null,
+          website: null,
+          telegram: null,
+          logo_url: null,
+          sort_order: 0,
+        },
+      ],
+      page: 1,
+      page_size: 100,
+      total: 1,
+    });
+    vi.spyOn(coffeeApi, "getAdminMenu").mockResolvedValue({
+      categories: [],
+      items: [],
+    });
+    vi.spyOn(coffeeApi, "getAdminPromotions").mockResolvedValue({
+      items: [],
+      page: 1,
+      page_size: 50,
+      total: 0,
+    });
+    const group = {
+      id: "group-1",
+      venue_id: "venue-1",
+      name: "Молоко",
+      description: null,
+      min_selections: 0,
+      max_selections: 1,
+      required: false,
+      enabled: true,
+      sort_order: 0,
+      archived_at: null,
+      item_ids: [],
+      options: [
+        {
+          id: "option-1",
+          name: "Обычное",
+          price_delta_minor: 0,
+          allows_quantity: false,
+          max_quantity: 1,
+          enabled: true,
+          sort_order: 0,
+        },
+        {
+          id: "option-2",
+          name: "Овсяное",
+          price_delta_minor: 5_000,
+          allows_quantity: false,
+          max_quantity: 1,
+          enabled: true,
+          sort_order: 1,
+        },
+      ],
+    };
+    vi.spyOn(coffeeApi, "getAdminModifierGroups").mockResolvedValue([group]);
+    const save = vi
+      .spyOn(coffeeApi, "saveAdminModifierGroup")
+      .mockResolvedValue(group);
+
+    render(
+      <MemoryRouter>
+        <AdminPricingPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Изменить" }));
+    await user.click(
+      screen.getByRole("button", { name: "Поднять вариант Овсяное" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const payload = save.mock.calls[0]?.[1];
+    expect(payload?.options.map((option) => option.name)).toEqual([
+      "Овсяное",
+      "Обычное",
+    ]);
+    expect(payload?.options.map((option) => option.sort_order)).toEqual([0, 1]);
+  });
 });

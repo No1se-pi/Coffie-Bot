@@ -532,6 +532,7 @@ export interface OrderOptions {
     center_latitude: number | null;
     center_longitude: number | null;
     radius_meters: number | null;
+    polygon: Array<{ latitude: number; longitude: number }>;
   }>;
 }
 
@@ -695,6 +696,7 @@ export interface AdminDeliveryZone {
   minimum_order_minor: number | null;
   location_id: string | null;
   radius_meters: number | null;
+  polygon: Array<{ latitude: number; longitude: number }>;
   is_active: boolean;
   sort_order: number;
   archived: boolean;

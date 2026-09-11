@@ -3200,9 +3200,21 @@ details p {
 
 .pricing-option-row {
   display: grid;
-  grid-template-columns: minmax(150px, 2fr) minmax(90px, 1fr) auto 72px auto;
+  grid-template-columns:
+    auto minmax(150px, 2fr) minmax(90px, 1fr)
+    auto 72px auto auto auto;
   gap: 0.65rem;
   align-items: center;
+}
+.pricing-option-position {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-surface) 82%, var(--color-bg));
+  color: var(--color-muted);
+  font-weight: 800;
 }
 
 @media (max-width: 600px) {
@@ -3440,6 +3452,44 @@ details p {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+.delivery-hours-fieldset {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.delivery-hours-fieldset legend {
+  padding-inline: 0.35rem;
+  font-weight: 800;
+}
+.delivery-hours-row {
+  min-width: 0;
+  padding: 0.75rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface) 82%, var(--color-bg));
+}
+.delivery-hours-row > strong,
+.delivery-hours-row > .checkbox {
+  grid-column: 1 / -1;
+}
+.delivery-hours-row label:not(.checkbox) span {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+.delivery-polygon-editor {
+  display: grid;
+  gap: 0.75rem;
+}
+.success-text {
+  color: var(--color-success);
+  font-weight: 700;
 }
 
 .order-card__head,

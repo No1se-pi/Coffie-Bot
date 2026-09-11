@@ -28,6 +28,7 @@ const emptyZone: AdminDeliveryZoneDraft = {
   minimum_order_minor: null,
   location_id: null,
   radius_meters: null,
+  polygon: [],
   is_active: true,
   sort_order: 0,
 };
@@ -60,6 +61,19 @@ const weekdays = [
   ["sunday", "Воскресенье"],
 ] as const;
 
+type ZoneGeometryMode = "radius" | "polygon";
+
+function hoursParts(value: unknown) {
+  if (typeof value !== "string" || !value) {
+    return { start: "", end: "", closed: false };
+  }
+  if (value.toLowerCase() === "closed") {
+    return { start: "", end: "", closed: true };
+  }
+  const [start = "", end = ""] = value.split("-", 2);
+  return { start, end, closed: false };
+}
+
 export function AdminDeliveryPage() {
   const resource = useResource(coffeeApi.getAdminDelivery);
   const venues = useResource(coffeeApi.getVenues);
@@ -68,8 +82,11 @@ export function AdminDeliveryPage() {
   );
   const [zone, setZone] = useState<AdminDeliveryZone | null>(null);
   const [zoneDraft, setZoneDraft] = useState<AdminDeliveryZoneDraft>(emptyZone);
+  const [zoneGeometryMode, setZoneGeometryMode] =
+    useState<ZoneGeometryMode>("radius");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [settingsSaved, setSettingsSaved] = useState(false);
   const [newLocation, setNewLocation] = useState(emptyLocation);
   useEffect(() => {
     if (!resource.data) return;
@@ -85,9 +102,11 @@ export function AdminDeliveryPage() {
     if (!settings) return;
     setSaving(true);
     setError(null);
+    setSettingsSaved(false);
     try {
       await coffeeApi.saveAdminDeliverySettings(settings);
       await resource.reload();
+      setSettingsSaved(true);
     } catch (reason) {
       setError(
         reason instanceof Error ? reason : new Error("Не удалось сохранить"),
@@ -99,12 +118,17 @@ export function AdminDeliveryPage() {
 
   const saveZone = async (event: FormEvent) => {
     event.preventDefault();
+    if (zoneGeometryMode === "polygon" && zoneDraft.polygon.length < 3) {
+      setError(new Error("Нарисуйте зону минимум из трёх точек"));
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await coffeeApi.saveAdminDeliveryZone(zone, zoneDraft);
       setZone(null);
       setZoneDraft(emptyZone);
+      setZoneGeometryMode("radius");
       await resource.reload();
     } catch (reason) {
       setError(
@@ -169,6 +193,7 @@ export function AdminDeliveryPage() {
             <h2>Общие настройки</h2>
             <form
               className="order-form"
+              onChange={() => setSettingsSaved(false)}
               onSubmit={(event) => void saveSettings(event)}
             >
               <label className="toggle-row">
@@ -260,26 +285,83 @@ export function AdminDeliveryPage() {
                   }
                 />
               </Field>
-              <div className="delivery-hours-grid">
-                {weekdays.map(([key, label]) => (
-                  <Field key={key} label={label} hint="HH:MM-HH:MM или closed">
-                    <input
-                      value={String(settings.operating_hours[key] ?? "")}
-                      placeholder="10:00-22:00"
-                      onChange={(event) => {
-                        const operatingHours = { ...settings.operating_hours };
-                        if (event.target.value)
-                          operatingHours[key] = event.target.value;
-                        else delete operatingHours[key];
-                        setSettings({
-                          ...settings,
-                          operating_hours: operatingHours,
-                        });
-                      }}
-                    />
-                  </Field>
-                ))}
-              </div>
+              <fieldset className="delivery-hours-fieldset">
+                <legend>Часы доставки</legend>
+                <p className="muted">
+                  Пустой день работает без ограничения по времени. Для
+                  нерабочего дня включите «Выходной».
+                </p>
+                <div className="delivery-hours-grid">
+                  {weekdays.map(([key, label]) => {
+                    const parts = hoursParts(settings.operating_hours[key]);
+                    const updateHours = (next: {
+                      start: string;
+                      end: string;
+                      closed: boolean;
+                    }) => {
+                      const operatingHours = { ...settings.operating_hours };
+                      if (next.closed) operatingHours[key] = "closed";
+                      else if (next.start || next.end)
+                        operatingHours[key] = `${next.start}-${next.end}`;
+                      else delete operatingHours[key];
+                      setSettings({
+                        ...settings,
+                        operating_hours: operatingHours,
+                      });
+                      setSettingsSaved(false);
+                    };
+                    return (
+                      <div className="delivery-hours-row" key={key}>
+                        <strong>{label}</strong>
+                        <label>
+                          <span>С</span>
+                          <input
+                            aria-label={`${label}: начало`}
+                            type="time"
+                            disabled={parts.closed}
+                            required={Boolean(parts.start || parts.end)}
+                            value={parts.start}
+                            onChange={(event) =>
+                              updateHours({
+                                ...parts,
+                                start: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          <span>До</span>
+                          <input
+                            aria-label={`${label}: окончание`}
+                            type="time"
+                            disabled={parts.closed}
+                            required={Boolean(parts.start || parts.end)}
+                            value={parts.end}
+                            onChange={(event) =>
+                              updateHours({ ...parts, end: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="checkbox">
+                          <input
+                            aria-label={`${label}: выходной`}
+                            type="checkbox"
+                            checked={parts.closed}
+                            onChange={(event) =>
+                              updateHours({
+                                start: "",
+                                end: "",
+                                closed: event.target.checked,
+                              })
+                            }
+                          />
+                          <span>Выходной</span>
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </fieldset>
               <Field label="Точка выдачи по умолчанию">
                 <select
                   value={settings.default_pickup_location_id ?? ""}
@@ -326,6 +408,11 @@ export function AdminDeliveryPage() {
               <Button type="submit" disabled={saving}>
                 {saving ? "Сохраняем…" : "Сохранить настройки"}
               </Button>
+              {settingsSaved && (
+                <span className="success-text" role="status">
+                  Настройки и часы работы сохранены
+                </span>
+              )}
             </form>
           </Panel>
 
@@ -485,7 +572,13 @@ export function AdminDeliveryPage() {
                           {formatMoney(value.fee_minor)} · минимум{" "}
                           {value.minimum_order_minor === null
                             ? "общий"
-                            : formatMoney(value.minimum_order_minor)}
+                            : formatMoney(value.minimum_order_minor)}{" "}
+                          ·{" "}
+                          {value.polygon.length
+                            ? "контур на карте"
+                            : value.location_id && value.radius_meters
+                              ? "радиус"
+                              : "без ограничения по карте"}
                         </small>
                       </span>
                       <div className="action-row">
@@ -500,9 +593,13 @@ export function AdminDeliveryPage() {
                               minimum_order_minor: value.minimum_order_minor,
                               location_id: value.location_id,
                               radius_meters: value.radius_meters,
+                              polygon: value.polygon,
                               is_active: value.is_active,
                               sort_order: value.sort_order,
                             });
+                            setZoneGeometryMode(
+                              value.polygon.length ? "polygon" : "radius",
+                            );
                           }}
                         >
                           Изменить
@@ -584,66 +681,152 @@ export function AdminDeliveryPage() {
                   }
                 />
               </Field>
-              <Field label="Центр зоны">
+              <Field label="Граница зоны">
                 <select
-                  value={zoneDraft.location_id ?? ""}
-                  onChange={(event) =>
+                  aria-label="Способ настройки зоны"
+                  value={zoneGeometryMode}
+                  onChange={(event) => {
+                    const mode = event.target.value as ZoneGeometryMode;
+                    setZoneGeometryMode(mode);
                     setZoneDraft({
                       ...zoneDraft,
-                      location_id: event.target.value || null,
-                      radius_meters: event.target.value
-                        ? (zoneDraft.radius_meters ?? 3000)
-                        : null,
-                    })
-                  }
+                      location_id: null,
+                      radius_meters: null,
+                      polygon: [],
+                    });
+                  }}
                 >
-                  <option value="">Без проверки по карте</option>
-                  {resource.data.locations
-                    .filter(
-                      (location) =>
-                        location.latitude !== null &&
-                        location.longitude !== null,
-                    )
-                    .map((location) => (
-                      <option key={location.id} value={location.id}>
-                        {location.name}
-                      </option>
-                    ))}
+                  <option value="radius">Радиус от физической точки</option>
+                  <option value="polygon">Нарисовать вручную на карте</option>
                 </select>
               </Field>
-              {zoneDraft.location_id && (
-                <Field label="Радиус доставки, м">
-                  <input
-                    type="number"
-                    min={100}
-                    max={100000}
-                    step={100}
-                    value={zoneDraft.radius_meters ?? 3000}
-                    onChange={(event) =>
+              {zoneGeometryMode === "radius" ? (
+                <>
+                  <Field label="Центр зоны">
+                    <select
+                      value={zoneDraft.location_id ?? ""}
+                      onChange={(event) =>
+                        setZoneDraft({
+                          ...zoneDraft,
+                          location_id: event.target.value || null,
+                          radius_meters: event.target.value
+                            ? (zoneDraft.radius_meters ?? 3000)
+                            : null,
+                          polygon: [],
+                        })
+                      }
+                    >
+                      <option value="">Без ограничения по карте</option>
+                      {resource.data.locations
+                        .filter(
+                          (location) =>
+                            location.latitude !== null &&
+                            location.longitude !== null,
+                        )
+                        .map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                  {zoneDraft.location_id && (
+                    <Field label="Радиус доставки, м">
+                      <input
+                        type="number"
+                        min={100}
+                        max={100000}
+                        step={100}
+                        value={zoneDraft.radius_meters ?? 3000}
+                        onChange={(event) =>
+                          setZoneDraft({
+                            ...zoneDraft,
+                            radius_meters: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </Field>
+                  )}
+                  {(() => {
+                    const center = resource.data.locations.find(
+                      (location) => location.id === zoneDraft.location_id,
+                    );
+                    return center?.latitude !== null &&
+                      center?.latitude !== undefined &&
+                      center.longitude !== null ? (
+                      <DeliveryMap
+                        center={{
+                          latitude: center.latitude,
+                          longitude: center.longitude,
+                        }}
+                        radiusMeters={zoneDraft.radius_meters}
+                      />
+                    ) : null;
+                  })()}
+                </>
+              ) : (
+                <div className="delivery-polygon-editor">
+                  <p className="muted">
+                    Поставьте вершины по границе доставки. Последняя точка
+                    автоматически соединится с первой.
+                  </p>
+                  <DeliveryMap
+                    center={(() => {
+                      if (zoneDraft.polygon.length) return null;
+                      const location = resource.data.locations.find(
+                        (value) =>
+                          value.latitude !== null && value.longitude !== null,
+                      );
+                      return location?.latitude !== null &&
+                        location?.latitude !== undefined &&
+                        location.longitude !== null
+                        ? {
+                            latitude: location.latitude,
+                            longitude: location.longitude,
+                          }
+                        : null;
+                    })()}
+                    polygon={zoneDraft.polygon}
+                    onPolygonPointAdd={(point) => {
+                      if (zoneDraft.polygon.length >= 100) return;
                       setZoneDraft({
                         ...zoneDraft,
-                        radius_meters: Number(event.target.value),
-                      })
-                    }
-                  />
-                </Field>
-              )}
-              {(() => {
-                const center = resource.data.locations.find(
-                  (location) => location.id === zoneDraft.location_id,
-                );
-                return center?.latitude !== null &&
-                  center?.latitude !== undefined &&
-                  center.longitude !== null ? (
-                  <DeliveryMap
-                    center={{
-                      latitude: center.latitude,
-                      longitude: center.longitude,
+                        location_id: null,
+                        radius_meters: null,
+                        polygon: [...zoneDraft.polygon, point],
+                      });
                     }}
-                    radiusMeters={zoneDraft.radius_meters}
                   />
-                ) : null;
-              })()}
+                  <div className="action-row">
+                    <span className="muted">
+                      Точек: {zoneDraft.polygon.length}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!zoneDraft.polygon.length}
+                      onClick={() =>
+                        setZoneDraft({
+                          ...zoneDraft,
+                          polygon: zoneDraft.polygon.slice(0, -1),
+                        })
+                      }
+                    >
+                      Отменить последнюю точку
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={!zoneDraft.polygon.length}
+                      onClick={() =>
+                        setZoneDraft({ ...zoneDraft, polygon: [] })
+                      }
+                    >
+                      Очистить контур
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className="action-row">
                 <Button type="submit" disabled={saving}>
                   {zone ? "Сохранить" : "Добавить зону"}
@@ -655,6 +838,7 @@ export function AdminDeliveryPage() {
                     onClick={() => {
                       setZone(null);
                       setZoneDraft(emptyZone);
+                      setZoneGeometryMode("radius");
                     }}
                   >
                     Отмена

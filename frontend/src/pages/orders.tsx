@@ -464,14 +464,16 @@ export function CheckoutPage() {
                         longitude: selectedZone.center_longitude,
                       }
                     : null;
-                if (!center) return null;
+                const polygon = selectedZone?.polygon ?? [];
+                if (!center && polygon.length < 3) return null;
                 return (
                   <Panel>
                     <div className="section-heading">
                       <div>
                         <h2>Точка доставки</h2>
                         <p className="muted">
-                          Поставьте маркер точно у дома. Сервер проверит радиус.
+                          Поставьте маркер точно у дома. Сервер проверит границу
+                          выбранной зоны.
                         </p>
                       </div>
                       <Button
@@ -498,6 +500,7 @@ export function CheckoutPage() {
                       center={center}
                       marker={deliveryPoint}
                       radiusMeters={selectedZone?.radius_meters}
+                      polygon={polygon}
                       onMarkerChange={setDeliveryPoint}
                     />
                   </Panel>

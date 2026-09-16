@@ -205,6 +205,22 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+export async function requestAllPages<T>(
+  path: string,
+  parameters: Record<string, string | number | boolean | undefined> = {},
+): Promise<T[]> {
+  const items: T[] = [];
+  let page = 1;
+  while (true) {
+    const response = await request<ListResponse<T>>(
+      `${path}${queryString({ ...parameters, page, page_size: 100 })}`,
+    );
+    items.push(...response.items);
+    if (items.length >= response.total) return items;
+    page += 1;
+  }
+}
+
 function queryString(
   values: Record<
     string,
@@ -1358,14 +1374,14 @@ export const coffeeApi = {
   }> => {
     if (isDemoMode) return demoApi.getAdminMenu(includeArchived);
     const [categories, items] = await Promise.all([
-      request<ListResponse<MenuCategory>>(
-        `/admin/menu/categories${queryString({ page: 1, page_size: 100, include_archived: includeArchived || undefined })}`,
-      ),
-      request<ListResponse<MenuItem>>(
-        `/admin/menu/items${queryString({ page: 1, page_size: 100, include_archived: includeArchived || undefined })}`,
-      ),
+      requestAllPages<MenuCategory>("/admin/menu/categories", {
+        include_archived: includeArchived || undefined,
+      }),
+      requestAllPages<MenuItem>("/admin/menu/items", {
+        include_archived: includeArchived || undefined,
+      }),
     ]);
-    return { categories: categories.items, items: items.items };
+    return { categories, items };
   },
   uploadAdminMedia: async (
     file: File,

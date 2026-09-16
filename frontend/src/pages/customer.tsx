@@ -940,46 +940,81 @@ export function MenuPage() {
         <div className="purchase-sheet-backdrop">
           <Panel className="purchase-sheet" role="dialog" aria-modal="true">
             <h2>{configuring.name}</h2>
-            {(configuring.modifier_groups ?? []).map((group) => (
-              <fieldset className="modifier-choice" key={group.id}>
-                <legend>
-                  {group.name} · {group.required ? "обязательно" : "по желанию"}
-                </legend>
-                {group.options.map((option) => {
-                  const single = group.max_selections === 1;
-                  const checked = (selectedModifiers[option.id] ?? 0) > 0;
-                  return (
-                    <label key={option.id}>
-                      <input
-                        type={single ? "radio" : "checkbox"}
-                        name={group.id}
-                        checked={checked}
-                        onChange={() => {
-                          setConfigurationError(null);
-                          setSelectedModifiers((current) => {
-                            const next = { ...current };
-                            if (single) {
-                              group.options.forEach(
-                                (value) => delete next[value.id],
-                              );
-                              next[option.id] = 1;
-                            } else if (checked) delete next[option.id];
-                            else next[option.id] = 1;
-                            return next;
-                          });
-                        }}
-                      />
-                      <span>{option.name}</span>
-                      <strong>
-                        {option.price_delta_minor > 0
-                          ? `+${formatMoney(option.price_delta_minor)}`
-                          : "без доплаты"}
-                      </strong>
-                    </label>
-                  );
-                })}
-              </fieldset>
-            ))}
+            {(configuring.modifier_groups ?? []).map((group) => {
+              const volumeGroup = group.name.startsWith("Объём");
+              const selectedOption = group.options.find(
+                (option) => (selectedModifiers[option.id] ?? 0) > 0,
+              );
+              return (
+                <fieldset className="modifier-choice" key={group.id}>
+                  <legend>
+                    {group.name} ·{" "}
+                    {group.required ? "обязательно" : "по желанию"}
+                  </legend>
+                  {volumeGroup ? (
+                    <select
+                      aria-label={group.name}
+                      value={selectedOption?.id ?? ""}
+                      onChange={(event) => {
+                        setConfigurationError(null);
+                        setSelectedModifiers((current) => {
+                          const next = { ...current };
+                          group.options.forEach(
+                            (option) => delete next[option.id],
+                          );
+                          if (event.target.value) next[event.target.value] = 1;
+                          return next;
+                        });
+                      }}
+                    >
+                      <option value="">Выберите объём</option>
+                      {group.options.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name} —{" "}
+                          {formatMoney(
+                            configuring.price_minor + option.price_delta_minor,
+                          )}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    group.options.map((option) => {
+                      const single = group.max_selections === 1;
+                      const checked = (selectedModifiers[option.id] ?? 0) > 0;
+                      return (
+                        <label key={option.id}>
+                          <input
+                            type={single ? "radio" : "checkbox"}
+                            name={group.id}
+                            checked={checked}
+                            onChange={() => {
+                              setConfigurationError(null);
+                              setSelectedModifiers((current) => {
+                                const next = { ...current };
+                                if (single) {
+                                  group.options.forEach(
+                                    (value) => delete next[value.id],
+                                  );
+                                  next[option.id] = 1;
+                                } else if (checked) delete next[option.id];
+                                else next[option.id] = 1;
+                                return next;
+                              });
+                            }}
+                          />
+                          <span>{option.name}</span>
+                          <strong>
+                            {option.price_delta_minor > 0
+                              ? `+${formatMoney(option.price_delta_minor)}`
+                              : "без доплаты"}
+                          </strong>
+                        </label>
+                      );
+                    })
+                  )}
+                </fieldset>
+              );
+            })}
             {configurationError && (
               <div className="inline-error">{configurationError}</div>
             )}

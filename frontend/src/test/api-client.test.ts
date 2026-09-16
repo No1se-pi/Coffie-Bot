@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createIdempotencyKey } from "../api/client";
+import { ApiError, createIdempotencyKey, requestAllPages } from "../api/client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -29,5 +29,46 @@ describe("createIdempotencyKey", () => {
         status: 0,
       });
     }
+  });
+});
+
+describe("admin menu pagination", () => {
+  it("loads every item page when the menu contains more than 100 positions", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/admin/menu/categories")) {
+        return new Response(
+          JSON.stringify({
+            items: [{ id: "category-1" }],
+            page: 1,
+            page_size: 100,
+            total: 1,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      const page = new URL(url, "https://example.test").searchParams.get(
+        "page",
+      );
+      const items =
+        page === "1"
+          ? Array.from({ length: 100 }, (_, index) => ({ id: `item-${index}` }))
+          : [{ id: "item-100" }];
+      return new Response(
+        JSON.stringify({
+          items,
+          page: Number(page),
+          page_size: 100,
+          total: 101,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await requestAllPages<{ id: string }>("/admin/menu/items");
+
+    expect(result).toHaveLength(101);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -77,6 +77,64 @@ describe("order flows", () => {
     expect(screen.getAllByText("350 ₽")).toHaveLength(2);
   });
 
+  it("shows drink volumes as a dropdown with the final price", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(coffeeApi, "getMenu").mockResolvedValue({
+      categories: [{ id: "cat", name: "Кофе", visible: true, sort_order: 0 }],
+      items: [
+        {
+          id: "coffee-volume",
+          category_id: "cat",
+          name: "Капучино",
+          price_minor: 18000,
+          available: true,
+          visible: true,
+          modifier_groups: [
+            {
+              id: "volume",
+              name: "Объём · Капучино",
+              min_selections: 1,
+              max_selections: 1,
+              required: true,
+              options: [
+                {
+                  id: "250",
+                  name: "250 мл",
+                  price_delta_minor: 0,
+                  allows_quantity: false,
+                  max_quantity: 1,
+                },
+                {
+                  id: "350",
+                  name: "350 мл",
+                  price_delta_minor: 7000,
+                  allows_quantity: false,
+                  max_quantity: 1,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    render(
+      <MemoryRouter initialEntries={["/menu"]}>
+        <CartProvider>
+          <MenuPage />
+        </CartProvider>
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "В корзину" }));
+    const volumes = screen.getByRole("combobox", { name: "Объём · Капучино" });
+    expect(volumes).toHaveTextContent("250 мл — 180 ₽");
+    expect(volumes).toHaveTextContent("350 мл — 250 ₽");
+    await user.selectOptions(volumes, "350");
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+
+    expect(screen.getByRole("link", { name: "Корзина · 1" })).toBeVisible();
+  });
+
   it("moves a new staff order to confirmation", async () => {
     const user = userEvent.setup();
     const order = {

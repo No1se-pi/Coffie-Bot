@@ -12,16 +12,16 @@ def _source() -> dict:
     return SYNC["load_source"](ROOT / "configs" / "coffeeanddot-menu.json")
 
 
-def test_pdf_menu_expands_to_expected_categories_and_variants() -> None:
+def test_available_menu_expands_to_expected_categories_and_variants() -> None:
     items = SYNC["expand_items"](_source())
 
-    assert len(items) == 46
+    assert len(items) == 31
     assert Counter(item.category_name for item in items) == {
-        "Классика": 11,
+        "Классика": 8,
         "Чай": 1,
         "Авторский чай": 3,
-        "Холодные напитки": 18,
-        "Авторский кофе": 7,
+        "Холодные напитки": 10,
+        "Авторский кофе": 3,
         "Матча": 6,
     }
     assert len({SYNC["normalized"](item.name) for item in items}) == len(items)
@@ -33,7 +33,7 @@ def test_pdf_prices_and_sizes_are_preserved_in_minor_units() -> None:
     assert dict(items["Эспрессо"].prices) == {"36 мл": 12_000}
     assert dict(items["Капучино"].prices)["550 мл"] == 42_000
     assert dict(items["Чай листовой"].prices)["900 мл"] == 30_000
-    assert dict(items["Лимонад"].prices)["900 мл"] == 70_000
+    assert dict(items["Айс-ти"].prices)["550 мл"] == 52_000
     assert dict(items["Коктейль с урбечем"].prices)["550 мл"] == 80_000
     assert dict(items["Матча-латте"].prices)["450 мл"] == 42_000
 

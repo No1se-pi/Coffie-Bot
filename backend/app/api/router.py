@@ -27,6 +27,7 @@ from app.api.routes.public import router as public_router
 from app.api.routes.receipts import router as receipts_router
 from app.api.routes.reviews import router as reviews_router
 from app.api.routes.staff import router as staff_router
+from app.api.routes.staff_benefits import router as staff_benefits_router
 from app.api.routes.staff_profile import router as staff_profile_router
 from app.api.routes.subscriptions import router as subscriptions_router
 from app.api.routes.venues import router as venues_router
@@ -42,6 +43,7 @@ api_v1_router.include_router(public_router)
 api_v1_router.include_router(pricing_router)
 api_v1_router.include_router(venues_router)
 api_v1_router.include_router(staff_router)
+api_v1_router.include_router(staff_benefits_router)
 api_v1_router.include_router(staff_profile_router)
 api_v1_router.include_router(admin_users_router)
 api_v1_router.include_router(analytics_router)

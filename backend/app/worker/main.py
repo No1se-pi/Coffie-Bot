@@ -23,6 +23,7 @@ from app.core.logging import configure_logging, get_logger
 from app.db.session import create_database
 from app.repositories.delivery import DeliveryRepository
 from app.repositories.loyalty_v2 import PointLedgerRepository
+from app.repositories.staff_benefits import StaffBenefitRepository
 from app.services.broadcasts import BroadcastService
 from app.services.notifications import (
     DeliveryError,
@@ -32,6 +33,7 @@ from app.services.notifications import (
     RetryPolicy,
 )
 from app.services.point_expiry import PointExpiryService
+from app.services.staff_benefits import StaffBenefitService
 
 logger = get_logger(__name__)
 
@@ -155,6 +157,9 @@ async def run_worker(
                             PointLedgerRepository(session)
                         ).process_batch(limit=resolved_options.batch_size)
                         processed += expiry_result.expired + expiry_result.reminders_scheduled
+                        processed += await StaffBenefitService(
+                            StaffBenefitRepository(session)
+                        ).process_batch(limit=resolved_options.batch_size)
                         next_maintenance_at = (
                             loop.time() + resolved_options.maintenance_interval_seconds
                         )

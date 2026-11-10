@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { coffeeApi, createIdempotencyKey } from "../api/client";
@@ -9,7 +15,9 @@ import type {
   PassTemplate,
   PointsMenuPurchase,
   Reward,
+  StaffBenefits,
 } from "../api/types";
+import { AuthContext } from "../auth/AuthContext";
 import { useResource } from "../hooks/useResource";
 import { formatDate, formatDateTime, formatMoney } from "../utils/format";
 import { useVenueSelection } from "../components/VenueSelector";
@@ -619,6 +627,23 @@ export function VenueDetailPage() {
 }
 
 export function MenuPage() {
+  const actor = useContext(AuthContext)?.actor;
+  const employee = actor && ["staff", "admin", "owner"].includes(actor.role);
+  const benefits = useResource(
+    () =>
+      employee
+        ? coffeeApi.getStaffBenefits()
+        : Promise.resolve<StaffBenefits>({
+            enabled: false,
+            monthly_points: 3000,
+            all_items: true,
+            item_ids: [],
+            balance_points: 0,
+            expires_at: null,
+          }),
+    [actor?.role],
+  );
+  const [benefitMode, setBenefitMode] = useState(false);
   const venues = useResource(coffeeApi.getVenues);
   const venueSelection = useVenueSelection(venues.data?.items ?? null);
   const resource = useResource(
@@ -682,6 +707,7 @@ export function MenuPage() {
     };
   }, [buying, purchase, configuring, purchasing]);
   const startConfiguration = (item: MenuItem) => {
+    setBenefitMode(false);
     if (!item.modifier_groups?.length) {
       cart.add(item, []);
       return;
@@ -690,7 +716,7 @@ export function MenuPage() {
     setConfigurationError(null);
     setConfiguring(item);
   };
-  const addConfiguredItem = () => {
+  const addConfiguredItem = async () => {
     if (!configuring) return;
     for (const group of configuring.modifier_groups ?? []) {
       const selected = group.options.reduce(
@@ -714,6 +740,33 @@ export function MenuPage() {
           price: option.price_delta_minor,
         })),
     );
+    if (benefitMode) {
+      setPurchasing(true);
+      setConfigurationError(null);
+      try {
+        setPurchase(
+          await coffeeApi.purchaseStaffBenefit(
+            configuring.id,
+            options.map((option) => ({
+              option_id: option.option_id,
+              quantity: option.quantity,
+            })),
+            purchaseKey,
+          ),
+        );
+        setConfiguring(null);
+        await benefits.reload();
+      } catch (reason) {
+        setConfigurationError(
+          reason instanceof Error
+            ? reason.message
+            : "Не удалось купить за бонусы сотрудника",
+        );
+      } finally {
+        setPurchasing(false);
+      }
+      return;
+    }
     cart.add(configuring, options);
     setConfiguring(null);
   };
@@ -757,6 +810,22 @@ export function MenuPage() {
   };
   return (
     <Page title="Меню" eyebrow="Что приготовим сегодня">
+      {benefits.data?.enabled && (
+        <Panel>
+          <h2>Бонусы сотрудника: {benefits.data.balance_points}</h2>
+          <p>
+            Лимит — {benefits.data.monthly_points} в месяц. 1 бонус = 1 ₽.
+            Остаток сгорает{" "}
+            {benefits.data.expires_at
+              ? formatDate(benefits.data.expires_at)
+              : "в конце месяца"}
+            .
+          </p>
+        </Panel>
+      )}
+      {employee && benefits.error && (
+        <ErrorState error={benefits.error} onRetry={benefits.reload} compact />
+      )}
       {venues.data && venues.data.items.length > 0 && (
         <Link className="current-venue" to="/restaurants">
           <span aria-hidden="true">⌖</span>
@@ -899,6 +968,22 @@ export function MenuPage() {
                     <Button onClick={() => startConfiguration(item)}>
                       В корзину
                     </Button>
+                    {benefits.data?.enabled &&
+                      (benefits.data.all_items ||
+                        benefits.data.item_ids.includes(item.id)) && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setBenefitMode(true);
+                            setSelectedModifiers({});
+                            setConfigurationError(null);
+                            setPurchaseKey(createIdempotencyKey());
+                            setConfiguring(item);
+                          }}
+                        >
+                          За бонусы сотрудника
+                        </Button>
+                      )}
                     {item.points_price && (
                       <Button
                         className="menu-card__points-button"
@@ -1019,10 +1104,23 @@ export function MenuPage() {
               <div className="inline-error">{configurationError}</div>
             )}
             <div className="action-row">
-              <Button variant="secondary" onClick={() => setConfiguring(null)}>
+              <Button
+                variant="secondary"
+                disabled={purchasing}
+                onClick={() => setConfiguring(null)}
+              >
                 Отмена
               </Button>
-              <Button onClick={addConfiguredItem}>Добавить</Button>
+              <Button
+                disabled={purchasing}
+                onClick={() => void addConfiguredItem()}
+              >
+                {purchasing
+                  ? "Покупаем…"
+                  : benefitMode
+                    ? `Купить за ${Math.ceil((configuring.price_minor + (configuring.modifier_groups ?? []).flatMap((group) => group.options).reduce((sum, option) => sum + option.price_delta_minor * (selectedModifiers[option.id] ?? 0), 0)) / 100)} бонусов сотрудника`
+                    : "Добавить"}
+              </Button>
             </div>
           </Panel>
         </div>
@@ -1077,7 +1175,8 @@ export function MenuPage() {
                 <Badge tone="success">Награда готова</Badge>
                 <h2 id="points-purchase-success-title">{purchase.item_name}</h2>
                 <p>
-                  Списано {purchase.points_spent} баллов. Осталось:{" "}
+                  Списано {purchase.points_spent}{" "}
+                  {benefitMode ? "бонусов сотрудника" : "баллов"}. Осталось:{" "}
                   {purchase.balance_after}.
                 </p>
                 <div className="qr-frame">

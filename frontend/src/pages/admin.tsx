@@ -23,6 +23,7 @@ import type {
   Promotion,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { StaffBenefitEditor } from "../components/StaffBenefitEditor";
 import { useResource } from "../hooks/useResource";
 import { formatDateTime, formatMoney } from "../utils/format";
 import { AdminBirthdayEditor, AdminLoyaltyV2Controls } from "./admin-loyalty";
@@ -1055,6 +1056,9 @@ function StaffMemberEditor({
           </Button>
         )}
       </div>
+      {canManageAdmins && member.role !== "courier" && (
+        <StaffBenefitEditor staffId={member.id} />
+      )}
       {editing && manageable && (
         <form className="form" onSubmit={(event) => void save(event)}>
           <div className="form-grid">

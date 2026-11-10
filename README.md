@@ -210,6 +210,7 @@ Telegram API.
 
 - [CUSTOMIZATION.md](CUSTOMIZATION.md) — подготовка отдельного экземпляра для кофейни;
 - [DEPLOYMENT.md](DEPLOYMENT.md) — production Compose, HTTPS, обновления и backup/restore;
+- [docs/STAFF_BENEFITS.md](docs/STAFF_BENEFITS.md) — ежемесячные бонусы сотрудников и разрешённые позиции;
 - [MIGRATION_V2.md](MIGRATION_V2.md) — forward-only V2 revisions, preflight и проверки;
 - [docs/LOYALTY_V2.md](docs/LOYALTY_V2.md) — нормативный design и additive API contract
   завершённой Phase 2;

@@ -64,6 +64,7 @@ from app.models.orders import (
 )
 from app.models.receipts import Receipt, ReceiptRevision, ReceiptRiskFlag, ReceiptRiskSettings
 from app.models.staff import FeedbackItem, StaffTipProfile
+from app.models.staff_benefits import StaffBenefitGrant, StaffBenefitOperation, StaffBenefitPolicy
 
 __all__ = [
     "AccountMergeLotRoute",
@@ -119,6 +120,9 @@ __all__ = [
     "Reward",
     "RewardTemplate",
     "Session",
+    "StaffBenefitGrant",
+    "StaffBenefitOperation",
+    "StaffBenefitPolicy",
     "StaffInvite",
     "StaffMember",
     "StaffPermission",

@@ -1,4 +1,5 @@
 import type {
+  StaffBenefits,
   AccrualPreview,
   Actor,
   AdminModifierGroup,
@@ -885,6 +886,40 @@ export const coffeeApi = {
             idempotencyKey,
           },
         ),
+  getStaffBenefits: (): Promise<StaffBenefits> =>
+    isDemoMode
+      ? Promise.resolve({
+          enabled: false,
+          monthly_points: 3000,
+          all_items: true,
+          item_ids: [],
+          balance_points: 0,
+          expires_at: null,
+        })
+      : request("/me/staff-benefits"),
+  getAdminStaffBenefits: (staffId: string): Promise<StaffBenefits> =>
+    request(`/admin/staff/${encodeURIComponent(staffId)}/benefits`),
+  updateAdminStaffBenefits: (
+    staffId: string,
+    data: Pick<
+      StaffBenefits,
+      "enabled" | "monthly_points" | "all_items" | "item_ids"
+    >,
+  ): Promise<StaffBenefits> =>
+    request(`/admin/staff/${encodeURIComponent(staffId)}/benefits`, {
+      method: "PUT",
+      body: jsonBody(data),
+    }),
+  purchaseStaffBenefit: (
+    itemId: string,
+    modifiers: Array<{ option_id: string; quantity: number }>,
+    idempotencyKey: string,
+  ): Promise<PointsMenuPurchase> =>
+    request("/me/staff-benefits/purchases", {
+      method: "POST",
+      body: jsonBody({ item_id: itemId, modifiers }),
+      idempotencyKey,
+    }),
   getMore,
   getContacts: (): Promise<ContactsData> =>
     isDemoMode ? demoApi.getContacts() : request("/contacts"),

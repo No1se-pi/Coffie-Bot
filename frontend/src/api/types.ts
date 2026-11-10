@@ -1309,3 +1309,12 @@ export interface BulkBonusResult {
     balance_after: number;
   }>;
 }
+export interface StaffBenefits {
+  staff_id?: string | null;
+  enabled: boolean;
+  monthly_points: number;
+  all_items: boolean;
+  item_ids: string[];
+  balance_points: number;
+  expires_at: string | null;
+}

@@ -9,11 +9,12 @@ import os
 import subprocess
 import sys
 import zipfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 PART_BYTES = 45 * 1024 * 1024
+UTC = timezone.utc  # Python 3.10 on Ubuntu 22.04 has no datetime.UTC.
 BACKUP_FILES = ("database.dump", "media.tar.gz", "manifest.txt", "SHA256SUMS")
 
 EXPORT_SETTINGS = """

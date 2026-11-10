@@ -23,6 +23,7 @@ from app.models.enums import PointLotSourceType, Role, UserStatus
 from app.models.loyalty import LoyaltyOperation, Reward, RewardTemplate, UserLoyaltyState
 from app.models.loyalty_v2 import LoyaltyWallet, PointLot
 from app.models.staff_benefits import StaffBenefitGrant, StaffBenefitOperation, StaffBenefitPolicy
+from app.repositories.delivery import DeliveryRepository
 from app.repositories.loyalty import LoyaltyRepository
 from app.repositories.staff_benefits import StaffBenefitRepository
 from app.security.rbac import Actor, get_current_actor, resolve_permissions
@@ -150,6 +151,20 @@ async def buy(sessions, actor, item_id, key):
         return await StaffBenefitService(StaffBenefitRepository(session)).purchase(
             actor, item_id=item_id, modifiers=(), key=key
         )
+
+
+@pytest.mark.asyncio
+async def test_empty_maintenance_batch_releases_session_for_notification_leases(benefit_data):
+    sessions, _, _, _, _, _ = benefit_data
+    async with sessions() as session:
+        assert (
+            await StaffBenefitService(StaffBenefitRepository(session)).process_batch(limit=0) == 0
+        )
+        assert not session.in_transaction()
+        jobs = await DeliveryRepository(session).claim_notifications(
+            now=datetime.now(UTC), lease_for=timedelta(seconds=60), limit=0
+        )
+        assert jobs == []
 
 
 @pytest.mark.asyncio

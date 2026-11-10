@@ -355,8 +355,11 @@ class StaffBenefitService:
 
     async def process_batch(self, limit: int = 50) -> int:
         now = datetime.now(UTC)
-        period, _ = month_bounds(now, await self.repo.timezone())
-        ids = await self.repo.due_staff(period, now, limit)
+        # Close the read transaction even when there are no due employees, so the
+        # shared worker session can start the outbox lease transaction afterwards.
+        async with self.repo.transaction():
+            period, _ = month_bounds(now, await self.repo.timezone())
+            ids = await self.repo.due_staff(period, now, limit)
         for staff_id in ids:
             await self.view(staff_id, now=now)
         return len(ids)

@@ -182,6 +182,40 @@ Backup содержит персональные данные и внутрен�
 перенесите хотя бы одно поколение вне VPS. Периодически проверяйте checksum и выполняйте
 restore rehearsal в отдельном окружении. Скрипты не загружают данные в облако автоматически.
 
+## Ежедневная доставка backup в Telegram
+
+`scripts/telegram_backup.py` запускает штатный `backup.sh`, проверяет SHA-256 и собирает
+ZIP: полный PostgreSQL dump, media, читаемый экспорт настроек/меню и инструкцию восстановления.
+`.env`, bot token и исходный код в ZIP не включаются. Отправка использует bot token из
+окружения работающего backend; получатель должен быть личным чатом, уже начавшим диалог с ботом.
+Архивы больше 45 MiB отправляются частями; инструкция их объединения находится внутри ZIP.
+Подтверждения Telegram сохраняются по каждой части, повторный запуск в тот же московский день
+пропускает уже доставленные части. Локальные архивы остаются в `backups/telegram-daily/`.
+
+На Linux с Python 3.10+ и systemd создайте `/etc/coffie-bot/telegram-backup.env` с правами `600`:
+
+```dotenv
+BACKUP_ROOT=/opt/coffie-bot
+BACKUP_CHAT_ID=123456789
+```
+
+Установите units и выполните первую проверочную отправку:
+
+```bash
+sudo cp scripts/systemd/coffie-telegram-backup.service /etc/systemd/system/
+sudo cp scripts/systemd/coffie-telegram-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now coffie-telegram-backup.timer
+sudo systemctl start coffie-telegram-backup.service
+sudo systemctl status coffie-telegram-backup.service
+sudo systemctl list-timers coffie-telegram-backup.timer
+```
+
+Расписание — ежедневно в 03:00 `Europe/Moscow`, с выполнением пропущенного запуска после
+включения сервера. При ошибке systemd повторяет попытку через 15 минут. Повторная отправка
+успешно полученного дневного архива не выполняется. Успех подтверждается `message_id`
+документа в `delivery.json`; ошибки логируются без bot token и приватных payloads.
+
 ## Restore
 
 Restore полностью заменяет текущие БД и media, поэтому требует явного подтверждения. Сначала

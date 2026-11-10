@@ -1,0 +1,16 @@
+[Unit]
+Description=Send Coffie Bot database and media backup to the owner
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=6h
+StartLimitBurst=12
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/coffie-bot/telegram-backup.env
+ExecStart=/usr/bin/python3 ${BACKUP_ROOT}/scripts/telegram_backup.py --root ${BACKUP_ROOT} --chat-id ${BACKUP_CHAT_ID}
+UMask=0077
+TimeoutStartSec=30min
+Restart=on-failure
+RestartSec=15min
